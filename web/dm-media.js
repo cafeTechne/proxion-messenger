@@ -6,6 +6,21 @@ import { escHtml } from './util.js';
 import { t } from './i18n.js';
 import { sanitizeFilename } from './e2e-secondary.js';
 
+// The original manifest/key never crosses the destination boundary. Verify the
+// source again even when preview bytes are already cached, then prepare a new
+// ordinary media draft (fresh id/key/IV) through the destination's sender.
+export async function forwardDmMedia({ message, source, current, send }) {
+    const content = message?.content;
+    if (!message || !source || !current() || message.deleted || message.thread_id !== source.threadId
+        || (!message.sender_verified && message.from_webid !== source.selfId) || !parseDmAttachment(content)) return false;
+    const sender = message.from_webid === source.selfId ? source.actor : message.from_webid;
+    const result = await createDmAttachments({ fetch: source.readFetch, current, getSelfWebId: () => source.actor }).download(sender, content);
+    if (!result.ok || !current() || message.deleted || message.content !== content) return false;
+    const { name, mime, kind, spoiler, durationMs } = result.manifest;
+    const sent = await send(new Blob([result.bytes], { type: mime }), { name, mime, kind, spoiler, ...(durationMs === undefined ? {} : { durationMs }) });
+    return sent?.ok === true;
+}
+
 export function createDmMediaStore(dbApi = globalThis.indexedDB) {
     async function operation(mode, work) {
         const db = await new Promise((resolve, reject) => {
@@ -298,6 +313,9 @@ export function createDmMedia({ getContext, post, onMessage, showToast, confirmC
             return;
         }
         await attempt(row, ctx);
+        // This means durably queued, not necessarily delivered. Failed uploads
+        // and sends remain visible as Retry in the selected conversation.
+        return { ok: true, id };
     }
 
     return { send, refresh };

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { createDmMedia, createDmMediaStore, deliverDmMedia } from './dm-media.js';
-import { parseDmAttachment } from './dm-attachments.js';
+import { createDmMedia, createDmMediaStore, deliverDmMedia, forwardDmMedia } from './dm-media.js';
+import { parseDmAttachment, createDmAttachments } from './dm-attachments.js';
 
 describe('createDmMediaStore', () => {
     it('preserves legacy drafts as unknown and prevents older writers reopening the upgraded database', async () => {
@@ -91,6 +91,65 @@ function fixture({ postFails = false, uploadFails = false, partialFailure = fals
         cancel: key => handler({ target: { closest: selector => selector.includes('cancel') ? { dataset: { dmMediaCancel: key } } : null } }),
     };
 }
+
+describe('private media forwarding', () => {
+    async function sourceFixture() {
+        const h = fixture();
+        await h.controller.send(new Blob(['private source']), { name: 'secret.txt', mime: 'text/plain', spoiler: true });
+        const message = { ...h.post.mock.calls[0][0], from_webid: h.ctx.actor, thread_id: h.ctx.threadId };
+        return { h, message, source: { ...h.ctx, selfId: h.ctx.actor, readFetch: h.ctx.fetch } };
+    }
+    it('makes a fresh encrypted copy and never reuses the source id, key or IV', async () => {
+        const { h, message, source } = await sourceFixture();
+        const original = parseDmAttachment(message.content);
+        const destination = fixture(); destination.ctx.peerWebId = 'https://pod.example/carol/profile/card#me';
+        expect(await forwardDmMedia({ message, source, current: () => true,
+            send: (blob, metadata) => destination.controller.send(blob, metadata) })).toBe(true);
+        const forwarded = destination.post.mock.calls[0][0], manifest = parseDmAttachment(forwarded.content);
+        expect(manifest).toMatchObject({ name: original.name, mime: original.mime, size: original.size, kind: 'file', spoiler: true });
+        for (const field of ['id', 'key', 'iv', 'sha256']) expect(manifest[field]).not.toBe(original[field]);
+        const reader = createDmAttachments({ fetch: destination.ctx.fetch, getSelfWebId: () => destination.ctx.actor });
+        const downloaded = await reader.download(destination.ctx.actor, forwarded.content);
+        expect(new TextDecoder().decode(downloaded.bytes)).toBe('private source');
+        expect((await reader.download(destination.ctx.actor, forwarded.content.replace(manifest.key, original.key))).ok).toBe(false);
+        expect(h.resources.size).toBeGreaterThan(0);
+    });
+    it('preserves voice type and duration in a new encrypted draft', async () => {
+        const h = fixture();
+        await h.controller.send(new Blob(['voice bytes']), { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs: 1500 });
+        const message = { ...h.post.mock.calls[0][0], from_webid: h.ctx.actor, thread_id: h.ctx.threadId };
+        const source = { ...h.ctx, selfId: h.ctx.actor, readFetch: h.ctx.fetch }, destination = fixture();
+        await forwardDmMedia({ message, source, current: () => true, send: (blob, metadata) => destination.controller.send(blob, metadata) });
+        expect(parseDmAttachment(destination.post.mock.calls[0][0].content)).toMatchObject({ kind: 'voice', mime: 'audio/webm', durationMs: 1500 });
+    });
+    it('persists the destination copy before failed upload and retries without the source after recreation', async () => {
+        const { h, message, source } = await sourceFixture(), destination = fixture({ uploadFails: true });
+        expect(await forwardDmMedia({ message, source, current: () => true,
+            send: (blob, metadata) => destination.controller.send(blob, metadata) })).toBe(true);
+        const row = [...destination.rows.values()][0];
+        expect(row.deliveryState).toBe('never'); expect(row.uploaded).toBe(false);
+        h.resources.clear(); destination.restoreUpload(); createDmMedia(destination.options);
+        await destination.retry(row.key);
+        expect(destination.rows.size).toBe(0);
+        expect(destination.post.mock.calls[0][0].content).toBe(row.content);
+    });
+    it('refuses unverified, deleted, changed-thread or unavailable sources before dispatch', async () => {
+        const { h, message, source } = await sourceFixture(), send = vi.fn();
+        for (const candidate of [null, { ...message, deleted: true }, { ...message, thread_id: 'other' },
+            { ...message, from_webid: 'https://pod.example/mallory/profile/card#me', sender_verified: false }]) {
+            expect(await forwardDmMedia({ message: candidate, source, current: () => true, send })).toBe(false);
+        }
+        h.resources.clear();
+        expect(await forwardDmMedia({ message, source, current: () => true, send })).toBe(false);
+        expect(send).not.toHaveBeenCalled();
+    });
+    it('discards downloaded bytes when navigation or account context changes', async () => {
+        const { message, source } = await sourceFixture(), original = source.readFetch, send = vi.fn(); let active = true;
+        source.readFetch = async (...args) => { const result = await original(...args); active = false; return result; };
+        expect(await forwardDmMedia({ message, source, current: () => active, send })).toBe(false);
+        expect(send).not.toHaveBeenCalled();
+    });
+});
 
 describe('durable dm-media drafts', () => {
     it('keeps a late delivery acknowledgement in its original draft after navigation', async () => {

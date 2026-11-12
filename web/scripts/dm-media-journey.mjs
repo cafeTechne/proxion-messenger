@@ -197,4 +197,83 @@ export async function dmMediaJourney({ sender, receiver, openSender, openReceive
     }, { id, text });
     if (!retained) throw Error('Cleanup broke a delivered file');
     console.log(`  ✓ ${label}: interrupted cleanup resumes after reload, removes unused chunks and preserves delivered files`);
+
+    // The recipient forwards a verified copy back to its sender. The copy must
+    // now belong to the forwarder's pod, with a fresh encryption key and id.
+    await openReceiver(); await receiver.bringToFront();
+    const original = await receiver.evaluate(async id => {
+        const { dmHistoryGet } = await import('./dmhistory.js');
+        const { parseDmAttachment } = await import('./dm-attachments.js');
+        const record = await dmHistoryGet(id);
+        return { manifest: parseDmAttachment(record.content), threadId: record.thread_id };
+    }, id);
+    const forwardingDesktop = await receiver.evaluate(() => !!window.proxionCrossMode?.isReady());
+    let forwardOutage = false, forwardInterceptor;
+    if (forwardingDesktop) {
+        await receiver.evaluate(() => {
+            const bridge = window.proxionCrossMode.bridge, original = bridge.fetch; let failed = false;
+            bridge.fetch = (url, options) => {
+                if (!failed && options?.method === 'PUT' && url.includes('/dm-assets/asset-')) {
+                    failed = true; return Promise.reject(Error('forward upload outage'));
+                }
+                return original(url, options);
+            };
+        });
+    } else {
+        await receiver.setRequestInterception(true);
+        forwardInterceptor = request => {
+            if (!forwardOutage && request.method() === 'PUT' && request.url().includes('/dm-assets/asset-')) {
+                forwardOutage = true; request.abort('failed').catch(() => {});
+            } else request.continue().catch(() => {});
+        };
+        receiver.on('request', forwardInterceptor);
+    }
+    async function chooseForward(sourceId) {
+        await receiver.$$eval('.toast__close', buttons => buttons.forEach(button => button.click()));
+        await receiver.click('#msg-' + sourceId, { button: 'right' });
+        await receiver.waitForSelector('#ctx-forward', { visible: true }); await receiver.click('#ctx-forward');
+        await receiver.waitForSelector('#forward-modal', { visible: true });
+        const target = await receiver.evaluateHandle(thread => [...document.querySelectorAll('[data-forward-thread-id]')]
+            .find(button => button.dataset.forwardThreadId === thread), original.threadId);
+        const button = target.asElement(); if (!button) throw Error('DM forwarding destination missing');
+        await button.click(); await target.dispose();
+    }
+    await chooseForward(id);
+    await receiver.waitForSelector('[data-dm-media-retry]:not([disabled])', { timeout: 30000 });
+    const copyId = await receiver.$eval('[data-dm-media-draft]', el => el.dataset.dmMediaDraft.split('\n').at(-1));
+    if (forwardInterceptor) { await receiver.setRequestInterception(false); receiver.off('request', forwardInterceptor); }
+    await receiver.reload({ waitUntil: 'networkidle2' }); await ready(receiver); await openReceiver();
+    await receiver.waitForSelector('[data-dm-media-retry]:not([disabled])', { timeout: 20000 });
+    await receiver.click('[data-dm-media-retry]');
+    await receiver.waitForFunction(() => document.getElementById('dm-media-drafts').hidden, { timeout: 30000 });
+    const fresh = await receiver.evaluate(async id => {
+        const { dmHistoryGet } = await import('./dmhistory.js'); const { parseDmAttachment } = await import('./dm-attachments.js');
+        return parseDmAttachment((await dmHistoryGet(id)).content);
+    }, copyId);
+    if (!fresh || ['id', 'key', 'iv', 'sha256'].some(field => fresh[field] === original.manifest[field])) throw Error('Forward reused source encryption');
+    await openSender();
+    await until(sender, id => !!document.querySelector(`#msg-${id} [data-dm-asset]:not([disabled])`), copyId);
+    await sender.$$eval('.toast__close', buttons => buttons.forEach(button => button.click()));
+    await sender.click(`#msg-${copyId} [data-dm-asset]`);
+    await sender.waitForFunction(({ id, text }) => {
+        const link = document.querySelector(`#msg-${id} a[download]`);
+        return link && atob(link.href.split(',')[1] || '') === text;
+    }, { timeout: 30000 }, { id: copyId, text });
+    console.log(`  ✓ ${label}: private Forward uses a fresh key/id; failed upload survives reload and exact bytes arrive from the forwarder's pod`);
+
+    await openReceiver();
+    await until(receiver, () => !!document.querySelector('.audio-message'));
+    const voiceSource = await receiver.$eval('.audio-message', element => element.closest('[id^="msg-"]').id.slice(4));
+    const existing = await sender.$$eval('[data-dm-asset]', buttons => buttons.map(button => button.dataset.dmAsset));
+    await chooseForward(voiceSource);
+    await receiver.waitForFunction(() => document.getElementById('forward-modal').style.display === 'none', { timeout: 30000 });
+    await until(sender, existing => [...document.querySelectorAll('[data-dm-asset]:not([disabled])')]
+        .some(button => !existing.includes(button.dataset.dmAsset) && button.parentElement.textContent.includes('voice.webm')), existing);
+    const voiceCopy = await sender.$$eval('[data-dm-asset]:not([disabled])', (buttons, existing) => buttons
+        .find(button => !existing.includes(button.dataset.dmAsset) && button.parentElement.textContent.includes('voice.webm')).dataset.dmAsset, existing);
+    await sender.$$eval('.toast__close', buttons => buttons.forEach(button => button.click()));
+    await sender.click(`#msg-${voiceCopy} [data-dm-asset]`);
+    await sender.waitForFunction(id => document.querySelector(`#msg-${id} audio`)?.readyState >= 1, { timeout: 20000 }, voiceCopy);
+    await sender.$eval(`#msg-${voiceCopy} audio`, async audio => { await audio.play(); audio.pause(); });
+    console.log(`  ✓ ${label}: a forwarded voice note decrypts and plays`);
 }

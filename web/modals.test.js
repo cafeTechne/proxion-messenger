@@ -26,7 +26,7 @@ function mkEl(over = {}) {
     style: {}, innerHTML: '', textContent: '', className: '', id: '',
     dataset: {}, _children: children,
     appendChild: (c) => children.push(c),
-    addEventListener() {}, remove() {}, setAttribute() {}, focus() {},
+    addEventListener(type, handler) { this[type] = handler; }, remove() {}, setAttribute() {}, focus() {},
     querySelector: () => mkEl(), querySelectorAll: () => [],
     ...over,
   };
@@ -51,12 +51,57 @@ function make(over = {}) {
     sendCmd: (cmd, payload) => sendCmdCalls.push({ cmd, payload }),
     showToast: () => {},
     getMessageContent: over.getMessageContent,
+    getMediaForwardTargets: over.getMediaForwardTargets,
+    forwardMedia: over.forwardMedia,
     renderMessage: over.renderMessage ?? (() => {}),
   });
   return { modals, sent, sendCmdCalls };
 }
 
 describe('openForwardModal', () => {
+  const manifest = '[proxion-dm-attachment:v1]' + JSON.stringify({ v: 1, id: '12345678-1234-4123-8123-123456789abc',
+    name: 'secret.txt', mime: 'text/plain', size: 1, kind: 'file', chunks: 1,
+    key: 'A'.repeat(43), iv: 'B'.repeat(16), sha256: 'c'.repeat(64) });
+  it('uses private DM destinations and locks selection while preparing a copy', async () => {
+    let finish;
+    const forwardMedia = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const destination = { id: 'dm-carol', name: 'Carol' };
+    const { modals, sent } = make({ getMessageContent: () => manifest,
+      getMediaForwardTargets: () => [destination], forwardMedia });
+    modals.openForwardModal('source');
+    const item = els['forward-thread-list']._children[0];
+    const pending = item.click(); await item.click();
+    expect(item.disabled).toBe(true); expect(forwardMedia).toHaveBeenCalledTimes(1);
+    expect(forwardMedia.mock.calls[0].slice(0, 2)).toEqual(['source', destination]);
+    finish(true); await pending;
+    expect(els['forward-modal'].style.display).toBe('none'); expect(sent).toEqual([]);
+  });
+  it('does not let a late forwarding result close a reopened picker', async () => {
+    let finish;
+    const { modals, sent } = make({ getMessageContent: () => manifest,
+      getMediaForwardTargets: () => [{ id: 'dm', name: 'DM' }],
+      forwardMedia: () => new Promise(resolve => { finish = resolve; }) });
+    modals.openForwardModal('source');
+    const pending = els['forward-thread-list']._children[0].click();
+    modals.openForwardModal('new-source'); finish(true); await pending;
+    expect(els['forward-modal'].style.display).toBe('flex'); expect(sent).toEqual([]);
+  });
+  it('invalidates private preparation on cancel and permits retry after a source failure', async () => {
+    let isCurrent;
+    const forwardMedia = vi.fn(async (_, __, current) => { isCurrent = current; return false; });
+    const { modals, sent } = make({ getMessageContent: () => manifest,
+      getMediaForwardTargets: () => [{ id: 'dm', name: 'DM' }], forwardMedia });
+    modals.openForwardModal('source');
+    const item = els['forward-thread-list']._children[0]; await item.click();
+    expect(item.disabled).toBe(false); expect(els['forward-modal'].style.display).toBe('flex');
+    expect(isCurrent()).toBe(true); els['forward-modal'].style.display = 'none';
+    expect(isCurrent()).toBe(false); expect(sent).toEqual([]);
+  });
+  it('refuses malformed private manifests instead of using plaintext forwarding', () => {
+    const { modals, sent } = make({ getMessageContent: () => '[proxion-dm-attachment:v1]{"key":"private"}' });
+    modals.openForwardModal('invalid'); expect(sent).toEqual([]);
+    expect(modals.state.forwardingMsgId).toBe(null);
+  });
   it('does not forward an encrypted attachment manifest through the plaintext gateway command', () => {
     const manifest = '[proxion-dm-attachment:v1]' + JSON.stringify({ v: 1, id: '12345678-1234-4123-8123-123456789abc',
       name: 'secret.txt', mime: 'text/plain', size: 1, kind: 'file', chunks: 1,

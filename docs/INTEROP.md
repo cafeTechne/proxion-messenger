@@ -292,3 +292,22 @@ review has no deletion action. Missing metadata and incomplete listings remain
 visible as uncertainty. `npm run smoke:asset-inventory` checks actual browser and
 desktop controls with a throwaway Solid pod, including retained storage, folder
 navigation, pagination, close/reset, and metadata-only reads.
+
+## Private DM media forwarding
+
+Browser and desktop clients can forward verified pod-DM file and voice
+attachments to an existing WebID DM through the message Forward menu. The client
+verifies the source download, re-encrypts with a fresh ID/key/IV, and uploads to
+the forwarder's own asset storage. The destination receives a normal encrypted
+attachment from the forwarder. No source key, source URL or original-author
+claim is carried into that copy, and no plaintext gateway forwarding command is
+used. There is no wire-format or bridge-policy change.
+
+The destination opens with its ordinary durable media draft. Failed uploads or
+delivery remain retryable across reload without downloading the original again.
+Filenames, spoilers and voice duration are preserved. Source failure keeps the
+picker available for retry; navigation/cancellation/account changes invalidate
+pending work. Room targets and legacy gateway DMs are excluded from private
+media forwarding. Existing text forwarding retains its previous behavior.
+The browser DM and both cross-mode DM journeys verify forwarding with new keys,
+exact downloaded bytes, durable retries, and playable forwarded voice notes.

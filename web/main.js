@@ -57,7 +57,7 @@ import { createMedia, captureMediaTarget } from './media.js';
 import { createRoomAttachments, parseRoomAttachment } from './room-attachments.js';
 import { createRoomMedia } from './room-media.js';
 import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attachments.js';
-import { createDmMedia, deliverDmMedia } from './dm-media.js';
+import { createDmMedia, deliverDmMedia, forwardDmMedia } from './dm-media.js';
 import { createDmReceiptStore } from './dm-receipts.js';
 import { createAssetInventoryUi } from './asset-inventory-ui.js';
 import { createModals } from './modals.js';
@@ -737,6 +737,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     return m && !isUndecryptable(m.content) && !isSealedCopy(m) ? (m.content || '') : '';
                 },
                 openSearchResult: (threadId, msgId) => _openSearchResult(threadId, msgId),
+                getMediaForwardTargets: () => Object.entries(localDmPeers)
+                    .filter(([id, peer]) => isDmPeerWebId(peer.peer_webid) && !blocks.isBlocked(peer.peer_webid) && !hiddenDms.has(id))
+                    .map(([id, peer]) => ({ id, peerWebId: peer.peer_webid, name: peer.display_name || dmFallbackName(peer.peer_webid) })),
+                forwardMedia: (id, destination, current) => _forwardPrivateMedia(id, destination, current),
             });
         const scheduledComposer = createScheduledComposer({
             send: (command) => sendCmd('schedule_message', command),
@@ -6506,6 +6510,36 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             onMessage: (message, ctx) => _handleEventAsync({ ...message, type: 'message', source: 'local_dm', thread_id: ctx.threadId, local: true, own: true }, true),
         });
 
+        async function _forwardPrivateMedia(id, destination, modalCurrent) {
+            const source = _dmMediaContext(), message = messageMap[id];
+            const content = message?.content;
+            let navigated = false;
+            const current = () => !!source?.current() && modalCurrent() && messageMap[id] === message
+                && !message?.deleted && message?.content === content;
+            const queued = await forwardDmMedia({ message, source, current, send: (blob, metadata) => {
+                const peer = localDmPeers[destination.id];
+                if (!current() || !peer || peer.peer_webid !== destination.peerWebId || blocks.isBlocked(peer.peer_webid)) return;
+                if (peer.cert) openContactThread({ certificate_id: destination.id, display_name: peer.display_name, peer_did: peer.peer_webid });
+                else openLocalDmThread(destination.id, destination.name, peer.peer_webid);
+                navigated = true;
+                const target = captureMediaTarget({ getSocket: () => socket, getActiveView: () => activeView,
+                    getSessionId: _webRoomSessionId, canSend: () => _conversationSupports('files') && !blocks.isBlocked(peer.peer_webid) });
+                if (target) {
+                    const destinationCurrent = target.current;
+                    target.current = () => destinationCurrent() && modalCurrent();
+                }
+                const ctx = target && _dmMediaContext(target);
+                if (!ctx || ctx.actor !== source.actor || ctx.peerWebId !== destination.peerWebId) {
+                    showToast(t('dmMedia.forwardFailed'), 'error'); return;
+                }
+                return _dmMedia.send(blob, metadata, target);
+            } });
+            // Preparation errors already explain themselves in the destination.
+            // Its picker can no longer retry the original source view.
+            if (navigated && !queued && modalCurrent()) document.getElementById('forward-modal').style.display = 'none';
+            return queued;
+        }
+
         function _inventoryIdentity() {
             if (transport.mode === 'web') return solidSession.info.isLoggedIn && podStorageRoot()
                 ? { actor: solidSession.info.webId, root: podStorageRoot() } : null;
@@ -7236,7 +7270,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             updateFriendAction(friendButton, msg.from_webid);
             if (isOwn) friendButton.hidden = true;
             const isImage = _isImageAttachment(msg);
-            document.getElementById('ctx-forward').style.display = parseDmAttachment(msg.content) ? 'none' : '';
+            document.getElementById('ctx-forward').style.display = parseDmAttachment(msg.content)
+                && (!_isPodDmView(activeView) || (!msg.sender_verified && !isOwn)) ? 'none' : '';
             document.getElementById("ctx-pin").style.display = (!_isPodRoomView(activeView) || roomCreatorOf.has(activeView.id)) ? "" : "none";
             document.getElementById("ctx-edit").style.display  = isOwn ? "" : "none";
             document.getElementById("ctx-delete").style.display = (isOwn || (_isPodRoomView(activeView) && roomCreatorOf.has(activeView.id))) ? "" : "none";

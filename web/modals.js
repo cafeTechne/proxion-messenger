@@ -10,7 +10,7 @@ import { escHtml, formatTimestamp } from './util.js';
 import { icon } from './icons.js';
 import { inlineNotice } from './states.js';
 import { showPromptModal, closeButtonHtml } from './dialogs.js';
-import { parseDmAttachment } from './dm-attachments.js';
+import { parseDmAttachment, DM_ASSET_PREFIX } from './dm-attachments.js';
 import { previewText } from './dmtext.js';
 
 // Rooms to offer in the "Forward to…" picker. Each sidebar room row carries a
@@ -42,31 +42,56 @@ export function searchAction(raw, online) {
     return { kind: 'search', query };
 }
 
-export function createModals({ getSocket, getActiveView, sendCmd, showToast, getMessageContent, openSearchResult }) {
+export function createModals({ getSocket, getActiveView, sendCmd, showToast, getMessageContent, openSearchResult,
+    getMediaForwardTargets, forwardMedia }) {
     const state = { forwardingMsgId: null };
+    let forwardGeneration = 0;
 
     function openForwardModal(msgId) {
-        // The gateway forward command is plaintext and cannot carry a private
-        // DM file key. A future media-forward path must re-encrypt for its target.
-        if (parseDmAttachment(getMessageContent?.(msgId))) {
+        const content = getMessageContent?.(msgId), privateMedia = content?.startsWith(DM_ASSET_PREFIX);
+        // Even a malformed private manifest must never fall back to plaintext.
+        if (privateMedia && (!parseDmAttachment(content) || !forwardMedia || !getMediaForwardTargets)) {
             showToast(t('error.transportUnsupported'), 'error');
             return;
         }
         state.forwardingMsgId = msgId;
+        const generation = ++forwardGeneration;
         const socket = getSocket();
         const modal = document.getElementById('forward-modal');
         const list = document.getElementById('forward-thread-list');
         if (!modal || !list) return;
-        const threads = forwardTargets(document);
-        if (!threads.length) { list.innerHTML = inlineNotice(t('modal.noRoomsToForward')); }
+        const threads = privateMedia ? getMediaForwardTargets() : forwardTargets(document);
+        if (!threads.length) { list.innerHTML = inlineNotice(t(privateMedia ? 'dmMedia.noForwardTargets' : 'modal.noRoomsToForward')); }
         else {
             list.innerHTML = '';
             threads.forEach(thr => {
                 const item = document.createElement('button');
                 item.type = 'button';
                 item.className = 'forward-thread-item picker-item';
-                item.textContent = thr.name;
-                item.addEventListener('click', () => {
+                item.dataset.forwardThreadId = thr.id;
+                const label = privateMedia && thr.peerWebId ? `${thr.name} · ${thr.peerWebId}` : thr.name;
+                item.textContent = label;
+                item.addEventListener('click', async () => {
+                    if (generation !== forwardGeneration || item.disabled) return;
+                    if (privateMedia) {
+                        const current = () => generation === forwardGeneration && modal.style.display === 'flex';
+                        list.querySelectorAll('button').forEach(button => { button.disabled = true; });
+                        item.disabled = true;
+                        item.textContent = t('dmMedia.forwarding');
+                        try {
+                            const queued = await forwardMedia(msgId, thr, current);
+                            if (!current()) return;
+                            if (queued) modal.style.display = 'none';
+                            else showToast(t('dmMedia.forwardFailed'), 'error');
+                        } catch { if (current()) showToast(t('dmMedia.forwardFailed'), 'error'); }
+                        finally {
+                            if (current()) {
+                                list.querySelectorAll('button').forEach(button => { button.disabled = false; });
+                                item.disabled = false; item.textContent = label;
+                            }
+                        }
+                        return;
+                    }
                     if (socket && state.forwardingMsgId) {
                         // Send the PLAINTEXT we rendered — the gateway only has
                         // ciphertext for E2E DMs and would forward garbage.

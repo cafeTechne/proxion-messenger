@@ -932,7 +932,7 @@ Local history preserves sender verification and loaded file identity/bytes so
 files and real recorded audio survive reload. Filename labels replace manifests
 in reply, copy, Saved, search and notification previews. The plaintext gateway
 forward command is refused for DM asset manifests because it would expose their
-file keys; media forwarding needs a dedicated encrypted path.
+file keys; the dedicated private-copy forwarding path is described below.
 
 The website CSP explicitly permits local data/blob media playback. Live browser
 DM tests retain that policy, adding only localhost connections for the test pod.
@@ -1050,3 +1050,37 @@ access, or new mutation permissions. Shared room chunk reads retain their
 existing authorization. Tests cover bounded listings, scoped paths, unavailable
 metadata and stale contexts; `smoke_asset_inventory.mjs` exercises the browser
 and desktop bridge against a real throwaway Solid pod.
+
+### Forwarding private DM attachments
+
+The message Forward action offers existing, visible, unblocked WebID DM
+conversations for a private attachment. Recipient labels include their WebID.
+The source must be a verified incoming message or this account's own message in
+the open DM. Deleted, unavailable, malformed and stale-context sources are
+refused. Forwarding downloads and verifies the original encrypted chunks again;
+cached preview bytes are not used as evidence of integrity.
+
+After verification, the app opens the selected DM and prepares an ordinary
+durable attachment draft with a new random asset ID, AES key and IV. Only the
+decrypted bytes and validated filename, MIME, kind, spoiler and voice duration
+are copied. Original resource names, keys and manifests are never sent to the
+destination. The new ciphertext belongs to the forwarder's own pod, and its new
+manifest travels through the destination's encrypted DM delivery path. It is
+shown as a new attachment from the forwarder; no original-author claim is added.
+
+Prepared ciphertext and the new manifest are committed locally before upload.
+Upload/delivery failures leave Retry in the destination conversation, including
+after reload, without needing the source again. Existing attempted-delivery and
+conditional-cleanup boundaries apply to the new draft. Closing the picker,
+navigation, account changes and disconnection stop pending preparation/I/O;
+an already persisted draft remains available for explicit retry or discard.
+Preparing an attachment locks destination buttons against duplicate clicks.
+
+This path never invokes the plaintext gateway `forward_message` command, even
+for a malformed private attachment prefix. Private attachments cannot be
+forwarded to shared rooms or legacy gateway DMs by this picker. Existing text
+forwarding retains its room targets. `dm-media.test.js` and `modals.test.js`
+cover fresh encryption, voice metadata, retry after source loss, trust/context
+checks, selection locking and stale picker results. Browser and cross-mode DM
+smokes exercise the actual Forward menu, forced upload failure/reload/retry,
+exact file bytes, and real forwarded voice-note playback.
