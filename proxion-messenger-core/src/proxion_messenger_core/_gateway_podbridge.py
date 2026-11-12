@@ -682,9 +682,11 @@ class PodBridgeMixin:
         consumer = await self._pb_consumer(refresh=True)
         if not status["ready"] or not consumer:
             return
+        if self._pb_consumer_online():
+            st["seen"].clear()
+            return  # Recheck the current signer before deciding a device is online.
         ident = st.get("consumer_identity") or consumer
-        fresh = False
-        missed_call = False
+        notices = {"dm": [], "missed_call": []}
         for box in ("dm", "call"):
             url = f"{status['pod_root']}proxion/{box}-inbox/"
             try:
@@ -694,22 +696,27 @@ class PodBridgeMixin:
                 continue
             if code != 200:
                 continue
-            members = [m for m in _pbp.container_members(listing, url) if m.startswith(url)][:200]
+            members = [m for m in _pbp.container_members(listing, url) if m.startswith(url)]
             seen = st["seen"].get(url)
-            st["seen"][url] = set(members)
             if seen is None:
+                st["seen"][url] = set(members)
                 continue   # first look sets the baseline
-            for m in [m for m in members if m not in seen][:20]:
+            examined = st["seen"][url] = seen.intersection(members)
+            for m in [m for m in members if m not in examined][:20]:
                 try:
                     code, _h, raw = await self._pb_request_own("GET", m)
                 except Exception:
                     continue
                 if code != 200:
+                    if code == 404:
+                        examined.add(m)
                     continue
                 try:
                     doc = json.loads(raw.decode("utf-8", "replace"))
                 except Exception:
+                    examined.add(m)
                     continue
+                examined.add(m)
                 sender = doc.get("from_webid") if isinstance(doc, dict) else None
                 if isinstance(sender, str) and self._is_blocked_for(ident, sender):
                     try:
@@ -718,13 +725,19 @@ class PodBridgeMixin:
                         pass
                     continue
                 if box == "call" and isinstance(doc, dict) and doc.get("type") == "voice_invite":
-                    missed_call = True
+                    notices["missed_call"].append((examined, m))
+                    examined.discard(m)
                 elif box == "dm":
-                    fresh = True
-        if missed_call:
-            self._pb_push(ident, "missed_call")
-        elif fresh:
-            self._pb_push(ident)
+                    notices["dm"].append((examined, m))
+                    examined.discard(m)
+        if notices["missed_call"]:
+            if self._pb_push(ident, "missed_call"):
+                for examined, member in notices["missed_call"]:
+                    examined.add(member)
+        elif notices["dm"]:
+            if self._pb_push(ident):
+                for examined, member in notices["dm"]:
+                    examined.add(member)
 
     def _pb_push(self, identity: str, kind: str = "dm") -> bool:
         """A content-free 'new message' (or 'missed_call') push to *identity*'s
@@ -757,10 +770,7 @@ class PodBridgeMixin:
             st = self._pb()
             if now >= st["closed_next"]:
                 st["closed_next"] = now + self._POD_CLOSED_POLL_S
-                if not self._pb_consumer_online():
-                    await self._pb_closed_app_check()
-                else:
-                    st["seen"].clear()   # the open client drains; re-baseline when it closes
+                await self._pb_closed_app_check()
 
 
 def _pb_response_headers() -> frozenset:

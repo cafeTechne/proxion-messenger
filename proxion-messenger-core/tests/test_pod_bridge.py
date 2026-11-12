@@ -540,3 +540,85 @@ def test_inbox_watch_cannot_follow_the_same_device_into_a_different_pod(gw):
         run(gw._pb_poll_watches(100.0))
         read.assert_not_called()
     assert box not in gw._pb()['watches']
+
+
+def _baseline_call_notifications(gw, did='did:key:z6MkConsumer'):
+    be_consumer(gw, did)
+    box = ROOT + 'proxion/call-inbox/'
+    gw._pod.routes[('GET', ROOT + 'proxion/dm-inbox/')] = (200, {}, _listing())
+    gw._pod.routes[('GET', box)] = (200, {}, _listing())
+    run(gw._pb_closed_app_check())
+    return box
+
+
+@pytest.mark.parametrize('failure', ['exception', 503])
+def test_missed_call_notification_retries_a_failed_drop_read(gw, failure):
+    box = _baseline_call_notifications(gw)
+    gw._pod.routes[('GET', box)] = (200, {}, _listing('call'))
+    def unavailable():
+        raise OSError('temporary pod failure')
+    gw._pod.routes[('GET', box + 'call')] = unavailable if failure == 'exception' else (failure, {}, b'')
+    with patch.object(gw, '_pb_push', return_value=True) as push:
+        run(gw._pb_closed_app_check()); push.assert_not_called()
+        gw._pod.routes[('GET', box + 'call')] = (200, {}, json.dumps({'type': 'voice_invite', 'from_webid': PEER}).encode())
+        run(gw._pb_closed_app_check())
+        push.assert_called_once_with('did:key:z6MkConsumer', 'missed_call')
+        run(gw._pb_closed_app_check())
+        assert push.call_count == 1
+
+
+@pytest.mark.parametrize('candidate_count', [20, 200])
+def test_missed_call_beyond_poll_limit_is_examined_next_time(gw, candidate_count):
+    box = _baseline_call_notifications(gw)
+    names = [f'candidate-{i}' for i in range(candidate_count)] + ['call']
+    gw._pod.routes[('GET', box)] = (200, {}, _listing(*names))
+    for name in names:
+        gw._pod.routes[('GET', box + name)] = (200, {}, json.dumps({
+            'type': 'voice_invite' if name == 'call' else 'ice_candidate', 'from_webid': PEER}).encode())
+    with patch.object(gw, '_pb_push', return_value=True) as push:
+        for _ in range(candidate_count // 20):
+            run(gw._pb_closed_app_check()); push.assert_not_called()
+        run(gw._pb_closed_app_check())
+        push.assert_called_once_with('did:key:z6MkConsumer', 'missed_call')
+
+
+def test_rate_limited_missed_call_is_not_marked_notified(gw):
+    box = _baseline_call_notifications(gw)
+    gw._pod.routes[('GET', box)] = (200, {}, _listing('call'))
+    gw._pod.routes[('GET', box + 'call')] = (200, {}, json.dumps({'type': 'voice_invite', 'from_webid': PEER}).encode())
+    with patch.object(gw, '_pb_push', side_effect=[False, True]) as push:
+        run(gw._pb_closed_app_check())
+        assert box + 'call' not in gw._pb()['seen'][box]
+        run(gw._pb_closed_app_check())
+        assert push.call_count == 2 and box + 'call' in gw._pb()['seen'][box]
+        run(gw._pb_closed_app_check())
+        assert push.call_count == 2
+
+
+def test_old_connected_device_does_not_suppress_replacement_devices_notifications(gw):
+    ws, old = make_ws(); register(gw, ws, old); be_consumer(gw, old)
+    assert run(gw._pb_consumer()) == old
+    gw._pb()['consumer_identity'] = old
+    new = 'did:key:zReplacement'
+    box = _baseline_call_notifications(gw, new)
+    gw._pod.routes[('GET', box)] = (200, {}, _listing('call'))
+    gw._pod.routes[('GET', box + 'call')] = (200, {}, json.dumps({'type': 'voice_invite', 'from_webid': PEER}).encode())
+    with patch.object(gw, '_pb_push', return_value=True) as push:
+        run(gw._pb_closed_app_check())
+        push.assert_called_once_with(new, 'missed_call')
+
+
+def test_simultaneous_missed_call_does_not_discard_the_dm_notification(gw):
+    call_box = _baseline_call_notifications(gw)
+    dm_box = ROOT + 'proxion/dm-inbox/'
+    for box, name, doc in [(call_box, 'call', {'type': 'voice_invite', 'from_webid': PEER}),
+                           (dm_box, 'message', {'from_webid': PEER, 'content': 'ciphertext'})]:
+        gw._pod.routes[('GET', box)] = (200, {}, _listing(name))
+        gw._pod.routes[('GET', box + name)] = (200, {}, json.dumps(doc).encode())
+    with patch.object(gw, '_pb_push', return_value=True) as push:
+        run(gw._pb_closed_app_check())
+        push.assert_called_once_with('did:key:z6MkConsumer', 'missed_call')
+        run(gw._pb_closed_app_check())
+        assert push.call_args.args == ('did:key:z6MkConsumer',)
+        run(gw._pb_closed_app_check())
+        assert push.call_count == 2

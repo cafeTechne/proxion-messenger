@@ -53,7 +53,14 @@ so an abrupt crash before those writes commit can still lose a received message.
   Unverified, or the call is refused once that contact has made a verified call.
   The desktop keeps its gateway's TURN relay; the browser build uses public STUN
   and the default or user-added relay. A call to a closed desktop app shows a
-  missed-call notification within a minute. Test: `npm run smoke:cross-mode-call`.
+  missed-call notification on the gateway's minute-scale poll. This is an alert,
+  not live ringing. Failed inbox reads, deferred scan batches, and push throttling
+  retain notification candidates for a later poll. A missed-call alert takes priority
+  over a simultaneous DM alert; the DM remains eligible for the next poll. The gateway
+  refreshes the receiving-device identity before deciding whether that device is online.
+  Push delivery remains best-effort once queued. Scan progress is in memory, and the
+  first scan after gateway restart establishes a baseline rather than alerting for old
+  inbox items. Test: `npm run smoke:cross-mode-call`.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.
