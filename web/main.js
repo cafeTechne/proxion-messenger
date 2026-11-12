@@ -1296,6 +1296,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             const el = document.getElementById('settings-crossmode-status');
             if (!el) return;
             if (st.ready) el.textContent = st.conflict ? t('crossmode.conflict') : t('crossmode.ready');
+            else if (st.reason === 'not_consumer') el.textContent = t('crossmode.notConsumer');
             else if (st.reason === 'identity_failed') el.textContent = t('crossmode.identityFailed');
             else if (st.reason === 'identity_pending') el.textContent = t('crossmode.identityPending');
             else if (st.reason === 'root_mismatch') el.textContent = t('crossmode.rootMismatch');

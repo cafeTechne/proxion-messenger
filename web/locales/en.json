@@ -1066,6 +1066,7 @@
   "members.remoteGateway": "remote gateway",
   "mr.title": "Message request",
   "mr.decline": "Decline and block",
+  "crossmode.notConsumer": "This device is no longer confirmed to receive browser-contact messages and calls for this WebID. Reconnect to try again.",
   "crossmode.identityFailed": "Could not publish this device’s identity or encryption key to your pod. Browser contacts are unavailable. Reconnect to retry.",
   "crossmode.identityPending": "Publishing this device’s identity and encryption key…",
   "crossmode.ready": "Browser-build users can message you at this WebID.",

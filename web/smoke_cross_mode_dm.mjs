@@ -350,6 +350,30 @@ try {
   if (!blockedShown && blockedGone) ok('after Alice blocks Bob his DM is deleted unread');
   else fail(`blocked DM: shown=${blockedShown} deleted=${blockedGone}`);
 
+  step = 'external-device-takeover';
+  const signerUrl = alice.storageRoot + 'proxion/identity/signer.json';
+  const originalSigner = await (await aliceSession.fetch(signerUrl)).json();
+  const otherSigner = await (await fetch(bob.storageRoot + 'proxion/identity/signer.json')).json();
+  const takeover = await aliceSession.fetch(signerUrl, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: 1, signer: otherSigner.signer, account_did: null }),
+  });
+  if (!takeover.ok) throw Error('External signer takeover failed: ' + takeover.status);
+  if (!(await waitFor(pageA, () => window.proxionCrossMode?.state().reason === 'not_consumer', undefined, 20000)))
+    throw Error('Desktop did not notice external device takeover');
+  const refused = await pageA.evaluate(async url => {
+    const response = await window.proxionCrossMode.bridge.fetch(url);
+    return { status: response.status, error: response.error };
+  }, alice.storageRoot + 'proxion/dm-inbox/');
+  if (refused.status !== 409 || refused.error !== 'not_consumer') throw Error('Retired device could still read its inbox');
+  ok('external pod signer takeover stops the old desktop and refuses inbox access');
+  await pageA.reload({ waitUntil: 'load', timeout: 30000 });
+  if (!(await waitFor(pageA, () => window.proxionCrossMode?.isReady(), undefined, 30000)))
+    throw Error('Desktop could not reclaim receiving after reload');
+  const reclaimedSigner = await (await aliceSession.fetch(signerUrl)).json();
+  if (reclaimedSigner.signer !== originalSigner.signer) throw Error('Reload did not reclaim the original device signer');
+  ok('reopening desktop explicitly reclaims the receiving role');
+
   if (errs.length) fail('page errors:\n    ' + errs.slice(0, 6).join('\n    '));
   else ok('no uncaught page errors on either side');
 

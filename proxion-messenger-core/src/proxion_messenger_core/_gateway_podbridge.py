@@ -178,7 +178,7 @@ class PodBridgeMixin:
 
     async def _pb_consumer(self, refresh: bool = False) -> Optional[str]:
         """The signer did our pod's signer.json names: the one device that consumes
-        the drop boxes. Cached; re-read on *refresh* or after a pod switch."""
+        the drop boxes. Authorization uses a fresh read; hints may use the cache."""
         st = self._pb()
         webid = getattr(self, "_pod_webid", None)
         if not refresh and st["consumer_for"] == webid and st["consumer"]:
@@ -193,11 +193,16 @@ class PodBridgeMixin:
                 doc = json.loads(raw.decode("utf-8", "replace") or "null")
                 if isinstance(doc, dict) and isinstance(doc.get("signer"), str):
                     signer = doc["signer"]
+            current = self._pod_bridge_status()
+            if getattr(self, "_pod_webid", None) != webid or current.get("pod_root") != status["pod_root"]:
+                return None
+            if signer != st["consumer"]:
+                st["consumer_identity"] = None
             st["consumer"], st["consumer_for"] = signer, webid
             return signer
         except Exception as exc:
             logger.debug("pod bridge: signer read failed: %s", exc)
-            return st["consumer"] if st["consumer_for"] == webid else None
+            return None  # Never authorize from a stale signer after a failed refresh.
 
     # ── commands ─────────────────────────────────────────────────────────────
 
@@ -206,7 +211,7 @@ class PodBridgeMixin:
             await websocket.send(json.dumps({"type": "pod_bridge", "ready": False, "reason": "not_owner"}))
             return
         status = self._pod_bridge_status()
-        consumer = await self._pb_consumer() if status["ready"] else None
+        consumer = await self._pb_consumer(refresh=True) if status["ready"] else None
         status["consumer"] = bool(consumer) and consumer == self._pb_signing_did(websocket)
         await websocket.send(json.dumps({"type": "pod_bridge", **status}))
         if status["ready"]:
@@ -342,7 +347,7 @@ class PodBridgeMixin:
         # and clears the drop boxes. Creating a box or dropping into it is open to
         # any owner connection.
         if decision.own and decision.kind in ("box", "drop") and method in ("GET", "HEAD", "DELETE"):
-            if (await self._pb_consumer()) != self._pb_signing_did(websocket):
+            if (await self._pb_consumer(refresh=True)) != self._pb_signing_did(websocket):
                 await self._pod_fetch_reply(websocket, req_id, 409, error="not_consumer")
                 return
         try:
@@ -403,7 +408,7 @@ class PodBridgeMixin:
             return
         allowed = decision.allow and ((decision.own and decision.kind == "box") or room_resource
                                       or (not decision.own and decision.kind == "presence"))
-        if allowed and decision.own and not room_resource and (await self._pb_consumer()) != self._pb_signing_did(websocket):
+        if allowed and decision.own and not room_resource and (await self._pb_consumer(refresh=True)) != self._pb_signing_did(websocket):
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "not_consumer"}))
             return
         if not allowed:
@@ -614,12 +619,30 @@ class PodBridgeMixin:
 
     async def _pb_poll_watches(self, now: float) -> None:
         st = self._pb()
+        consumer_checked, consumer = False, None
         for url, w in list(st["watches"].items()):
             if not w["sockets"]:
                 st["watches"].pop(url, None)
                 continue
             if now < w["next"]:
                 continue
+            if w["own"] and not w.get("room"):
+                if not consumer_checked:
+                    consumer = await self._pb_consumer(refresh=True)
+                    consumer_checked = True
+                status = self._pod_bridge_status()
+                decision = _pbp.classify("GET", url, status.get("pod_root") or "", self._pb_rooms())
+                current_box = status["ready"] and decision.allow and decision.own and decision.kind == "box"
+                for ws in list(w["sockets"]):
+                    if not current_box or not self._is_pod_owner_socket(ws) or self._pb_signing_did(ws) != consumer:
+                        w["sockets"].pop(ws, None)
+                        try:
+                            await ws.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "not_consumer"}))
+                        except Exception:
+                            pass
+                if not w["sockets"]:
+                    st["watches"].pop(url, None)
+                    continue
             auth = w.get("auth", False)
             if auth and not any(url.startswith(c) for c in self._pb_rooms()):
                 st["watches"].pop(url, None)   # the room was left (or the pod switched)
@@ -656,7 +679,7 @@ class PodBridgeMixin:
         deleted unread."""
         st = self._pb()
         status = self._pod_bridge_status()
-        consumer = await self._pb_consumer()
+        consumer = await self._pb_consumer(refresh=True)
         if not status["ready"] or not consumer:
             return
         ident = st.get("consumer_identity") or consumer

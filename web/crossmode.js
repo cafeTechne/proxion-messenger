@@ -216,7 +216,15 @@ export function createCrossMode({
     }
 
     return {
-        handleEvent: (ev) => bridge.handleEvent(ev),
+        handleEvent: (ev) => {
+            const handled = bridge.handleEvent(ev);
+            if ((ev?.type === 'pod_fetch_result' && ev.error === 'not_consumer')
+                || (ev?.type === 'pod_watch_refused' && ev.reason === 'not_consumer')) {
+                bridge.reset();
+                _onInfo({ ready: false, reason: 'not_consumer' });
+            }
+            return handled;
+        },
         route, onReconnect,
         requestInfo: () => bridge.requestInfo(),
         state: () => _state,

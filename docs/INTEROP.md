@@ -62,7 +62,14 @@ so an abrupt crash before those writes commit can still lose a received message.
   leaves browser-contact routing unavailable and shows a publication error in
   Settings; reconnect retries publication. Duplicate bridge replies share one
   startup, and disconnect/account changes stop old inbox watches and discard late
-  call events. This does not add browser device pairing or multi-device fanout.
+  call events. Inbox reads, deletes, and subscriptions recheck the pod's signer;
+  due inbox watches are revalidated as a batch. A takeover made through another
+  browser or gateway therefore revokes the old desktop's inbox access, stops its
+  inbox watches, and clears readiness. A failed signer refresh also refuses access
+  rather than trusting an old cached signer. Reopening/reconnecting intentionally
+  republishes this device's identity to reclaim receiving. These checks add signer
+  reads to inbox operations; they do not implement an atomic lease across pods.
+  This does not add browser device pairing or multi-device fanout.
 - **Files and voice messages:** encrypted pod-backed attachments up to 2 MiB and
   recorded voice notes work through the browser and desktop chat controls. Source
   drafts survive upload/delivery failures and reload, with explicit Retry/Cancel.

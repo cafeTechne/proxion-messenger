@@ -464,3 +464,79 @@ def test_box_discovery_failure_does_not_write_a_fallback_acl(gw):
     run(gw._pb_ensure_boxes())
     assert gw._pb()["boxes_for"] is None
     assert not any(call[1].endswith((".acl", ".acr")) for call in gw._pod.calls)
+
+
+@pytest.mark.parametrize('method,path', [('GET', 'dm-inbox/'), ('HEAD', 'call-inbox/'), ('DELETE', 'dm-inbox/drop')])
+def test_external_signer_takeover_revokes_cached_inbox_authorization(gw, method, path):
+    ws, did = make_ws()
+    register(gw, ws, did)
+    be_consumer(gw, did)
+    assert run(gw._pb_consumer()) == did  # Warm the old authorization hint.
+    gw._pb()['consumer_identity'] = did
+    be_consumer(gw, 'did:key:zOtherDevice')
+    target = ROOT + 'proxion/' + path
+    before = len(gw._pod.calls)
+    assert fetch(gw, ws, method, target)['error'] == 'not_consumer'
+    assert not any(url == target for _, url, _, _ in gw._pod.calls[before:])
+    assert gw._pb()['consumer_identity'] is None
+
+
+def test_external_takeover_refuses_new_watch_and_bridge_info_is_fresh(gw):
+    ws, did = make_ws()
+    register(gw, ws, did); be_consumer(gw, did)
+    assert run(gw._pb_consumer()) == did
+    be_consumer(gw, 'did:key:zOtherDevice')
+    box = ROOT + 'proxion/dm-inbox/'
+    run(gw._handle_pod_watch(ws, {'url': box}))
+    assert sent(ws)[-1]['reason'] == 'not_consumer'
+    with patch.object(type(gw), '_pb_ensure_boxes', AsyncMock()):
+        run(gw._handle_pod_bridge_info(ws, {}))
+    assert sent(ws)[-1]['consumer'] is False
+
+
+def test_signer_refresh_failure_never_uses_old_inbox_authorization(gw):
+    ws, did = make_ws(); register(gw, ws, did); be_consumer(gw, did)
+    assert run(gw._pb_consumer()) == did
+    def unavailable():
+        raise OSError('pod unavailable')
+    gw._pod.routes[('GET', ROOT + 'proxion/identity/signer.json')] = unavailable
+    assert fetch(gw, ws, 'GET', ROOT + 'proxion/dm-inbox/')['error'] == 'not_consumer'
+    be_consumer(gw, did)
+    gw._pod.routes[('GET', ROOT + 'proxion/dm-inbox/')] = (200, {}, b'')
+    assert fetch(gw, ws, 'GET', ROOT + 'proxion/dm-inbox/')['status'] == 200
+
+
+@pytest.mark.asyncio
+async def test_signer_read_finishing_after_pod_switch_does_not_cache_old_owner(gw):
+    async def switched(*args):
+        gw._pod_webid = PEER
+        gw._pod_url = PEER_ROOT
+        return 200, {}, json.dumps({'signer': 'did:key:zOldDevice'}).encode()
+    with patch.object(gw, '_pb_request_own', switched):
+        assert await gw._pb_consumer(refresh=True) is None
+    assert gw._pb()['consumer'] is None
+
+
+def test_existing_inbox_watch_is_revoked_after_external_takeover_without_reading_box(gw):
+    ws, did = make_ws(); register(gw, ws, did); be_consumer(gw, did)
+    box = ROOT + 'proxion/dm-inbox/'
+    run(gw._handle_pod_watch(ws, {'url': box}))
+    assert box in gw._pb()['watches']
+    be_consumer(gw, 'did:key:zOtherDevice')
+    before = len(gw._pod.calls)
+    run(gw._pb_poll_watches(100.0))
+    assert box not in gw._pb()['watches']
+    assert sent(ws)[-1] == {'type': 'pod_watch_refused', 'url': box, 'reason': 'not_consumer'}
+    assert not any(url == box for _, url, _, _ in gw._pod.calls[before:])
+
+
+def test_inbox_watch_cannot_follow_the_same_device_into_a_different_pod(gw):
+    ws, did = make_ws(); register(gw, ws, did); be_consumer(gw, did)
+    box = ROOT + 'proxion/dm-inbox/'
+    run(gw._handle_pod_watch(ws, {'url': box}))
+    gw._pod_webid, gw._pod_url = PEER, PEER_ROOT
+    with patch.object(gw, '_pb_consumer', AsyncMock(return_value=did)), \
+            patch.object(gw, '_pb_signature', AsyncMock()) as read:
+        run(gw._pb_poll_watches(100.0))
+        read.assert_not_called()
+    assert box not in gw._pb()['watches']

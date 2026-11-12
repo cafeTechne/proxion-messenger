@@ -149,6 +149,20 @@ describe('createCrossMode', () => {
         expect(h.sent).toHaveLength(count);
     });
 
+    it.each([
+        { type: 'pod_watch_refused', url: ROOT + 'proxion/dm-inbox/', reason: 'not_consumer' },
+        { type: 'pod_fetch_result', req_id: 'retired', status: 409, error: 'not_consumer' },
+    ])('stops receiving and routing after an external device takes over: $type', async event => {
+        const h = harness(); await ready(h);
+        expect(h.cm.handleEvent(event)).toBe(true);
+        expect(h.cm.state()).toMatchObject({ ready: false, started: false, reason: 'not_consumer' });
+        const before = h.sent.length;
+        h.cm.route({ cmd: 'local_dm', target_webid: BOB, content: 'CT', message_id: 'retired' });
+        expect(h.sent).toHaveLength(before);
+        h.cm.onReconnect(); await ready(h);
+        expect(h.cm.isReady()).toBe(true);
+    });
+
     it('drops a WebID DM into the peer pod, signed, and confirms only on success', async () => {
         const h = harness({ routes: { 'POST https://pod.example/bob/proxion/dm-inbox/': { status: 201 } } });
         await ready(h);
