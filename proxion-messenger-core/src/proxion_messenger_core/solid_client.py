@@ -477,6 +477,14 @@ class SolidClient:
         except Exception as exc:
             raise SolidError(f"{method} {url} failed: {exc}") from exc
 
+    def head(self, uri: str) -> dict:
+        """Read metadata using the same bounded, authenticated transport as I/O."""
+        url = self._resolve_uri(uri)
+        status, headers, _ = self.request("HEAD", url)
+        if not 200 <= status < 300:
+            raise SolidError(f"HEAD {url}: HTTP {status}", status_code=status)
+        return headers
+
     def set_acl(
         self,
         stash_uri: str,

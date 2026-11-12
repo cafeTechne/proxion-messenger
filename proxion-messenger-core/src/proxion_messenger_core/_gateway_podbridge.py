@@ -575,11 +575,15 @@ class PodBridgeMixin:
                     st["boxes_for"] = None
                     continue
                 code, h, _b = await self._pb_request_own("HEAD", url)
+                if not 200 <= code < 300:
+                    st["boxes_for"] = None
+                    continue
                 acl_url, model = _pb_acl_from_link(h.get("link", ""), url)
-                if model != "wac" or not acl_url.startswith(url):
-                    continue   # an ACP server (the client writes the ACR on start), or an odd link
+                if not acl_url.startswith(url):
+                    st["boxes_for"] = None
+                    continue
                 code, _h, _b = await self._pb_request_own(
-                    "PUT", acl_url, _pbp.inbox_acl_turtle(url, status["webid"]).encode(),
+                    "PUT", acl_url, _pbp.inbox_acl_turtle(url, status["webid"], model).encode(),
                     {"Content-Type": "text/turtle"})
                 if not (200 <= code < 300):
                     st["boxes_for"] = None

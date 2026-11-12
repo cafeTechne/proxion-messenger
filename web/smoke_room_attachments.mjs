@@ -1,6 +1,8 @@
 // Real CSS transfer permissions and the full room attachment size limit.
 import { startCss, provisionAccount, makeAuthSession } from './scripts/css-harness.mjs';
 import { createRoomAttachments, ROOM_ASSET_MAX } from './room-attachments.js';
+import { createPodRoomIo } from './podroomio.js';
+import { accessControlUrl, detectAclModel } from './acl.js';
 import { skipSmoke } from './scripts/smoke-status.mjs';
 const css = await startCss().catch(() => null);
 if (!css) skipSmoke('No CSS pod available for attachment permission checks.');
@@ -10,8 +12,10 @@ try {
     const peer = await provisionAccount(css.url, { email: `asset-peer-${stamp}@test.example`, password: 'pw-12345678', label: 'asset-peer' });
     const a = await makeAuthSession(owner), b = await makeAuthSession(peer), container = owner.storageRoot + 'proxion/rooms/assets/';
     if (!(await a.fetch(container, { method: 'PUT', headers: { 'Content-Type': 'text/turtle', Link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"' }, body: '' })).ok) throw Error('create container');
-    const acl = shared => `@prefix acl: <http://www.w3.org/ns/auth/acl#>. <#o> a acl:Authorization; acl:agent <${owner.webId}>; acl:accessTo <${container}>; acl:default <${container}>; acl:mode acl:Read,acl:Write,acl:Control. ${shared ? `<#p> a acl:Authorization; acl:agent <${peer.webId}>; acl:accessTo <${container}>; acl:default <${container}>; acl:mode acl:Read,acl:Append.` : ''}`;
-    const grant = async shared => { if (!(await a.fetch(container + '.acl', { method: 'PUT', headers: { 'Content-Type': 'text/turtle' }, body: acl(shared) })).ok) throw Error('ACL update'); };
+    const head = await a.fetch(container, { method: 'HEAD' }), link = head.headers.get('link');
+    if (detectAclModel(link, accessControlUrl(link, container)) !== css.accessControl) throw Error('Unexpected access-control model');
+    const io = createPodRoomIo({ fetch: a.fetch, isLoggedIn: () => true, storageRoot: () => owner.storageRoot, webId: () => owner.webId });
+    const grant = async shared => { if (!await io.podGrantChatParticipants(container, owner.webId, shared ? [peer.webId] : [])) throw Error('ACL update'); };
     await grant(true);
     const sender = createRoomAttachments({ fetch: (url, options) => b.fetch(url, options) }), reader = createRoomAttachments({ fetch: (url, options) => a.fetch(url, options) });
     const bytes = new Uint8Array(ROOM_ASSET_MAX).map((_, index) => index % 251);

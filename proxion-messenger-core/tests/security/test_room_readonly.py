@@ -97,7 +97,7 @@ class TestSetRoomAclReadOnlyACP:
     def test_acp_read_only_passes_read_only_modes(self):
         room, client = _make_room_and_client(read_only=True)
         with patch("proxion_messenger_core.acp.detect_acl_mode", return_value="acp"), \
-             patch("proxion_messenger_core.acp.set_acp_policy", return_value="stash://rooms/room-test/.acr") as mock_acp:
+             patch("proxion_messenger_core.acp.set_acp_multi_policy", return_value="stash://rooms/room-test/.acr") as mock_acp:
             set_room_acl(room, client, owner_webid=OWNER, member_webids=[BOB])
         mock_acp.assert_called_once()
         _, _, _, _, modes = mock_acp.call_args[0]
@@ -108,7 +108,7 @@ class TestSetRoomAclReadOnlyACP:
         # #4: append-only members on the ACP path too — Read+Append, never Write.
         room, client = _make_room_and_client(read_only=False)
         with patch("proxion_messenger_core.acp.detect_acl_mode", return_value="acp"), \
-             patch("proxion_messenger_core.acp.set_acp_policy", return_value="stash://rooms/room-test/.acr") as mock_acp:
+             patch("proxion_messenger_core.acp.set_acp_multi_policy", return_value="stash://rooms/room-test/.acr") as mock_acp:
             set_room_acl(room, client, owner_webid=OWNER, member_webids=[BOB])
         mock_acp.assert_called_once()
         _, _, _, _, modes = mock_acp.call_args[0]

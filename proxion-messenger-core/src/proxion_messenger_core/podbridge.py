@@ -304,9 +304,20 @@ def pending_join_path(room_id: str, owner_webid: str) -> str:
     return f"proxion/join-requests/{digest}.jsonld"
 
 
-def inbox_acl_turtle(inbox_url: str, owner_webid: str) -> str:
-    """The WAC ACL for one of our drop boxes: owner full control, public Append.
+def inbox_acl_turtle(inbox_url: str, owner_webid: str, model: str = "wac") -> str:
+    """Drop-box access: owner full control, public Append on the container only.
     Mirrors buildInboxAcl in web/podio.js."""
+    if model == "acp":
+        return (
+            "@prefix acp: <http://www.w3.org/ns/solid/acp#>.\n@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n"
+            f"<> a acp:AccessControlResource; acp:resource <{inbox_url}>; acp:accessControl <#owner-ac>, <#public-ac>; acp:memberAccessControl <#owner-ac>.\n"
+            "<#owner-ac> a acp:AccessControl; acp:apply <#owner-policy>.\n"
+            "<#owner-policy> a acp:Policy; acp:allow acl:Read, acl:Write, acl:Control; acp:anyOf <#owner-matcher>.\n"
+            f"<#owner-matcher> a acp:Matcher; acp:agent <{owner_webid}>.\n"
+            "<#public-ac> a acp:AccessControl; acp:apply <#public-policy>.\n"
+            "<#public-policy> a acp:Policy; acp:allow acl:Append; acp:anyOf <#public-matcher>.\n"
+            "<#public-matcher> a acp:Matcher; acp:agent acp:PublicAgent.\n"
+        )
     return (
         "@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n"
         f"<#owner> a acl:Authorization; acl:agent <{owner_webid}>; acl:accessTo <{inbox_url}>; "

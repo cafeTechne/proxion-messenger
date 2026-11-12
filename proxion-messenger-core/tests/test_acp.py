@@ -170,32 +170,13 @@ def test_set_thread_read_acl_uses_set_acl_auto():
             assert result == "stash://messages/thread/c1/.acl"
 
 
-def test_set_room_acl_acp_path_calls_set_acp_policy():
-    """Test that set_room_acl detects ACP mode and calls set_acp_policy for each member."""
+def test_set_room_acl_writes_all_acp_members_in_one_policy():
     from proxion_messenger_core.room import set_room_acl, RoomConfig
-    from unittest.mock import patch, MagicMock
-    
-    # Create mock room config
+    from unittest.mock import patch
     room = MagicMock(spec=RoomConfig)
     room.stash_root = "stash://rooms/r1/"
-    room.owner_webid = "alice@pod.example"
-    
-    # Create mock client that indicates ACP mode
-    owner_client = MagicMock()
-    owner_client.head.return_value = {"Link": '<.acr>; rel="acr"'}
-    
-    member_webids = ["bob@pod.example", "charlie@pod.example"]
-    
-    with patch("proxion_messenger_core.acp.detect_acl_mode", return_value="acp"):
-        with patch("proxion_messenger_core.acp.set_acp_policy") as mock_set_acp_policy:
-            mock_set_acp_policy.return_value = "stash://rooms/r1/.acr"
-            result = set_room_acl(room, owner_client, "alice@pod.example", member_webids)
-            
-            # Verify set_acp_policy was called for each member
-            assert mock_set_acp_policy.call_count == 2
-            calls = mock_set_acp_policy.call_args_list
-            assert calls[0][0][2] == "alice@pod.example"  # owner
-            assert calls[0][0][3] == "bob@pod.example"    # first member
-            assert calls[1][0][3] == "charlie@pod.example"  # second member
-            assert result == "stash://rooms/r1/.acr"
-
+    room.read_only = False
+    pod = _mock_pod_acp()
+    with patch("proxion_messenger_core.acp.set_acp_multi_policy", return_value=room.stash_root + ".acr") as writer:
+        assert set_room_acl(room, pod, "https://alice/#me", ["https://bob/#me", "https://carol/#me"]) == room.stash_root + ".acr"
+    writer.assert_called_once_with(pod, room.stash_root, "https://alice/#me", ["https://bob/#me", "https://carol/#me"], ["Read", "Append"])

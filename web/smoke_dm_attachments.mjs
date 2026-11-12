@@ -3,6 +3,7 @@
 import { startCss, provisionAccount, makeAuthSession } from './scripts/css-harness.mjs';
 import { createDmAttachments, prepareDmAttachment, parseDmAttachment, dmAssetContainer, DM_ASSET_MAX } from './dm-attachments.js';
 import { skipSmoke } from './scripts/smoke-status.mjs';
+import { accessControlUrl, detectAclModel } from './acl.js';
 const css = await startCss().catch(() => null);
 if (!css) skipSmoke('No CSS pod available for encrypted DM asset checks.');
 try {
@@ -20,6 +21,8 @@ try {
     const result = await sender.upload(owner.webId, prepared, count => { progress = count; });
     if (!result.ok || progress !== 65) throw Error('2 MiB upload: ' + JSON.stringify(result));
     const container = dmAssetContainer(owner.webId), chunk = container + `asset-${result.manifest.id}-0.json`;
+    const head = await a.fetch(container, { method: 'HEAD' }), link = head.headers.get('link');
+    if (detectAclModel(link, accessControlUrl(link, container)) !== css.accessControl) throw Error('Unexpected access-control model');
     const anonymous = await fetch(chunk);
     if (!anonymous.ok) throw Error('recipient could not read public ciphertext');
     const publicDoc = await anonymous.json();

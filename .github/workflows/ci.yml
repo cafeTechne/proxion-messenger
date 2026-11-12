@@ -95,9 +95,9 @@ jobs:
         run: npm run smoke:ci
 
   pod-room-smokes:
-    name: Required live-pod room journeys
+    name: Required WAC and ACP pod journeys
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -118,7 +118,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/proxion-css" --no-audit --no-fund @solid/community-server@7.3.0
           test -x /usr/bin/google-chrome
           openssl version
-      - name: Create, approve, message, and restore pod rooms
+      - name: Verify WAC and ACP rooms, inboxes, and media
         working-directory: web
         env:
           PROXION_CHROME: /usr/bin/google-chrome
@@ -126,7 +126,7 @@ jobs:
           PROXION_SMOKE_REQUIRED: "1"
         run: |
           set -o pipefail
-          node scripts/run-smokes.mjs pod-required | tee pod-room-smokes.log
+          node scripts/run-smokes.mjs pod-required pod-acp | tee pod-room-smokes.log
       - name: Upload room journey results
         if: always()
         uses: actions/upload-artifact@v4

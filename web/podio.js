@@ -65,8 +65,8 @@ export function buildInboxAcl(inboxUrl, ownerWebId, readerWebIds = []) {
 
 // The inbox/drop-box ACL body for the discovered access-control model: WAC turtle,
 // or on an ACP server (ESS) an ACR with the same shape (owner full control, public
-// Append, optional reader agents Read). ACP path is spec-authored, not yet
-// live-verified; it only activates when the server advertises ACP, so WAC servers
+// Append, optional reader agents Read). ACP is live-verified on CSS 7 via the
+// pod-acp smoke group; it only activates when advertised, so WAC servers
 // (CSS) are unaffected.
 export function inboxAclBody(model, inboxUrl, ownerWebId, readerWebIds = []) {
     return model === 'acp'
@@ -75,9 +75,8 @@ export function inboxAclBody(model, inboxUrl, ownerWebId, readerWebIds = []) {
 }
 
 // Owner full control + public Read for a discoverable resource (the public type
-// index), as WAC turtle or the ACP analogue (public via acp:PublicAgent). ACP path
-// is spec-authored, not yet live-verified; it activates only when the server
-// advertises ACP, so WAC servers (CSS) are unaffected.
+// index), as WAC turtle or the ACP analogue (public via acp:PublicAgent), exercised
+// by the CSS ACP room journeys. It activates only when the server advertises ACP.
 export function publicReadAclBody(model, resourceUrl, ownerWebId) {
     if (model === 'acp') return buildAcpAcr(ownerWebId, [], resourceUrl, 'acl:Read', 'acl:Read');
     return `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
@@ -526,13 +525,11 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
             if (!res || !res.ok) return false;
             if (!_presenceAclWritten) {
                 try {
-                    const { url: aclUrl } = await discoverAccessControl(url);
+                    const { url: aclUrl, model } = await discoverAccessControl(url);
                     const aclRes = await fetch(aclUrl, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'text/turtle' },
-                        body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
-                            + `<#owner> a acl:Authorization; acl:agent <${me}>; acl:accessTo <${url}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
-                            + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${url}>; acl:mode acl:Read.\n`,
+                        body: publicReadAclBody(model, url, me),
                     });
                     // Only latch on success, else a failed ACL PUT is never retried and
                     // peers see the user permanently offline (mirrors putInboxAcl).

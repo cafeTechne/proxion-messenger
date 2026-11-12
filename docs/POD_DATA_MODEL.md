@@ -1084,3 +1084,36 @@ cover fresh encryption, voice metadata, retry after source loss, trust/context
 checks, selection locking and stale picker results. Browser and cross-mode DM
 smokes exercise the actual Forward menu, forced upload failure/reload/retry,
 exact file bytes, and real forwarded voice-note playback.
+
+### ACP room membership and desktop inbox provisioning
+
+Python room policies use the resolved HTTP container identity and the discovered
+same-origin ACR URL. One JSON-LD or Turtle document contains owner access plus all
+current member grants, referenced by both `acp:accessControl` and
+`acp:memberAccessControl`. Empty membership writes owner-only access to revoke
+previous grants. Writable members receive Read+Append, read-only members receive
+Read, and the owner retains Read+Write+Control. Rewriting the snapshot changes
+inherited access to retained children as well as the container.
+
+Metadata probes use `SolidClient.head` over the existing authenticated transport,
+without redirects or body downloads. The detector recognizes ACP relations and
+`.acr` links even when their relation is `acl`. Failed probes stop automatic
+policy writes; they do not trigger a WAC fallback. Explicit non-strict model
+inspection retains its compatibility fallback for callers that only inspect.
+
+The desktop gateway provisions DM, call and join inboxes before the browser UI
+opens on either WAC or ACP. ACP public Append applies to the container only;
+owner control is inherited by dropped resources. Listing, reading, overwriting
+or deleting a drop remains owner-only. Failed discovery or policy writes keep
+setup retryable. Public ciphertext asset Read uses its separate policy, which
+intentionally applies to child chunks too.
+
+`smoke:acp` and the permission smoke exercise these boundaries against actual
+CSS ACP authorization, including Python JSON-LD/Turtle writers. ESS deployment
+compatibility remains a separate verification target.
+
+Presence resources use model-aware public Read through `publicReadAclBody`.
+The owner retains Read+Write+Control. A failed policy publication is retried on
+later heartbeats; a successful grant is latched for the current I/O instance.
+This fixes WAC policy bodies previously written into ACP resources. Shell cache
+v286 distributes the updated presence writer to existing browser clients.

@@ -32,6 +32,7 @@
     "smoke:dm-attachments": "node smoke_dm_attachments.mjs",
     "smoke:room-attachments": "node smoke_room_attachments.mjs",
     "smoke:asset-inventory": "node smoke_asset_inventory.mjs",
+    "smoke:acp": "node scripts/run-smokes.mjs pod-acp",
     "smoke:web-rooms": "node smoke_web_rooms.mjs",
     "smoke:web-session": "node smoke_web_session.mjs",
     "smoke:cross-mode-rooms": "node smoke_cross_mode_rooms.mjs",

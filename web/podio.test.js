@@ -98,6 +98,26 @@ describe('createPodIo', () => {
         expect(d).toEqual({ status: 'online', heartbeat: 5, serverMs: Date.parse(lm) });
         expect(fetch.mock.calls[0][0]).toBe(presenceUrlFor('https://pod.example/bob/'));
     });
+    it.each(['wac', 'acp'])('publishes %s presence with public Read, retaining owner writes and retrying failed policy publication', async model => {
+        let failPolicy = true;
+        const url = ROOT + 'proxion/presence.json', suffix = model === 'acp' ? '.acr' : '.acl';
+        const fetch = vi.fn(async (target, options) => {
+            if (options.method === 'HEAD') return res(200, '', { Link: `<${url + suffix}>; rel="acl"` });
+            return res(target.endsWith(suffix) && failPolicy ? 503 : 201);
+        });
+        const p = io(fetch);
+        expect(await p.podWritePresence('online')).toBe(true);
+        failPolicy = false;
+        expect(await p.podWritePresence('online')).toBe(true);
+        expect(await p.podWritePresence('away')).toBe(true);
+        const policies = fetch.mock.calls.filter(([target]) => target === url + suffix);
+        expect(policies).toHaveLength(2);
+        const body = policies[1][1].body;
+        expect(body).toContain(ME);
+        expect(body).toContain(model === 'acp' ? 'acp:allow acl:Read, acl:Write, acl:Control' : 'acl:mode acl:Read, acl:Write, acl:Control');
+        expect(body).toContain(model === 'acp' ? 'acp:agent acp:PublicAgent' : 'acl:agentClass foaf:Agent');
+        if (model === 'acp') expect(body).not.toContain('acl:Authorization');
+    });
 
     it('builds the same box URLs as before', () => {
         expect(dmInboxUrlFor('https://pod.example/bob')).toBe('https://pod.example/bob/proxion/dm-inbox/');

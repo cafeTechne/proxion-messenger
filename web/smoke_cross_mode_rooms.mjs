@@ -346,7 +346,7 @@ try {
     });
     page.on('response', response => {
       if (step.endsWith('-deletes') && response.request().method() !== 'OPTIONS'
-          && /\/(room\.json|\.acl|members\.jsonld|publicTypeIndex\.ttl)$/.test(new URL(response.url()).pathname)) {
+          && /\/(room\.json|\.ac[lr]|members\.jsonld|publicTypeIndex\.ttl)$/.test(new URL(response.url()).pathname)) {
         deleteOps.push(`${response.status()} ${response.request().method()} ${new URL(response.url()).pathname}`);
       }
     });
@@ -426,7 +426,7 @@ try {
       blockedChanges++;
       request.abort('failed').catch(() => {});
     } else if (blockApproval && request.method() === 'PUT'
-        && request.url() === `${bob.storageRoot}proxion/rooms/${roomB}/.acl`) {
+        && request.url() === `${bob.storageRoot}proxion/rooms/${roomB}/.${css.accessControl === 'acp' ? 'acr' : 'acl'}`) {
       request.abort('failed').catch(() => {});
     } else request.continue().catch(() => {});
   });

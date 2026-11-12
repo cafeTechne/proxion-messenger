@@ -428,3 +428,39 @@ def test_box_setup_writes_a_public_append_acl(gw):
     body = acls[0][2].decode()
     assert "acl:agentClass foaf:Agent" in body and "acl:mode acl:Append" in body
     assert f"acl:agent <{WEBID}>" in body
+
+
+def test_acp_box_setup_works_before_the_desktop_client_opens(gw):
+    for box in ("dm", "call", "join"):
+        url = f"{ROOT}proxion/{box}-inbox/"
+        gw._pod.routes[("PUT", url)] = (201, {}, b"")
+        gw._pod.routes[("HEAD", url)] = (200, {"link": f'<{url}.acr>; rel="acl"'}, b"")
+        gw._pod.routes[("PUT", url + ".acr")] = (205, {}, b"")
+    run(gw._pb_ensure_boxes())
+    acls = [c for c in gw._pod.calls if c[0] == "PUT" and c[1].endswith(".acr")]
+    assert len(acls) == 3
+    for _, _, raw, _ in acls:
+        body = raw.decode()
+        assert "acp:allow acl:Append" in body and "acp:agent acp:PublicAgent" in body
+        assert "acp:memberAccessControl <#owner-ac>." in body
+        assert f"acp:agent <{WEBID}>" in body
+
+
+def test_acp_box_setup_failure_remains_retryable(gw):
+    for box in ("dm", "call", "join"):
+        url = f"{ROOT}proxion/{box}-inbox/"
+        gw._pod.routes[("PUT", url)] = (201, {}, b"")
+        gw._pod.routes[("HEAD", url)] = (200, {"link": '<.acr>; rel="acl"'}, b"")
+        gw._pod.routes[("PUT", url + ".acr")] = (503, {}, b"")
+    run(gw._pb_ensure_boxes())
+    assert gw._pb()["boxes_for"] is None
+
+
+def test_box_discovery_failure_does_not_write_a_fallback_acl(gw):
+    for box in ("dm", "call", "join"):
+        url = f"{ROOT}proxion/{box}-inbox/"
+        gw._pod.routes[("PUT", url)] = (201, {}, b"")
+        gw._pod.routes[("HEAD", url)] = (503, {}, b"")
+    run(gw._pb_ensure_boxes())
+    assert gw._pb()["boxes_for"] is None
+    assert not any(call[1].endswith((".acl", ".acr")) for call in gw._pod.calls)

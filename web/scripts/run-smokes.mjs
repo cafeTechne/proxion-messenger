@@ -29,6 +29,8 @@ export const GROUPS = {
         'smoke_cross_mode_dm.mjs', 'smoke_cross_mode_rooms.mjs', 'smoke_cross_mode_call.mjs'],
   // A required subset: never pass CI without exercising real pod membership.
   'pod-required': ['smoke_room_attachments.mjs', 'smoke_dm_attachments.mjs', 'smoke_web_rooms.mjs', 'smoke_web_friends.mjs', 'smoke_cross_mode_rooms.mjs', 'smoke_web_join_link.mjs'],
+  // ACP is a separate required target, never inferred from the default WAC pod.
+  'pod-acp': ['smoke_pod_access.mjs', 'smoke_room_attachments.mjs', 'smoke_dm_attachments.mjs', 'smoke_cross_mode_dm.mjs', 'smoke_cross_mode_rooms.mjs'],
   // Pixel baselines depend on the machine's font rendering, so local only.
   visual: ['smoke_visual.mjs'],
 };
@@ -88,7 +90,8 @@ export async function runGroups(wanted, { run = runSmoke, write = (s) => process
   for (const group of wanted) {
     for (const file of GROUPS[group]) {
       write(`${group.padEnd(14)} ${file.padEnd(28)} `);
-      const r = await run(file, { required: required || group === 'pod-required' });
+      const r = await run(file, { required: required || group === 'pod-required' || group === 'pod-acp',
+        ...(group === 'pod-acp' ? { env: { ...process.env, PROXION_CSS_ACP: '1' } } : {}) });
       results.push(r);
       const label = r.status === 'passed' ? 'pass' : (r.status === 'skipped' ? 'SKIP' : 'FAIL');
       write(`${label}${r.required && r.status === 'skipped' ? ' (required)' : ''}  ${r.secs}s\n`);

@@ -126,6 +126,20 @@ try {
   const A = await startGateway(css.url, alice);
   ok('Alice\'s gateway is up and connected to her pod');
 
+  // Provisioning must work before a desktop tab has supplied its own policies.
+  const startupInbox = alice.storageRoot + 'proxion/dm-inbox/';
+  let startupDrop;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const response = await fetch(startupInbox, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"startupProbe":true}' });
+    if (response.ok) { startupDrop = new URL(response.headers.get('location'), startupInbox).href; break; }
+    await sleep(500);
+  }
+  if (!startupDrop) throw Error('gateway inbox was not appendable before the desktop opened');
+  const privateDrop = await fetch(startupDrop);
+  if (![401, 403].includes(privateDrop.status)) throw Error('startup drop was publicly readable');
+  if (!(await aliceSession.fetch(startupDrop, { method: 'DELETE' })).ok) throw Error('startup drop cleanup failed');
+  ok(`${css.accessControl} inbox accepts a private drop before the desktop UI opens`);
+
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
   const pageA = await (await browser.createBrowserContext()).newPage();
   const pageB = await (await browser.createBrowserContext()).newPage();

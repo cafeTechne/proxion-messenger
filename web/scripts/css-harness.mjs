@@ -14,6 +14,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createServer, connect as netConnect } from 'node:net';
 import { randomUUID, createHash } from 'node:crypto';
 import { SignJWT, exportJWK, generateKeyPair } from 'jose';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export function freePort() {
     return new Promise((res, rej) => {
@@ -44,7 +47,9 @@ async function waitForPort(port, timeoutMs, checkProcess) {
 
 // Start CSS (in-memory backend) on a free port. Returns { url, port, stop() } or
 // throws/returns null if CSS cannot be launched (offline, npx blocked).
-export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientId = false } = {}) {
+export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientId = false,
+    accessControl = process.env.PROXION_CSS_ACP === '1' ? 'acp' : 'wac' } = {}) {
+    if (!['wac', 'acp'].includes(accessControl)) throw Error('Unsupported CSS access-control model');
     const port = await freePort();
     // Sanitize the child env. Under vitest, NODE_ENV=test makes a CSS dependency
     // reference a `jest` global (500s with "jest is not defined"), and the vitest
@@ -62,14 +67,18 @@ export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientI
     // CI provisions a pinned CSS binary before running required gates. Local
     // runs can keep using npx without needing a global installation.
     const executable = process.env.PROXION_CSS_EXECUTABLE;
+    const dataDir = accessControl === 'acp' ? mkdtempSync(join(tmpdir(), 'proxion-css-acp-')) : null;
+    const config = dataDir ? ['-c', '@css:config/file-acp.json', '-f', dataDir] : [];
     const proc = spawn(
-        executable || 'npx', [...(executable ? [] : ['-y', '@solid/community-server']), '-p', String(port), '-l', 'warn'],
+        executable || 'npx', [...(executable ? [] : ['-y', '@solid/community-server']), ...config, '-p', String(port), '-l', 'warn'],
         // detached on POSIX puts CSS in its own process group so stop() can kill it.
         { shell: process.platform === 'win32', env, detached: process.platform !== 'win32' },
     );
     let log = '';
     let launchError = null;
-    proc.on('error', (error) => { launchError = error; });
+    const removeData = () => { if (dataDir) rmSync(dataDir, { recursive: true, force: true }); };
+    proc.once('exit', removeData);
+    proc.on('error', (error) => { launchError = error; removeData(); });
     proc.stdout.on('data', (d) => { log += d; });
     proc.stderr.on('data', (d) => { log += d; });
     // Kill the whole tree: npx runs CSS as a grandchild (under cmd.exe on
@@ -96,6 +105,7 @@ export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientI
     return {
         url: `http://localhost:${port}`,
         port,
+        accessControl,
         stop,
         _log: () => log,
     };

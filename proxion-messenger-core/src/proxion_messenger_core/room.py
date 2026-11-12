@@ -587,7 +587,7 @@ def set_room_acl(
     str
         The stash:// ACL path (room.stash_root + ".acl").
     """
-    from .acp import detect_acl_mode, set_acp_policy
+    from .acp import detect_acl_mode, set_acp_multi_policy
     from .solid_client import _assert_safe_webid
 
     _assert_safe_webid(owner_webid)
@@ -595,15 +595,12 @@ def set_room_acl(
         _assert_safe_webid(_w)
 
     # Detect ACL mode (ACP vs WAC)
-    mode = detect_acl_mode(owner_client, room.stash_root)
+    mode = detect_acl_mode(owner_client, room.stash_root, strict=True)
 
     member_modes = ["Read"] if room.read_only else ["Read", "Append"]
 
     if mode == "acp":
-        acr_url = None
-        for member_webid in member_webids:
-            acr_url = set_acp_policy(owner_client, room.stash_root, owner_webid, member_webid, member_modes)
-        return acr_url if acr_url else room.stash_root.rstrip("/") + ".acr"
+        return set_acp_multi_policy(owner_client, room.stash_root, owner_webid, member_webids, member_modes)
 
     # WAC path
     member_mode_str = "acl:Read, acl:Append" if not room.read_only else "acl:Read"

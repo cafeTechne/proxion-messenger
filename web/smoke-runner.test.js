@@ -34,6 +34,16 @@ describe('smoke prerequisite results', () => {
     expect(result.exitCode).toBe(0);
     expect(output.join('')).toContain(`0 passed, ${GROUPS.pod.length} skipped, 0 failed.`);
   });
+  it('requires ACP checks with the explicit ACP server configuration', async () => {
+    const run = vi.fn(async (file, { required }) => ({ file, required, status: 'skipped', secs: 0, out: 'missing ACP server' }));
+    const result = await runGroups(['pod-acp'], { run, write: () => {}, required: false });
+    expect(result.exitCode).toBe(1);
+    expect(run).toHaveBeenCalledTimes(GROUPS['pod-acp'].length);
+    for (const [, options] of run.mock.calls) {
+      expect(options.required).toBe(true);
+      expect(options.env.PROXION_CSS_ACP).toBe('1');
+    }
+  });
 
   it('runs the required subset only once when all groups are selected', () => {
     expect(selectGroups(['all'])).toContain('pod');

@@ -311,3 +311,34 @@ pending work. Room targets and legacy gateway DMs are excluded from private
 media forwarding. Existing text forwarding retains its previous behavior.
 The browser DM and both cross-mode DM journeys verify forwarding with new keys,
 exact downloaded bytes, durable retries, and playable forwarded voice notes.
+
+## Automated ACP access checks
+
+`npm run smoke:acp` starts isolated CSS 7 servers using their ACP file-storage
+configuration, checks the advertised model, and runs required permission and
+browser/desktop journeys. Temporary pod data is removed when the server exits.
+`PROXION_CSS_ACP=1` also selects ACP for individual pod smokes; the default remains
+WAC. CI runs the WAC room group and the ACP group, treating missing prerequisites
+as a failure rather than silently skipping either target.
+
+Coverage includes all four browser inbox types accepting public drops while
+protecting listings and dropped resources; desktop inbox availability before the
+UI opens; full-size shared and private attachments; encrypted forwarding; member
+removal; retained owner access; and approval retry after reload. The standalone
+permission smoke also invokes the Python DPoP client against the real server,
+checking JSON-LD and Turtle room policies with two members and inherited child
+access, then revocation, empty membership and read-only access.
+
+The Python ACP writer now resolves internal stash URIs to HTTP resource identities,
+uses the discovered same-origin ACR location, and writes the complete membership
+snapshot once. Previously each member overwrote the same ACR, and empty membership
+wrote nothing. Both encodings now apply grants to child resources. Model detection
+recognizes CSS's `.acr` target advertised with `rel="acl"`, as well as explicit ACP
+relations. Failed metadata probes stop grant writes and remain retryable. These
+checks establish CSS ACP compatibility; they do not certify an Inrupt ESS deployment.
+
+Presence publication also uses the discovered model. It previously wrote WAC
+authorization into an ACP resource, leaving contacts unable to read heartbeats.
+The ACP grant now provides public Read while preserving owner updates; policy
+publication failures remain retryable. Live checks cover public reads, denied
+peer writes, and presence displayed by both browser and desktop clients.
