@@ -47,6 +47,7 @@ export function closedAppPushStatus({ origin, permission } = {}) {
 }
 
 export function createPush({ getSocket }) {
+    let generation = 0, enabling = null, enablingGeneration = null, disabling = null;
     // VAPID public key is base64url; PushManager wants a Uint8Array.
     function _urlB64ToUint8Array(b64) {
         const padding = "=".repeat((4 - (b64.length % 4)) % 4);
@@ -63,6 +64,24 @@ export function createPush({ getSocket }) {
     // this is a no-op. Returns true if a subscription was registered this call.
     // Safe to call on every connect.
     async function enablePush() {
+        const requested = generation;
+        if (disabling) { await disabling; return requested === generation ? enablePush() : false; }
+        if (enabling) {
+            if (enablingGeneration === requested) return enabling;
+            await enabling;
+            return requested === generation ? enablePush() : false;
+        }
+        enablingGeneration = requested;
+        const pending = registerPush(requested).finally(() => { if (enabling === pending) enabling = null; });
+        enabling = pending;
+        return pending;
+    }
+
+    async function registerPush(requested) {
+        let created = null, registered = false;
+        const socket = getSocket();
+        const current = () => requested === generation && getSocket() === socket
+            && socket?.readyState === WebSocket.OPEN && Notification.permission === "granted";
         try {
             if (!("serviceWorker" in navigator) || !("PushManager" in window) ||
                 typeof Notification === "undefined") {
@@ -71,34 +90,51 @@ export function createPush({ getSocket }) {
             const perm = Notification.permission;
             if (perm !== "granted") return false;
 
+            if (!current()) return false;
             const reg = await navigator.serviceWorker.ready;
+            if (!current()) return false;
             const resp = await fetch(gatewayUrl("/vapid-public-key"));
             if (!resp.ok) return false;
             const { publicKey } = await resp.json();
             if (!publicKey) return false;
 
+            if (!current()) return false;
+            const key = _urlB64ToUint8Array(publicKey);
             let sub = await reg.pushManager.getSubscription();
+            if (!current()) return false;
+            const existing = sub?.options?.applicationServerKey;
+            const bytes = existing ? new Uint8Array(existing.buffer || existing, existing.byteOffset || 0, existing.byteLength) : null;
+            const keyChanged = bytes && (bytes.length !== key.length || bytes.some((b, i) => b !== key[i]));
+            if (sub && ((sub.expirationTime != null && sub.expirationTime <= Date.now()) || keyChanged)) {
+                if (!await sub.unsubscribe()) return false;
+                sub = null;
+            }
+            if (!current()) return false;
             if (!sub) {
                 sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
-                    applicationServerKey: _urlB64ToUint8Array(publicKey),
+                    applicationServerKey: key,
                 });
+                created = sub;
             }
+            if (!current()) return false;
             const json = sub.toJSON();
             const keys = json.keys || {};
-            const socket = getSocket();
-            if (socket && socket.readyState === WebSocket.OPEN && keys.p256dh && keys.auth) {
+            if (current() && keys.p256dh && keys.auth) {
                 socket.send(JSON.stringify({
                     cmd: "subscribe_push",
                     endpoint: sub.endpoint,
                     p256dh_b64: keys.p256dh,
                     auth_b64: keys.auth,
                 }));
+                registered = true;
                 return true;
             }
             return false;
         } catch (_) {
             return false;
+        } finally {
+            if (created && !registered) { try { await created.unsubscribe(); } catch { /* retry on next connect */ } }
         }
     }
 
@@ -111,7 +147,15 @@ export function createPush({ getSocket }) {
 
     // Stop closed-app pushes: drop the gateway's copy and the browser's own
     // subscription. Before this, turning notifications off left both in place.
-    async function disablePush() {
+    function disablePush() {
+        generation++;
+        if (disabling) return disabling;
+        const pending = unregisterPush().finally(() => { if (disabling === pending) disabling = null; });
+        disabling = pending;
+        return pending;
+    }
+
+    async function unregisterPush() {
         let id = null;
         try { id = localStorage.getItem(SUB_ID_KEY); localStorage.removeItem(SUB_ID_KEY); } catch { /* ignore */ }
         const socket = getSocket();

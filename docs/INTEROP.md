@@ -61,6 +61,11 @@ so an abrupt crash before those writes commit can still lose a received message.
   Push delivery remains best-effort once queued. Scan progress is in memory, and the
   first scan after gateway restart establishes a baseline rather than alerting for old
   inbox items. Test: `npm run smoke:cross-mode-call`.
+  Browser push setup renews subscriptions that report local expiry or use a
+  different gateway VAPID key. Concurrent setup attempts share one registration;
+  disabling notifications or changing the socket prevents late registration and
+  removes a newly created unused subscription. Re-enabling waits for teardown.
+  Provider-side expiry responses and gateway restart recovery remain separate checks.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.
