@@ -102,6 +102,12 @@ describe('createPodIo', () => {
         expect(JSON.parse(put[1].body)).toEqual({ version: 1, signer: 'did:key:zDev', account_did: null });
     });
 
+    it('requires a readable signer policy when publication gates device readiness', async () => {
+        const fetch = vi.fn(async (url, options) => res(url.endsWith('.acl') ? 403 : 201));
+        expect(await io(fetch).podPublishSigner('did:key:zDev', null, { requirePublic: true })).toBe(false);
+        expect(await io(fetch).podPublishSigner('did:key:zDev')).toBe(true);
+    });
+
     it('reads presence with the server Last-Modified', async () => {
         const lm = 'Tue, 01 Sep 2026 10:00:00 GMT';
         const fetch = vi.fn(async () => res(200, JSON.stringify({ v: 1, status: 'online', heartbeat: 5 }), { 'Last-Modified': lm }));

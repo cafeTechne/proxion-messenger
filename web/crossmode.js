@@ -40,6 +40,7 @@ export function createCrossMode({
     isAllowedCaller = isKnownSender,
 }) {
     let _dm = null, _presence = null, _calls = null, _callActive = false, _startedFor = null;
+    let _generation = 0, _starting = null, _startingFor = null;
     let _state = { ready: false, reason: 'unknown', webid: null, pod_root: null, conflict: false };
 
     const bridge = createGwPodBridge({ send, onInfo: (info) => { _onInfo(info).catch(() => {}); } });
@@ -58,46 +59,77 @@ export function createCrossMode({
         try { onStateChange(_state); } catch { /* UI only */ }
     }
 
-    async function _publishIdentity(info) {
+    async function _publishIdentity(info, current) {
         const io = bridge.io;
+        const pub = getMyPub();
+        if (!pub) throw new Error('encryption key unavailable');
         // One device consumes a WebID's drop boxes: the one named in signer.json.
         // Taking it over is expected (this device signed in last), but say so.
         const prev = await io.podFetchPeerSigner(info.pod_root).catch(() => null);
+        if (!current()) throw new Error('session changed');
         const conflict = !!(prev && prev.signer && prev.signer !== getClientDid());
         // No account did: a gateway-issued cert would let any registering socket
         // speak for the account (see docs), so the signer stands on its own.
-        await io.podPublishSigner(getClientDid(), null);
-        const pub = getMyPub();
-        if (pub) {
-            const url = info.pod_root + X25519_PUB_PATH;
-            const res = await bridge.fetch(url, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ version: 1, pub }),
-            }).catch(() => null);
-            if (res && res.ok) await io.podPublishIdentityAcl(url);
-        }
+        if (!await io.podPublishSigner(getClientDid(), null, { requirePublic: true })) throw new Error('signer publication failed');
+        if (!current()) throw new Error('session changed');
+        const url = info.pod_root + X25519_PUB_PATH;
+        const res = await bridge.fetch(url, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version: 1, pub }),
+        }).catch(() => null);
+        if (!current()) throw new Error('session changed');
+        if (!res?.ok || !await io.podPublishIdentityAcl(url)) throw new Error('encryption key publication failed');
         return conflict;
     }
 
-    async function _onInfo(info) {
+    function _stop() {
+        _generation++;
+        _dm?.stop(); _presence?.stop(); _calls?.stop();
+        _dm = _presence = _calls = null;
+        _startedFor = _startingFor = _starting = null;
+    }
+
+    function _onInfo(info) {
         if (!info.ready) {
-            _setState({ ready: false, reason: info.reason || 'not_ready', webid: null, pod_root: null });
-            return;
+            _stop();
+            _setState({ ready: false, started: false, reason: info.reason || 'not_ready', webid: null, pod_root: null, conflict: false });
+            return Promise.resolve();
         }
-        _setState({ ready: true, reason: '', webid: info.webid, pod_root: info.pod_root });
-        if (_startedFor === info.webid) {
+        const key = `${info.webid}\n${info.pod_root}`;
+        if (_startingFor === key) return _starting;
+        if (_startedFor === key) {
             bridge.resubscribe();
-            _dm && _dm.drainOnce().catch(() => {});
-            _calls && _calls.drainOnce().catch(() => {});
-            return;
+            _dm?.drainOnce().catch(() => {});
+            _calls?.drainOnce().catch(() => {});
+            return Promise.resolve();
         }
-        _startedFor = info.webid;
-        const conflict = await _publishIdentity(info).catch(() => false);
-        _setState({ conflict });
+        _stop();
+        const generation = _generation;
+        _setState({ ready: false, started: false, reason: 'identity_pending', webid: info.webid, pod_root: info.pod_root, conflict: false });
+        _startingFor = key;
+        const starting = _start(info, generation).then(() => {
+            if (generation === _generation) _startedFor = key;
+        }).catch(() => {
+            if (generation === _generation) {
+                _stop();
+                _setState({ ready: false, started: false, reason: 'identity_failed' });
+            }
+        }).finally(() => {
+            if (_starting === starting) _starting = _startingFor = null;
+        });
+        _starting = starting;
+        return starting;
+    }
+
+    async function _start(info, generation) {
+        const current = () => generation === _generation;
+        const conflict = await _publishIdentity(info, current);
+        if (!current()) return;
+        const dispatch = (ev) => { if (current()) handleEvent(ev); };
         _dm = createWebDm({
             pod: bridge.io, e2e, notify,
-            handleEvent: (ev) => handleEvent(ev),
-            getSelfWebId: () => _state.webid,
+            handleEvent: dispatch,
+            getSelfWebId: () => info.webid,
             getDisplayName,
             getMyDeviceId: () => getClientDid(),
             persistMessage, receipts, signEnvelope,
@@ -110,14 +142,14 @@ export function createCrossMode({
         });
         _presence = createWebPresence({
             pod: bridge.io, notify,
-            handleEvent: (ev) => handleEvent(ev),
+            handleEvent: dispatch,
             getContacts: () => (getContacts() || []).filter(isDmPeerWebId),
             peerPodRoot: (w) => peerPodRootFromWebId(w),
         });
         _calls = createWebCalls({
             pod: bridge.io, notify,
-            handleEvent: (ev) => handleEvent(ev),
-            getSelfWebId: () => _state.webid,
+            handleEvent: dispatch,
+            getSelfWebId: () => info.webid,
             getDisplayName,
             peerPodRoot: (w) => peerPodRootFromWebId(w),
             isBlocked,
@@ -126,9 +158,11 @@ export function createCrossMode({
         });
         _calls.setActive(_callActive);
         await _dm.start().catch(() => {});
+        if (!current()) return;
         _presence.start();
         await _calls.start().catch(() => {});
-        _setState({ started: true });   // identity published: pod rooms may start (crossrooms.js)
+        if (!current()) return;
+        _setState({ ready: true, reason: '', conflict, started: true });   // identity published: pod rooms may start (crossrooms.js)
     }
 
     // A call signal for a WebID contact goes to their call-inbox. No gateway
@@ -154,10 +188,11 @@ export function createCrossMode({
         const to = webIdTarget(cmd);
         if (to) {
             if (_dm && _state.ready) {
+                const generation = _generation, self = getSelfId();
                 _dm.dropDm(cmd).then((ok) => {
-                    if (ok) handleEvent({
+                    if (ok && generation === _generation) handleEvent({
                         type: 'message', message_id: cmd.message_id, thread_id: cmd.thread_id || to,
-                        from_webid: getSelfId(), timestamp: new Date().toISOString(),
+                        from_webid: self, timestamp: new Date().toISOString(),
                         source: 'local_dm', _podEcho: true,
                     });
                 }).catch(() => {});
@@ -176,7 +211,7 @@ export function createCrossMode({
     // The socket dropped or reconnected: fail requests in flight, ask again.
     function onReconnect() {
         bridge.reset();
-        _setState({ ready: false, reason: 'disconnected' });
+        _onInfo({ ready: false, reason: 'disconnected' });
         bridge.requestInfo();
     }
 

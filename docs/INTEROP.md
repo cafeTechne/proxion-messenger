@@ -57,6 +57,12 @@ so an abrupt crash before those writes commit can still lose a received message.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.
+  The desktop reports cross-mode readiness only after publishing its signing
+  identity, encryption key, and their public-read access rules. A rejected write
+  leaves browser-contact routing unavailable and shows a publication error in
+  Settings; reconnect retries publication. Duplicate bridge replies share one
+  startup, and disconnect/account changes stop old inbox watches and discard late
+  call events. This does not add browser device pairing or multi-device fanout.
 - **Files and voice messages:** encrypted pod-backed attachments up to 2 MiB and
   recorded voice notes work through the browser and desktop chat controls. Source
   drafts survive upload/delivery failures and reload, with explicit Retry/Cancel.

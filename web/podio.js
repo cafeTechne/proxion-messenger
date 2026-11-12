@@ -287,7 +287,7 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
     // certified under, if any) next to the public x25519 key. A recipient fetches it
     // from the SENDER's pod to decide whether a DM's envelope signer is allowed to
     // speak for that WebID: an attacker cannot write here, so it is the trust anchor.
-    async function podPublishSigner(signerDid, accountDid) {
+    async function podPublishSigner(signerDid, accountDid, { requirePublic = false } = {}) {
         const root = _root();
         if (!root || !signerDid || !_loggedIn()) return false;
         const url = root.replace(/\/?$/, '/') + SIGNER_PATH;
@@ -301,9 +301,10 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
             // The signer is a trust anchor a PEER must read from OUR pod, so give it a
             // public-read ACL; without it the file inherits proxion/'s owner-only default
             // and a peer 403s, so R107 sender verification never reaches sender_verified
-            // across pods. Best-effort (the file is already saved), logged on failure.
-            await podPublishIdentityAcl(url);
-            return true;
+            // across pods. Callers that gate device readiness require public Read;
+            // legacy callers retain best-effort publication (the file is saved).
+            const published = await podPublishIdentityAcl(url);
+            return published || !requirePublic;
         } catch (err) {
             console.warn('[pod] podPublishSigner failed:', err);
             return false;

@@ -30,6 +30,7 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
     let _active = false;
     let _draining = false;
     let _drainAgain = false;
+    let _generation = 0;
 
     // Turn an outbound voice.js command into a signal and drop it to the callee.
     // The gateway would normally stamp the sender; here we add from/caller_webid
@@ -56,11 +57,14 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
         // and re-run once if a notification arrived mid-drain.
         if (_draining) { _drainAgain = true; return; }
         _draining = true;
+        const generation = _generation;
         try {
             do {
                 _drainAgain = false;
                 const sigs = await pod.podReadSignals();
+                if (generation !== _generation) return;
                 for (const { url, signal } of sigs) {
+                    if (generation !== _generation) return;
                     try {
                         // A blocked caller never rings: drop their signals unread.
                         const blocked = !!(signal && isBlocked && (isBlocked(signal.from_webid) || isBlocked(signal.caller_webid)));
@@ -72,6 +76,7 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
                     } catch (err) {
                         console.warn('[webcalls] signal handling failed:', err);
                     }
+                    if (generation !== _generation) return;
                     await pod.podDeleteSignal(url);
                 }
             } while (_drainAgain);
@@ -81,11 +86,16 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
     }
 
     async function start() {
+        const generation = _generation;
         const inbox = await pod.podEnsureCallInbox();
+        if (generation !== _generation) return null;
         _inbox = inbox;
         await drainOnce();
+        if (generation !== _generation) return null;
         if (inbox && notify && notify.watchResource) {
-            _unsub = notify.watchResource(inbox, () => { drainOnce().catch(() => {}); }, { fast: _active });
+            _unsub = notify.watchResource(inbox, () => {
+                if (generation === _generation) drainOnce().catch(() => {});
+            }, { fast: _active });
         }
         return inbox;
     }
@@ -101,6 +111,9 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
     }
 
     function stop() {
+        _generation++;
+        _drainAgain = false;
+        _inbox = null;
         if (_unsub) { try { _unsub(); } catch { /* ignore */ } _unsub = null; }
     }
 

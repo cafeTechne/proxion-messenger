@@ -18,7 +18,8 @@ function harness({ routes = {}, prevSigner = null, known = () => true } = {}) {
         if (m.method === 'GET' && m.url === ROOT + 'proxion/identity/signer.json' && prevSigner) {
             r = { status: 200, body: JSON.stringify({ version: 1, signer: prevSigner, account_did: null }) };
         }
-        r = r || (m.method === 'GET' ? { status: 404 } : { status: 201 });
+        r = r || (m.method === 'GET' && m.url.endsWith('.acl')
+            ? { status: 200, body: 'acl:Read' } : m.method === 'GET' ? { status: 404 } : { status: 201 });
         setTimeout(() => cm.handleEvent({ type: 'pod_fetch_result', req_id: m.req_id, headers: {}, body: '', ...r }), 0);
     };
     cm = createCrossMode({
@@ -41,7 +42,7 @@ const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 async function ready(h) {
     h.cm.handleEvent({ type: 'pod_bridge', ready: true, webid: ME, pod_root: ROOT, consumer: true });
-    for (let i = 0; i < 100 && !h.sent.some((m) => m.cmd === "pod_watch" && m.url.endsWith("presence.json")); i++) await settle(10);
+    for (let i = 0; i < 100 && !h.cm.isReady(); i++) await settle(10);
 }
 
 describe('webIdTarget', () => {
@@ -85,6 +86,67 @@ describe('createCrossMode', () => {
         const h = harness({ prevSigner: 'did:key:zOtherDevice' });
         await ready(h);
         expect(h.cm.state().conflict).toBe(true);
+    });
+
+    it.each([
+        'PUT ' + ROOT + 'proxion/identity/signer.json',
+        'PUT ' + ROOT + 'proxion/identity/signer.json.acl',
+        'PUT ' + ROOT + 'proxion/identity/x25519-pub.json',
+        'PUT ' + ROOT + 'proxion/identity/x25519-pub.json.acl',
+    ])('stays unavailable after rejected publication and retries on reconnect: %s', async route => {
+        const h = harness({ routes: { [route]: { status: 403 } } });
+        h.cm.handleEvent({ type: 'pod_bridge', ready: true, webid: ME, pod_root: ROOT });
+        await vi.waitFor(() => expect(h.cm.state().reason).toBe('identity_failed'));
+        expect(h.cm.isReady()).toBe(false);
+        expect(h.cm.state().started).toBe(false);
+        expect(h.sent.some(m => m.cmd === 'pod_watch')).toBe(false);
+        h.cm.route({ cmd: 'voice_invite', target_webid: BOB, session_id: 'failed' });
+        expect(h.events).toContainEqual(expect.objectContaining({ type: 'voice_unavailable' }));
+        h.setRoute(route, { status: 201 });
+        h.cm.onReconnect();
+        await ready(h);
+        expect(h.cm.isReady()).toBe(true);
+        expect(h.cm.state().started).toBe(true);
+    });
+
+    it('coalesces repeated bridge info during identity publication', async () => {
+        const h = harness();
+        const info = { type: 'pod_bridge', ready: true, webid: ME, pod_root: ROOT };
+        h.cm.handleEvent(info); h.cm.handleEvent(info);
+        await ready(h);
+        expect(h.sent.filter(m => m.method === 'PUT' && m.url.endsWith('/signer.json'))).toHaveLength(1);
+        expect(h.sent.filter(m => m.cmd === 'pod_watch' && m.url === ROOT + 'proxion/dm-inbox/')).toHaveLength(1);
+    });
+
+    it('abandons identity publication when the bridge disconnects', async () => {
+        const h = harness();
+        h.cm.handleEvent({ type: 'pod_bridge', ready: true, webid: ME, pod_root: ROOT });
+        h.cm.handleEvent({ type: 'pod_bridge', ready: false, reason: 'not_owner' });
+        await settle();
+        expect(h.cm.state()).toMatchObject({ ready: false, started: false, reason: 'not_owner', webid: null });
+        expect(h.sent.some(m => m.method === 'PUT' || m.cmd === 'pod_watch')).toBe(false);
+    });
+
+    it('keeps publication bound to the account that is still connected', async () => {
+        const h = harness();
+        h.cm.handleEvent({ type: 'pod_bridge', ready: true, webid: ME, pod_root: ROOT });
+        h.cm.handleEvent({ type: 'pod_bridge', ready: true, webid: BOB, pod_root: 'https://pod.example/bob/' });
+        await vi.waitFor(() => expect(h.cm.isReady()).toBe(true));
+        expect(h.cm.state().webid).toBe(BOB);
+        expect(h.sent.some(m => m.method === 'PUT' && m.url.startsWith(ROOT))).toBe(false);
+        expect(h.sent.some(m => m.method === 'PUT' && m.url === 'https://pod.example/bob/proxion/identity/signer.json')).toBe(true);
+    });
+
+    it('stops inbox watches and outbound routing when ownership is withdrawn', async () => {
+        const h = harness();
+        await ready(h);
+        h.cm.handleEvent({ type: 'pod_bridge', ready: false, reason: 'not_owner' });
+        expect(h.cm.isReady()).toBe(false);
+        expect(h.sent.filter(m => m.cmd === 'pod_unwatch').map(m => m.url))
+            .toEqual(expect.arrayContaining([ROOT + 'proxion/dm-inbox/', ROOT + 'proxion/call-inbox/']));
+        const count = h.sent.length;
+        h.cm.route({ cmd: 'local_dm', target_webid: BOB, message_id: 'old', content: 'CT' });
+        expect(h.sent).toHaveLength(count);
     });
 
     it('drops a WebID DM into the peer pod, signed, and confirms only on success', async () => {

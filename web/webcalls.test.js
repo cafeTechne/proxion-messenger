@@ -217,3 +217,28 @@ describe('a WebID call verifies against the signer.json of the contact', () => {
         expect(await verdict(signers, forger)).toBe('unverifiable');
     });
 });
+
+
+describe('call inbox shutdown', () => {
+    it('does not install a late subscription after stopping during startup', async () => {
+        const h = harness();
+        let finish;
+        h.pod.podEnsureCallInbox.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+        const start = h.calls.start();
+        h.calls.stop();
+        finish('https://me/proxion/call-inbox/');
+        expect(await start).toBe(null);
+        expect(h.notify.watchResource).not.toHaveBeenCalled();
+    });
+    it('does not ring or delete a signal returned after stopping', async () => {
+        const h = harness();
+        let finish;
+        h.pod.podReadSignals.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+        const drain = h.calls.drainOnce();
+        h.calls.stop();
+        finish([{ url: 'https://me/proxion/call-inbox/late', signal: { type: 'voice_invite' } }]);
+        await drain;
+        expect(h.events).toEqual([]);
+        expect(h.deleted).toEqual([]);
+    });
+});
