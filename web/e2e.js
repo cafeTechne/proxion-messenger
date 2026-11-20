@@ -599,15 +599,39 @@ export async function loadRatchetState(peerId) {
     return best;
 }
 
-export async function saveRatchetState(peerId, state) {
-    state.ver = (Number.isSafeInteger(state.ver) ? state.ver : 0) + 1;
-    _stateCache[peerId] = state;
-    if (!_stateEncKey) return;
-    const enc = await _encState(state);
-    localStorage.setItem(e2eScopedKey('proxion_e2e_state_' + peerId), enc);
-
+export async function saveRatchetState(peerId, state, { current = () => true } = {}) {
+    const storageKey = e2eScopedKey('proxion_e2e_state_' + peerId);
+    const next = { ...state, ver: (Number.isSafeInteger(state.ver) ? state.ver : 0) + 1 };
     const urls = _statePodUrls(peerId);
-    if (urls) _queuePodWrite(peerId, urls.device, enc);
+    if (!current()) throw new E2EDecryptError('Receive context changed');
+    if (_stateEncKey) {
+        const enc = await _encState(next);
+        if (!current() || storageKey !== e2eScopedKey('proxion_e2e_state_' + peerId)) {
+            throw new E2EDecryptError('Receive context changed');
+        }
+        // The encrypted recovery copy and spent key advance share this atomic write.
+        // A failed write must leave the live session retryable too.
+        localStorage.setItem(storageKey, enc);
+        _stateCache[peerId] = next;
+        if (urls) _queuePodWrite(peerId, urls.device, enc);
+    } else {
+        _stateCache[peerId] = next;
+    }
+}
+
+// Recovery entries contain plaintext only inside the existing encrypted state.
+// Remove one only after history and a durable exact-envelope receipt were saved.
+export function finishDmReceive(peerId, receiveId, current = () => true) {
+    return _serialize(peerId, async () => {
+        if (!current()) return false;
+        const state = await loadRatchetState(peerId);
+        if (!current()) return false;
+        if (state?.pendingReceives?.[receiveId] === undefined) return true;
+        const next = { ...state, pendingReceives: { ...state.pendingReceives } };
+        delete next.pendingReceives[receiveId];
+        await saveRatchetState(peerId, next, { current });
+        return true;
+    });
 }
 
 // ── Internal DH ratchet helpers ───────────────────────────────────────────────
@@ -815,7 +839,20 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
         throw new E2EDecryptError('invalid msg_num or pn');
     }
 
+    const current = opts.current || (() => true);
+    if (!current()) throw new E2EDecryptError('Receive context changed');
+    const receiveId = opts.receiveId;
+    if (receiveId !== undefined && (typeof receiveId !== 'string' || !/^[a-f0-9]{64}$/.test(receiveId))) {
+        throw new E2EDecryptError('Invalid receive fingerprint');
+    }
     let state = await loadRatchetState(peerId);
+    if (!current()) throw new E2EDecryptError('Receive context changed');
+    if (receiveId && state?.pendingReceives?.[receiveId] !== undefined) {
+        return state.pendingReceives[receiveId];
+    }
+    if (receiveId && Object.keys(state?.pendingReceives || {}).length >= 64) {
+        throw new E2EDecryptError('Pending receive recovery is full');
+    }
 
     // Work on a COPY and commit only after the GCM tag verifies (saveRatchetState
     // below). loadRatchetState hands back the live in-memory cached object by
@@ -866,8 +903,10 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
             { name: 'AES-GCM', iv: b64uDec(nonceB64u) },
             await _aesKey(msgKey),
             b64uDec(ciphertextB64u));
-        await saveRatchetState(peerId, state);
-        return _DEC.decode(plain);
+        const text = _DEC.decode(plain);
+        if (receiveId) state.pendingReceives = { ...state.pendingReceives, [receiveId]: text };
+        await saveRatchetState(peerId, state, { current });
+        return text;
     } catch {
         throw new E2EDecryptError('AES-GCM decryption failed for msgNum=' + msgNum);
     }

@@ -9,7 +9,7 @@ const ROOT = 'https://pod.example/me/';
 const BOB = 'https://pod.example/bob/profile/card#me';
 
 // A fake gateway: answers pod_fetch from a route table, records everything.
-function harness({ routes = {}, prevSigner = null, known = () => true, fetchAndCachePeerPub } = {}) {
+function harness({ routes = {}, prevSigner = null, known = () => true, fetchAndCachePeerPub, onEvent, e2eExtras = {}, receipts } = {}) {
     const sent = [], events = [];
     let cm = null;
     const answer = (m) => {
@@ -24,12 +24,12 @@ function harness({ routes = {}, prevSigner = null, known = () => true, fetchAndC
     };
     cm = createCrossMode({
         send: (m) => { sent.push(m); answer(m); },
-        handleEvent: (ev) => events.push(ev),
+        handleEvent: (ev) => { events.push(ev); return onEvent?.(ev); },
         getClientDid: () => 'did:key:zDevice',
         getDisplayName: () => 'Me',
         signEnvelope: async () => ({ signer: 'did:key:zDevice', sig: 'S' }),
         verifyDmSig: async () => true, verifyFanoutSig: async () => true, verifyDeviceCert: async () => null,
-        e2e: { cachePeerPub: vi.fn(), ratchetDecrypt: vi.fn(), hasSession: async () => false },
+        e2e: { cachePeerPub: vi.fn(), ratchetDecrypt: vi.fn(), hasSession: async () => false, ...e2eExtras }, receipts,
         isBlocked: () => false, isKnownSender: (w) => known(w), onMessageRequest: vi.fn(),
         getContacts: () => [BOB, 'did:key:zGatewayContact'],
         getMyPub: () => 'PUB', fetchAndCachePeerPub,
@@ -65,6 +65,30 @@ describe('createCrossMode', () => {
         h.cm.onReconnect();
         expect(via.current()).toBe(false);
     });
+    it('awaits the fanout persistence result before acknowledging a bridge drop', async () => {
+        let persisted = false;
+        const finish = vi.fn(async () => true);
+        const h = harness({ onEvent: async () => ({ persisted }), e2eExtras: { finishDmReceive: finish },
+            receipts: { has: async () => false, hasSpace: async () => true, remember: async () => true, acknowledge: async () => true },
+            routes: { 'GET https://pod.example/bob/proxion/identity/signer.json': {
+                status: 200, body: JSON.stringify({ version: 1, signer: 'did:key:zBobDevice', account_did: null }) } },
+        });
+        await ready(h);
+        const inbox = ROOT + 'proxion/dm-inbox/', url = inbox + 'fanout';
+        h.setRoute('GET ' + inbox, { status: 200, body: JSON.stringify({ '@id': inbox, contains: [{ '@id': url }] }) });
+        h.setRoute('GET ' + url, { status: 200, body: JSON.stringify({ kind: 'fanout', from_webid: BOB,
+            to_device_id: 'did:key:zDevice', message_id: 'fanout', signer: 'did:key:zBobDevice', sig: 'S', payload: { e2e: true, content: 'CT' } }) });
+        await h.cm.drainOnce();
+        expect(h.events.some(event => event.type === 'dm_fanout')).toBe(true);
+        expect(h.sent.some(message => message.method === 'DELETE' && message.url === url)).toBe(false);
+        expect(finish).not.toHaveBeenCalled();
+        persisted = true;
+        await h.cm.drainOnce();
+        expect(finish).toHaveBeenCalledTimes(1);
+        expect(h.sent.some(message => message.method === 'DELETE' && message.url === url)).toBe(true);
+        h.cm.onReconnect();
+    });
+
     it('leaves gateway traffic alone', () => {
         const { cm } = harness();
         expect(cm.route({ cmd: 'local_dm', target_webid: 'did:key:zPeer', content: 'x' })).toBe(false);

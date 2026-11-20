@@ -114,6 +114,13 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         try { context.durable = await receipts.remember(context.scope, context.fingerprint, context.url); context.pending = context.durable; }
         catch { /* preserve live delivery if local storage is unavailable */ }
     }
+    const receivePeer = env => env.kind === 'fanout'
+        ? env.from_webid + '#' + (env.payload?.from_device_id || env.from_webid) : env.from_webid;
+    async function _finishRecovery(context, peer) {
+        if (!context.recoverable) return true;
+        if (!context.durable || !context.current()) return false;
+        return await e2e.finishDmReceive(peer, context.fingerprint, context.current);
+    }
     async function _acknowledge(url, context) {
         if (!context.current()) return;
         _consumed.set(context.key, { acknowledged: false, url });
@@ -139,7 +146,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // Alternate bounded pages so an unavailable resource in live memory
         // cannot starve receipts restored from storage (or the reverse).
         const prefix = accountScope + '\n';
-        const memory = [..._consumed].filter(([key, row]) => key.startsWith(prefix) && !row.acknowledged)
+        const memory = [..._consumed].filter(([key, row]) => key.startsWith(prefix) && !row.acknowledged && !row.recovering)
             .map(([key, row]) => ({ fingerprint: key.slice(prefix.length), url: row.url })).sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
         let memoryStart = memory.findIndex(row => row.fingerprint > memoryCursor); if (memoryStart < 0) memoryStart = 0;
         const page = memory.slice(memoryStart, memoryStart + 8);
@@ -291,9 +298,14 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
                 // Only a verified envelope may start a new ratchet session.
                 allow_session_init: verified,
                 _dmCurrent: context.current,
+                _dmReceiveId: context.recoverable ? context.fingerprint : undefined,
+                _dmReplay: !!_consumed.get(context.key)?.recovering,
             });
             if (handled === false) return;
+            if (context.recoverable) _consumed.set(context.key, { acknowledged: false, recovering: true, url });
             if (handled?.persisted !== false) await _remember(context);
+            if (context.recoverable && handled?.persisted === false) return;
+            if (!await _finishRecovery(context, receivePeer(env))) return;
             await _acknowledge(url, context);
             return;
         }
@@ -321,7 +333,8 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
                 // it was set up with can produce (the AEAD tag must verify, and a
                 // failed decrypt leaves the stored state unchanged).
                 content = await e2e.ratchetDecrypt(from, env.content, env.nonce, env.msg_num, env.ratchet_pub, env.pn || 0,
-                    { allowInit: sender_verified });
+                    { allowInit: sender_verified,
+                        ...(context.recoverable ? { receiveId: context.fingerprint, current: context.current } : {}) });
             }
         } catch (err) {
             if (err && err.name === 'E2ENoSessionError') {
@@ -356,21 +369,20 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             _persistDm: true,
             sender_verified,
         };
-        // Deliver live first: a successful decrypt has already advanced the ratchet,
-        // so this message can never be re-decrypted — it must be shown now, and the
-        // drop must go (retaining spent ciphertext buys nothing and would wedge the
-        // inbox). Persist to local history as a best effort, awaited so it lands
-        // before the drop is deleted, but NEVER gate delivery or deletion on it: a
-        // cache write failure (quota, private mode) must not hide the message or
-        // leave an undeletable, undecryptable drop.
-        // The UI handler may be asynchronous. A failure must not bypass the
-        // history write and acknowledgement after a successful decrypt.
-        try { await handleEvent(message); }
-        catch (err) { console.warn('[webdm] message handling failed:', err); }
+        // A recoverable decrypt saved plaintext with its ratchet advance. Keep
+        // the drop until history and receipt writes succeed, and show it once
+        // per live reader while those writes retry.
+        if (!_consumed.get(context.key)?.recovering) {
+            if (context.recoverable) _consumed.set(context.key, { acknowledged: false, recovering: true, url });
+            try { await handleEvent(message); }
+            catch (err) { console.warn('[webdm] message handling failed:', err); }
+        }
         if (!context.current()) return;
         let persisted = true;
         if (persistMessage) { try { persisted = await persistMessage(message) !== false; } catch { persisted = false; } }
         if (persisted) await _remember(context);
+        if (context.recoverable && !persisted) return;
+        if (!await _finishRecovery(context, from)) return;
         await _acknowledge(url, context);
     }
 
@@ -387,24 +399,29 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
                 const fingerprint = await dmEnvelopeFingerprint(d.envelope);
                 if (!current()) return;
                 const context = { scope: accountScope, fingerprint, url: d.url, key: accountScope + '\n' + fingerprint, current, durable: false };
+                context.recoverable = typeof e2e.finishDmReceive === 'function'
+                    && !!(d.envelope.kind === 'fanout' ? d.envelope.payload?.e2e : d.envelope.e2e);
                 const consumed = _consumed.get(context.key);
-                if (consumed) {
+                if (consumed && !consumed.recovering) {
                     if (!consumed.acknowledged || consumed.url !== d.url) {
                         if (receipts) { try { context.durable = await receipts.has(accountScope, fingerprint); } catch { /* memory fallback */ } }
                         await _acknowledge(d.url, context);
                     }
                     continue;
                 }
-                if (!_hasReceiptSpace()) continue;
+                if (!consumed && !_hasReceiptSpace()) continue;
                 if (receipts) {
-                    try {
-                        context.durable = await receipts.has(accountScope, fingerprint);
-                        if (!current()) return;
-                        if (context.durable) { await _acknowledge(d.url, context); continue; }
-                        if (!await receipts.hasSpace(accountScope)) continue;
-                    } catch { /* live-only fallback during local storage failure */ }
+                    try { context.durable = await receipts.has(accountScope, fingerprint); }
+                    catch { /* encrypted recovery still prevents losing a spent key */ }
+                    if (!current()) return;
+                    if (context.durable) {
+                        if (await _finishRecovery(context, receivePeer(d.envelope))) await _acknowledge(d.url, context);
+                        continue;
+                    }
+                    try { if (await receipts.hasSpace(accountScope) === false) continue; }
+                    catch { /* recovery remains until receipt storage recovers */ }
                 }
-                if (current() && _hasReceiptSpace()) await _handleEnvelope(d.url, d.envelope, context);
+                if (current() && (consumed || _hasReceiptSpace())) await _handleEnvelope(d.url, d.envelope, context);
             } catch (err) { console.warn('[webdm] drop handling failed:', err); }
         }
     }

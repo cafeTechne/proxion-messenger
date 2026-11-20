@@ -25,7 +25,7 @@ import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { dmMediaJourney } from './scripts/dm-media-journey.mjs';
-import { dmReceiptReconciliationJourney } from './scripts/dm-receipt-journey.mjs';
+import { dmReceiptReconciliationJourney, dmReceiveRecoveryJourney } from './scripts/dm-receipt-journey.mjs';
 import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount, makeAuthSession, freePort } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
@@ -263,6 +263,10 @@ try {
   step = 'external-delete';
   await dmReceiptReconciliationJourney({ sender: pageB, receiver: pageA, send,
     openReceiver: () => openThread(pageA, bob.webId), externalFetch: aliceSession.fetch, label: 'desktop receipt' });
+
+  step = 'receive-recovery';
+  await dmReceiveRecoveryJourney({ sender: pageB, receiver: pageA, send,
+    openReceiver: () => openThread(pageA, bob.webId), label: 'desktop recovery' });
 
   // Exercise the shared encrypted asset storage protocol in both directions.
   step = 'encrypted-assets';

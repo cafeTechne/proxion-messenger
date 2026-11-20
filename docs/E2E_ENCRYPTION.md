@@ -847,7 +847,27 @@ written to it. A blob at the shared path written by another device fails to decr
 and is ignored. A state with no `ver` counts as 0.
 
 The state contains the current ratchet private key as a JWK, chain keys, root key,
-skipped message keys and `ver`.
+skipped message keys and `ver`. Pod inbox receives additionally keep up to 64
+`pendingReceives` entries per peer, indexed by the exact envelope's SHA-256 digest.
+Each entry holds the decrypted message text inside the same encrypted blob as
+the advanced ratchet state (`ratchetDecrypt` with `receiveId`). That single local
+storage write commits both; if it fails, the copied receive state is not installed
+in the live cache and the ciphertext remains retryable.
+
+On a retry or reload, a matching recovery entry returns the saved plaintext
+without advancing the ratchet again. `webdm.js` retains the inbox drop until local
+history and an account/device-scoped exact-envelope receipt succeed, then
+`finishDmReceive` removes the recovery entry before attempting DELETE. A crash
+between receipt creation and cleanup resumes cleanup from the receipt. A full
+recovery journal applies backpressure instead of evicting undelivered plaintext.
+History disabled in Settings still skips permanent history; the temporary
+recovery copy is removed after the receipt is saved.
+
+This recovery applies to regular and per-device fanout DMs received through pod
+inboxes, including a gateway's pod bridge. Gateway socket delivery and secondary
+sealed events do not use this recovery journal. Pod state backup remains best
+effort; browser storage removal or loss of this device's state key can still lose
+local history and pending recovery.
 
 Peer keys are cached in localStorage as `proxion_e2e_peer_pub_<peerId>` (account
 scoped). Decrypted messages are cached in local IndexedDB for history.
@@ -957,6 +977,9 @@ sn = 24594 99591 04903 81211 44774 95312   (same for either argument order)
 (One continuous byte string, wrapped for width.)
 
 ## 14. Changelog
+
+- Unreleased: pod DM receives commit encrypted recovery text with the ratchet
+  advance and retry history/receipt persistence before inbox acknowledgement (11).
 
 - Unreleased: ratchet state is stored per device on the pod and the newest copy is
   loaded (11); skipped keys are bounded per message and in total, and expire by

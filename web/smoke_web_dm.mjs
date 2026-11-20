@@ -19,7 +19,7 @@ import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { dmMediaJourney } from './scripts/dm-media-journey.mjs';
-import { dmReceiptReconciliationJourney } from './scripts/dm-receipt-journey.mjs';
+import { dmReceiptReconciliationJourney, dmReceiveRecoveryJourney } from './scripts/dm-receipt-journey.mjs';
 import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount, makeAuthSession } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
@@ -217,6 +217,10 @@ try {
   const bobSession = await makeAuthSession(bob);
   await dmReceiptReconciliationJourney({ sender: pageA, receiver: pageB, send,
     openReceiver: () => openThread(pageB, alice.webId), externalFetch: bobSession.fetch, label: 'browser receipt' });
+
+  step = 'receive-recovery';
+  await dmReceiveRecoveryJourney({ sender: pageA, receiver: pageB, send,
+    openReceiver: () => openThread(pageB, alice.webId), label: 'browser recovery' });
 
   step = 'dm-media-ui';
   await dmMediaJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId), openReceiver: () => openThread(pageB, alice.webId), label: 'browser-dm' });

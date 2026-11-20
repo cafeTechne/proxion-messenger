@@ -5,6 +5,11 @@
  * localStorage is mocked below since the node environment doesn't provide it.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
+import { readFileSync } from 'node:fs';
+import { dmHistorySave, dmHistorySetEnabled } from './dmhistory.js';
+import { createWebDm } from './webdm.js';
+import { createDmReceiptStore, dmEnvelopeFingerprint } from './dm-receipts.js';
 
 // ── Mock localStorage ────────────────────────────────────────────────────────
 const _ls = {};
@@ -44,6 +49,7 @@ import {
     markPeerVerified,
     ratchetEncrypt,
     ratchetDecrypt,
+    finishDmReceive,
     loadRatchetState,
     saveRatchetState,
     advanceChain,
@@ -653,5 +659,179 @@ describe('publishing the x25519 public key makes it peer-readable (D2)', () => {
         await initE2E();
         await flush();
         expect(_publishIdentityAcl).not.toHaveBeenCalled();
+    });
+});
+
+
+describe('recoverable pod DM receives', () => {
+    let bob, encrypted;
+    const receiveId = 'a'.repeat(64);
+    beforeEach(async () => {
+        _e2eSession = { info: { isLoggedIn: false } }; _e2eRoot = null;
+        localStorage.clear();
+        const alice = await makeX25519Pair(); bob = await makeX25519Pair();
+        await swapIdentity(alice.privJwk, alice.pubB64u);
+        cachePeerPub('recovery-bob', bob.pubB64u);
+        encrypted = await ratchetEncrypt('recovery-bob', 'recover this message');
+        await swapIdentity(bob.privJwk, bob.pubB64u);
+    });
+    const decrypt = (enc, opts = {}) => ratchetDecrypt('recovery-alice', enc.ciphertext,
+        enc.nonce, enc.msgNum, enc.ratchetPub, enc.pn, opts);
+
+    it('recovers across reload without advancing the ratchet again, then erases recovery', async () => {
+        expect(await decrypt(encrypted, { receiveId })).toBe('recover this message');
+        const version = (await loadRatchetState('recovery-alice')).ver;
+        expect(localStorage.getItem('proxion_e2e_state_recovery-alice')).not.toContain('recover this message');
+        _resetForTesting(); await initE2E();
+        expect(await decrypt(encrypted, { receiveId })).toBe('recover this message');
+        expect((await loadRatchetState('recovery-alice')).ver).toBe(version);
+        await finishDmReceive('recovery-alice', receiveId);
+        _resetForTesting(); await initE2E();
+        await expect(decrypt(encrypted)).rejects.toThrow('already consumed');
+        expect((await loadRatchetState('recovery-alice')).pendingReceives).toEqual({});
+    });
+
+    it('leaves the key retryable when the atomic local write fails', async () => {
+        const set = vi.spyOn(localStorage, 'setItem').mockImplementationOnce(() => { throw Error('quota'); });
+        await expect(decrypt(encrypted, { receiveId })).rejects.toThrow();
+        set.mockRestore();
+        expect(await loadRatchetState('recovery-alice')).toBeNull();
+        expect(await decrypt(encrypted, { receiveId })).toBe('recover this message');
+    });
+
+    it('does not commit after the receiving account changes during decryption', async () => {
+        let active = true;
+        const subtle = crypto.subtle;
+        const original = subtle.decrypt.bind(subtle);
+        const spy = vi.spyOn(subtle, 'decrypt').mockImplementation(async (...args) => {
+            const result = await original(...args); active = false; return result;
+        });
+        await expect(decrypt(encrypted, { receiveId, current: () => active })).rejects.toThrow();
+        spy.mockRestore();
+        expect(await loadRatchetState('recovery-alice')).toBeNull();
+        expect(await decrypt(encrypted, { receiveId })).toBe('recover this message');
+    });
+
+    it('applies backpressure instead of evicting an undelivered recovery copy', async () => {
+        await decrypt(encrypted, { receiveId });
+        const state = await loadRatchetState('recovery-alice');
+        state.pendingReceives = Object.fromEntries(Array.from({ length: 64 }, (_, i) => [i.toString(16).padStart(64, '0'), 'pending']));
+        await saveRatchetState('recovery-alice', state);
+        await expect(decrypt(encrypted, { receiveId: 'b'.repeat(64) })).rejects.toThrow('recovery is full');
+        expect(Object.keys((await loadRatchetState('recovery-alice')).pendingReceives)).toHaveLength(64);
+    });
+
+    function reader(receipts, persistMessage, drops, events, deleteDrop = async () => true) {
+        return createWebDm({
+            pod: { podReadDmDrops: async () => drops, podDeleteDmDrop: deleteDrop },
+            e2e: { ratchetDecrypt, finishDmReceive, cachePeerPub: vi.fn() }, receipts,
+            getSelfWebId: () => 'https://bob.example/profile/card#me', getMyDeviceId: () => 'bob-device',
+            verifySender: async () => 'verified', persistMessage,
+            handleEvent: msg => events.push(msg),
+        });
+    }
+    const drop = enc => ({ url: 'https://bob.example/proxion/dm-inbox/recovery.json', envelope: {
+        from_webid: 'recovery-alice', message_id: 'recovery-message', content: enc.ciphertext,
+        e2e: true, nonce: enc.nonce, msg_num: enc.msgNum, ratchet_pub: enc.ratchetPub, pn: enc.pn,
+    } });
+
+    it.each(['same reader', 'reload'])('retries failed history through %s before deleting the drop', async mode => {
+        const db = new IDBFactory(), receipts = createDmReceiptStore(db);
+        const d = drop(encrypted), events = [], deleted = vi.fn(async () => true);
+        const persist = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+        let dm = reader(receipts, persist, [d], events, deleted);
+        await dm.drainOnce();
+        expect(events).toHaveLength(1); expect(deleted).not.toHaveBeenCalled();
+        if (mode === 'reload') {
+            _resetForTesting(); await initE2E();
+            dm = reader(createDmReceiptStore(db), persist, [d], events, deleted);
+        }
+        await dm.drainOnce();
+        expect(persist).toHaveBeenCalledTimes(2);
+        expect(persist.mock.calls[1][0].content).toBe('recover this message');
+        expect(events).toHaveLength(mode === 'reload' ? 2 : 1);
+        expect(deleted).toHaveBeenCalledTimes(1);
+        expect((await loadRatchetState('recovery-alice')).pendingReceives).toEqual({});
+        // A copied envelope at a different URL is acknowledged using its receipt.
+        const copy = { ...d, url: d.url.replace('recovery.json', 'duplicate.json') };
+        await reader(createDmReceiptStore(db), persist, [copy], events, deleted).drainOnce();
+        expect(persist).toHaveBeenCalledTimes(2);
+        expect(deleted).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries receipt storage after a reload without losing the already saved history', async () => {
+        const db = new IDBFactory(), receipts = createDmReceiptStore(db);
+        const remember = vi.spyOn(receipts, 'remember').mockRejectedValueOnce(Error('storage unavailable'));
+        const d = drop(encrypted), events = [], deleted = vi.fn(async () => true), history = new Map();
+        const persist = async msg => { history.set(msg.message_id, msg); return true; };
+        await reader(receipts, persist, [d], events, deleted).drainOnce();
+        expect(deleted).not.toHaveBeenCalled(); expect(history.size).toBe(1);
+        _resetForTesting(); await initE2E();
+        remember.mockRestore();
+        await reader(createDmReceiptStore(db), persist, [d], [], deleted).drainOnce();
+        expect(deleted).toHaveBeenCalledTimes(1); expect(history.size).toBe(1);
+        expect(history.get('recovery-message').content).toBe('recover this message');
+    });
+
+    it('honors disabled history and clears the temporary recovery copy', async () => {
+        dmHistorySetEnabled(false);
+        try {
+            const deleted = vi.fn(async () => true);
+            await reader(createDmReceiptStore(new IDBFactory()), dmHistorySave, [drop(encrypted)], [], deleted).drainOnce();
+            expect(deleted).toHaveBeenCalledTimes(1);
+            expect((await loadRatchetState('recovery-alice')).pendingReceives).toEqual({});
+        } finally { dmHistorySetEnabled(true); }
+    });
+
+    it('recovers actual fanout dispatch across failed history and reload', async () => {
+        const source = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+        const declaration = source.slice(source.indexOf('async function _handleEventAsync('), source.indexOf('// True for a DM thread'));
+        const db = new IDBFactory(), receipts = createDmReceiptStore(db), events = [];
+        const persist = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+        const deps = {
+            crossMode: null, crossRooms: null, clientDid: 'bob-device', selfWebId: 'bob',
+            cachePeerPub: vi.fn(), ratchetDecrypt, E2EDecryptError,
+            isSealedPlain: () => false, isUndecryptable: text => text.startsWith('[could not decrypt]') || text.startsWith('[decryption error]'),
+            peerDidToCertId: {}, handleEvent: msg => events.push(msg), dmHistorySave: persist,
+        };
+        const dispatch = new Function(...Object.keys(deps), declaration + '; return _handleEventAsync;')(...Object.values(deps));
+        const d = { ...drop(encrypted), envelope: { kind: 'fanout', from_webid: 'recovery-alice',
+            message_id: 'fanout-recovery', to_device_id: 'bob-device', payload: {
+                content: encrypted.ciphertext, nonce: encrypted.nonce, msg_num: encrypted.msgNum,
+                ratchet_pub: encrypted.ratchetPub, pn: encrypted.pn, e2e: true,
+            } } };
+        const deleted = vi.fn(async () => true);
+        const options = { pod: { podReadDmDrops: async () => [d], podDeleteDmDrop: deleted },
+            e2e: { ratchetDecrypt, finishDmReceive }, receipts,
+            getSelfWebId: () => 'bob', getMyDeviceId: () => 'bob-device', verifySender: async () => 'verified',
+            handleEvent: msg => dispatch(msg, true),
+        };
+        let dm = createWebDm(options);
+        await dm.drainOnce();
+        expect(events).toHaveLength(1); expect(deleted).not.toHaveBeenCalled();
+        // Same-reader retries persist again without re-rendering.
+        persist.mockResolvedValueOnce(false);
+        await dm.drainOnce();
+        expect(events).toHaveLength(1); expect(deleted).not.toHaveBeenCalled();
+        _resetForTesting(); await initE2E();
+        dm = createWebDm({ ...options, receipts: createDmReceiptStore(db) });
+        await dm.drainOnce();
+        expect(deleted).toHaveBeenCalledTimes(1);
+        expect(events.at(-1).content).toBe('recover this message');
+        expect((await loadRatchetState('recovery-alice#recovery-alice')).pendingReceives).toEqual({});
+    });
+
+    it('resumes after the receipt commits but recovery cleanup is interrupted', async () => {
+        const db = new IDBFactory(), receipts = createDmReceiptStore(db);
+        const d = drop(encrypted), fingerprint = await dmEnvelopeFingerprint(d.envelope);
+        await decrypt(encrypted, { receiveId: fingerprint });
+        const scope = JSON.stringify(['https://bob.example/profile/card#me', 'bob-device']);
+        await receipts.remember(scope, fingerprint, d.url);
+        _resetForTesting(); await initE2E();
+        const persist = vi.fn(), events = [], deleted = vi.fn(async () => true);
+        await reader(receipts, persist, [d], events, deleted).drainOnce();
+        expect(events).toHaveLength(0); expect(persist).not.toHaveBeenCalled();
+        expect(deleted).toHaveBeenCalledTimes(1);
+        expect((await loadRatchetState('recovery-alice')).pendingReceives).toEqual({});
     });
 });

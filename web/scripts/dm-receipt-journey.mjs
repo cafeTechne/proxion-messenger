@@ -72,3 +72,60 @@ export async function dmReceiptReconciliationJourney({ sender, receiver, send, o
     }
     throw Error('new DM did not arrive after reconciliation');
 }
+
+
+// Interrupt history persistence after the ratchet advances, then reload. The
+// encrypted recovery entry must bridge the gap before the inbox is acknowledged.
+export async function dmReceiveRecoveryJourney({ sender, receiver, send, openReceiver, label }) {
+    await openReceiver();
+    const text = label + '-history-interruption';
+    await receiver.evaluate(() => {
+        const put = IDBObjectStore.prototype.put;
+        window.__historyWriteFailures = 0;
+        IDBObjectStore.prototype.put = function (...args) {
+            if (this.name === 'messages') {
+                window.__historyWriteFailures++;
+                throw new DOMException('injected history storage failure', 'QuotaExceededError');
+            }
+            return put.apply(this, args);
+        };
+    });
+    if (await send(sender, text) !== true) throw Error('recovery probe was not sent');
+    const drain = () => receiver.evaluate(() => (window.proxionWebDm || window.proxionCrossMode).drainOnce());
+    await receiver.waitForFunction(text => document.getElementById('message-feed').textContent.includes(text), { timeout: 25000 }, text);
+    await drain();
+    const before = await receiver.evaluate(async text => {
+        const cross = window.proxionCrossMode;
+        const drops = cross?.isReady() ? await cross.bridge.io.podReadDmDrops()
+            : await (await import('./pod.js')).podReadDmDrops();
+        const { loadRatchetState } = await import('./e2e.js');
+        const pending = [];
+        for (const drop of drops) {
+            const env = drop.envelope;
+            const peer = env.kind === 'fanout' ? env.from_webid + '#' + (env.payload?.from_device_id || env.from_webid) : env.from_webid;
+            const state = await loadRatchetState(peer);
+            if (Object.values(state?.pendingReceives || {}).includes(text)) pending.push(drop.url);
+        }
+        return { failures: window.__historyWriteFailures, pending,
+            copies: document.getElementById('message-feed').textContent.split(text).length - 1 };
+    }, text);
+    if (!before.failures || before.pending.length !== 1 || before.copies !== 1) {
+        throw Error('interrupted receive did not retain one recovery copy: ' + JSON.stringify(before));
+    }
+    await receiver.reload({ waitUntil: 'networkidle2' });
+    await receiver.waitForFunction(() => !!window.proxionWebDm || window.proxionCrossMode?.isReady(), { timeout: 40000 });
+    await openReceiver(); await drain();
+    await receiver.waitForFunction(text => document.getElementById('message-feed').textContent.includes(text), { timeout: 25000 }, text);
+    const after = await receiver.evaluate(async ({ text, pending }) => {
+        const cross = window.proxionCrossMode;
+        const drops = cross?.isReady() ? await cross.bridge.io.podReadDmDrops()
+            : await (await import('./pod.js')).podReadDmDrops();
+        const { dmHistorySearch } = await import('./dmhistory.js');
+        const rows = await dmHistorySearch(text);
+        return { retained: drops.some(drop => pending.includes(drop.url)),
+            saved: rows.filter(row => row.content === text).length,
+            copies: document.getElementById('message-feed').textContent.split(text).length - 1 };
+    }, { text, pending: before.pending });
+    if (after.retained || after.saved !== 1 || after.copies !== 1) throw Error('receive did not recover cleanly: ' + JSON.stringify(after));
+    console.log(`  ✓ ${label}: interrupted history recovers after reload, keeps one message, and acknowledges the drop`);
+}

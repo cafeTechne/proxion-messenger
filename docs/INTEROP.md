@@ -41,9 +41,16 @@ acknowledged entries first. Pending receipts are protected; if the cap is full,
 new ciphertext waits until acknowledgement or confirmed external deletion frees
 capacity. The in-memory cache keeps its
 1,024-entry bound. Local DM history holds plaintext separately; receipt storage
-contains no message text or media keys. Storage failures fall back to live-only
-behavior. Ratchet advancement and history/receipt writes are not one transaction,
-so an abrupt crash before those writes commit can still lose a received message.
+contains no message text or media keys. Encrypted pod receives commit temporary
+recovery text in the same encrypted local record as their ratchet advance. If
+that write fails, the ciphertext stays unread and retryable. If history or receipt
+storage fails afterward, the message remains visible live and its inbox drop stays
+for recovery; retry or reload uses the saved plaintext without spending another
+key. Recovery is capped at 64 undelivered entries per peer. Only after history
+(or the user's history-disabled preference) and a durable receipt succeed is the
+recovery text removed and the drop acknowledged. This covers regular and fanout
+pod inbox delivery, including the gateway bridge; socket delivery is separate.
+See [encryption state storage](E2E_ENCRYPTION.md#11-state-storage).
 
 - **Works:** text DMs both ways, message requests for a first DM from a stranger,
   presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.
@@ -399,8 +406,9 @@ Missing-resource acknowledgements conditionally match the currently stored URL,
 and account/device/engine changes discard stale results. Exact envelope digests
 remain available for replay suppression until normal bounded eviction. Legacy
 receipts without a locator remain conservative until their envelope is observed
-again. This does not make ratchet advancement and local history/receipt writes
-transactional. Browser and cross-mode DM smokes retain a consumed drop, delete it
+again. Ratchet advancement and local history/receipt writes remain separate;
+the encrypted receive recovery described above bridges interruptions between them.
+Browser and cross-mode DM smokes retain a consumed drop, delete it
 using an independent authenticated owner client, reload the receiver, verify
 metadata-only reconciliation and retained history, then receive another DM.
 

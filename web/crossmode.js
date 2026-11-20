@@ -131,7 +131,7 @@ export function createCrossMode({
         const current = () => generation === _generation;
         const conflict = await _publishIdentity(info, current);
         if (!current()) return;
-        const dispatch = (ev) => { if (current()) handleEvent(ev); };
+        const dispatch = (ev) => current() ? handleEvent(ev) : false;
         _dm = createWebDm({
             pod: bridge.io, e2e, notify,
             handleEvent: dispatch,

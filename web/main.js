@@ -1,7 +1,7 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, takeAuthError, reauthIssuer } from './auth.js';
 import {
     initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
-    ratchetEncrypt, ratchetDecrypt, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
+    ratchetEncrypt, ratchetDecrypt, finishDmReceive, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
@@ -1170,7 +1170,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         : signDm(env, _identityPrivKey, clientDid);
                 },
                 verifyDmSig, verifyFanoutSig, verifyDeviceCert,
-                e2e: { cachePeerPub, ratchetDecrypt, hasSession: hasRatchetSession },
+                e2e: { cachePeerPub, ratchetDecrypt, finishDmReceive, hasSession: hasRatchetSession },
                 persistMessage: (m) => dmHistorySave({ ...m, thread_id: m.thread_id }),
                 receipts: _dmReceipts,
                 isBlocked: (w) => blocks.isBlocked(w),
@@ -2341,7 +2341,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         // by the gateway session.
                         text = await ratchetDecrypt(pid, p.content, p.nonce,
                             p.msg_num ?? 0, p.ratchet_pub ?? null, p.pn ?? 0,
-                            { allowInit: !fromPod || event.allow_session_init === true });
+                            { allowInit: !fromPod || event.allow_session_init === true,
+                                ...(fromPod && event._dmReceiveId ? {
+                                    receiveId: event._dmReceiveId, current: event._dmCurrent,
+                                } : {}) });
                         if (isSealedPlain(text)) text = '[could not decrypt]';
                     } catch (err) {
                         text = err instanceof E2EDecryptError ? '[could not decrypt]' : '[decryption error]';
@@ -2372,7 +2375,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // Persist plaintext locally unless decryption failed.
                     _persistDm: text !== '[could not decrypt]' && text !== '[decryption error]',
                 };
-                try { handleEvent(message); } catch (err) {
+                try { if (!(fromPod && event._dmReplay)) handleEvent(message); } catch (err) {
                     if (!fromPod) throw err;
                     console.warn('[webdm] fanout UI failed:', err);
                 }
@@ -9203,7 +9206,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // the peer's pod on send, and watches our own drop box to receive.
                     const webDm = createWebDm({
                         pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop, podDmDropExists },
-                        e2e: { cachePeerPub, ratchetDecrypt, hasSession: hasRatchetSession },
+                        e2e: { cachePeerPub, ratchetDecrypt, finishDmReceive, hasSession: hasRatchetSession },
                         notify: { watchResource },
                         handleEvent: (ev) => _handleEventAsync(ev, true),
                         getSelfWebId: () => selfWebId,
