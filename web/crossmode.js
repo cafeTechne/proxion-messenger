@@ -52,7 +52,13 @@ export function createCrossMode({
     const callSigners = createCallSigners({
         fetchSigner: (w) => bridge.io.podFetchPeerSigner(peerPodRootFromWebId(w)),
     });
-    const via = () => ({ fetch: (u) => bridge.fetch(u), ownRoot: _state.pod_root });
+    const via = () => {
+        const generation = _generation;
+        return {
+            fetch: (u) => bridge.fetch(u), ownRoot: _state.pod_root,
+            current: () => generation === _generation && _state.ready,
+        };
+    };
 
     function _setState(patch) {
         _state = { ..._state, ...patch };

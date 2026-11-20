@@ -233,7 +233,10 @@ trailing slash; otherwise the WebID's origin followed by `/`.
 `fetchAndCachePeerPub` reads `{peerPodRoot}proxion/identity/x25519-pub.json` with the
 signed-in Solid session, after an SSRF check on the pod root (`ssrf.js`
 `isPeerPodRootAllowed`). The key is accepted only if `version` is `1` and `pub` is a
-string.
+string. Discovery checks the initiating Solid session, WebID and pod root again
+before accepting the response and parsed JSON. Gateway bridge discovery also
+checks the bridge generation. A stale lookup returns `false` without changing
+the peer-key cache or verification mark.
 
 ### 4.3 Key change
 

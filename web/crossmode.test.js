@@ -9,7 +9,7 @@ const ROOT = 'https://pod.example/me/';
 const BOB = 'https://pod.example/bob/profile/card#me';
 
 // A fake gateway: answers pod_fetch from a route table, records everything.
-function harness({ routes = {}, prevSigner = null, known = () => true } = {}) {
+function harness({ routes = {}, prevSigner = null, known = () => true, fetchAndCachePeerPub } = {}) {
     const sent = [], events = [];
     let cm = null;
     const answer = (m) => {
@@ -32,7 +32,7 @@ function harness({ routes = {}, prevSigner = null, known = () => true } = {}) {
         e2e: { cachePeerPub: vi.fn(), ratchetDecrypt: vi.fn(), hasSession: async () => false },
         isBlocked: () => false, isKnownSender: (w) => known(w), onMessageRequest: vi.fn(),
         getContacts: () => [BOB, 'did:key:zGatewayContact'],
-        getMyPub: () => 'PUB',
+        getMyPub: () => 'PUB', fetchAndCachePeerPub,
         onStateChange: () => {},
     });
     return { cm, sent, events, setRoute: (k, v) => { routes[k] = v; } };
@@ -55,6 +55,16 @@ describe('webIdTarget', () => {
 });
 
 describe('createCrossMode', () => {
+    it('invalidates peer-key lookups when the bridge reconnects', async () => {
+        const lookup = vi.fn(async () => true);
+        const h = harness({ fetchAndCachePeerPub: lookup });
+        await ready(h);
+        await h.cm.fetchPeerPub(BOB);
+        const via = lookup.mock.calls[0][2];
+        expect(via.current()).toBe(true);
+        h.cm.onReconnect();
+        expect(via.current()).toBe(false);
+    });
     it('leaves gateway traffic alone', () => {
         const { cm } = harness();
         expect(cm.route({ cmd: 'local_dm', target_webid: 'did:key:zPeer', content: 'x' })).toBe(false);

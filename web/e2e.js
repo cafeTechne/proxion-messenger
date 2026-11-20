@@ -443,17 +443,27 @@ export function markPeerVerified(peerId) {
     return true;
 }
 
-// via: { fetch, ownRoot } reads through another pod fetch (the desktop client's
+// via: { fetch, ownRoot, current? } reads through another pod fetch (the desktop client's
 // gateway pod bridge, gwpod.js) instead of the Solid session.
 export async function fetchAndCachePeerPub(peerId, peerPodRoot, via = null) {
-    const doFetch = via ? via.fetch : (u) => solidSession.fetch(u);
+    const session = solidSession;
+    const webId = _currentWebId();
+    const sessionId = session?.info?.sessionId;
+    const doFetch = via ? via.fetch : (u) => session.fetch(u);
     const ownRoot = via ? via.ownRoot : podStorageRoot();
     if (!peerPodRoot || !(via || solidSession?.info?.isLoggedIn)) return false;
     if (!isPeerPodRootAllowed(peerPodRoot, ownRoot)) return false;   // SSRF gate, see ssrf.js
+    // Never apply a delayed result to a different account's cache or trust mark.
+    const current = () => solidSession === session && _currentWebId() === webId
+        && session?.info?.sessionId === sessionId
+        && (via ? (!via.current || via.current())
+            : session?.info?.isLoggedIn && podStorageRoot() === ownRoot);
     try {
+        if (!current()) return false;
         const res = await doFetch(peerPodRoot + 'proxion/identity/x25519-pub.json');
-        if (!res.ok) return false;
+        if (!current() || !res.ok) return false;
         const data = await res.json();
+        if (!current()) return false;
         if (data?.version === 1 && typeof data.pub === 'string') {
             cachePeerPub(peerId, data.pub);
             return true;

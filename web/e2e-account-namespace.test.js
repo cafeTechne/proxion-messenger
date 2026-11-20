@@ -23,14 +23,15 @@ globalThis.localStorage = makeLS();
 
 // ── Mutable auth session so a test can switch accounts ─────────────────────────
 let _sess = { info: { isLoggedIn: false } };
+let _root = null;
 vi.mock('./auth.js', () => ({
     get solidSession() { return _sess; },
-    podStorageRoot: () => null,
+    podStorageRoot: () => _root,
 }));
 vi.mock('./pod.js', () => ({ podPublishIdentityAcl: async () => true }));
 
 import {
-    initE2E, _resetForTesting, myX25519PubB64u, cachePeerPub, ratchetEncrypt,
+    initE2E, _resetForTesting, myX25519PubB64u, cachePeerPub, ratchetEncrypt, fetchAndCachePeerPub,
 } from './e2e.js';
 
 const WEBID_A = 'https://alice.example/profile/card#me';
@@ -179,5 +180,64 @@ describe('E2E per-account identity namespacing', () => {
         expect(localStorage.getItem('proxion_e2e_verified_bob::' + WEBID_B)).toBe(null);
         expect(localStorage.getItem('proxion_e2e_peer_pub_bob::' + WEBID_B)).toBe(null);
         expect(localStorage.getItem('proxion_verified_did:key:zCarol::' + WEBID_B)).toBe(null);
+    });
+});
+
+
+describe('peer-key discovery keeps its initiating account', () => {
+    beforeEach(() => { _resetForTesting(); logout(); _root = null; localStorage.clear(); });
+    const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+    it.each(['response', 'json'])('ignores an account switch while waiting for %s', async stage => {
+        login(WEBID_A); _root = 'https://alice.example/';
+        const waiting = deferred();
+        const response = { ok: true, json: vi.fn(() => stage === 'json' ? waiting.promise : Promise.resolve({ version: 1, pub: 'late-key' })) };
+        _sess.fetch = vi.fn(() => stage === 'response' ? waiting.promise : Promise.resolve(response));
+        const read = fetchAndCachePeerPub('peer', 'https://peer.example/');
+        if (stage === 'json') await vi.waitFor(() => expect(response.json).toHaveBeenCalled());
+        login(WEBID_B); _root = 'https://bob.example/';
+        localStorage.setItem('proxion_e2e_peer_pub_peer::' + WEBID_B, 'trusted-bob-key');
+        localStorage.setItem('proxion_e2e_verified_peer::' + WEBID_B, 'trusted-bob-key');
+        waiting.resolve(stage === 'response' ? response : { version: 1, pub: 'late-key' });
+        expect(await read).toBe(false);
+        expect(localStorage.getItem('proxion_e2e_peer_pub_peer::' + WEBID_B)).toBe('trusted-bob-key');
+        expect(localStorage.getItem('proxion_e2e_verified_peer::' + WEBID_B)).toBe('trusted-bob-key');
+        expect(localStorage.getItem('proxion_e2e_peer_pub_peer::' + WEBID_A)).toBeNull();
+    });
+    it('does not populate the unscoped cache after the session expires', async () => {
+        login(WEBID_A); _root = 'https://alice.example/';
+        const waiting = deferred(); _sess.fetch = () => waiting.promise;
+        const read = fetchAndCachePeerPub('peer', 'https://peer.example/');
+        _sess.info.isLoggedIn = false;
+        waiting.resolve({ ok: true, json: async () => ({ version: 1, pub: 'late-key' }) });
+        expect(await read).toBe(false);
+        expect(localStorage.getItem('proxion_e2e_peer_pub_peer')).toBeNull();
+    });
+    it('ignores a lookup from an expired bridge generation', async () => {
+        const waiting = deferred();
+        let current = true;
+        const read = fetchAndCachePeerPub('peer', 'https://peer.example/', {
+            fetch: () => waiting.promise, ownRoot: 'https://alice.example/',
+            current: () => current,
+        });
+        current = false;
+        waiting.resolve({ ok: true, json: async () => ({ version: 1, pub: 'late-key' }) });
+        expect(await read).toBe(false);
+        expect(localStorage.getItem('proxion_e2e_peer_pub_peer')).toBeNull();
+    });
+    it('ignores a lookup after the same account changes pod root', async () => {
+        login(WEBID_A); _root = 'https://alice.example/';
+        const waiting = deferred();
+        _sess.fetch = () => waiting.promise;
+        const read = fetchAndCachePeerPub('peer', 'https://peer.example/');
+        _root = 'https://other.example/';
+        waiting.resolve({ ok: true, json: async () => ({ version: 1, pub: 'late-key' }) });
+        expect(await read).toBe(false);
+        expect(localStorage.getItem('proxion_e2e_peer_pub_peer::' + WEBID_A)).toBeNull();
+    });
+    it('accepts a lookup that finishes in the original account', async () => {
+        login(WEBID_A); _root = 'https://alice.example/';
+        _sess.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ version: 1, pub: 'current-key' }) }));
+        expect(await fetchAndCachePeerPub('peer', 'https://peer.example/')).toBe(true);
+        expect(localStorage.getItem('proxion_e2e_peer_pub_peer::' + WEBID_A)).toBe('current-key');
     });
 });
