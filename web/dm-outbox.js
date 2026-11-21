@@ -171,7 +171,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                     for (const frame of pendingFrames(ready, include)) {
                         if (!ctx.current()) return;
                         attempts.set(id, now());
-                        await send(JSON.parse(JSON.stringify(frame))); transmitted = true;
+                        await send(JSON.parse(JSON.stringify(frame)), ready); transmitted = true;
                     }
                 };
                 if (!ctx.current() || (!ready.peerConfirmed && await persistMessage(ready.record) === false) || !ctx.current()) return false;
@@ -211,6 +211,8 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         return serialized(id, async () => {
             const job = jobs.get(id);
             if (!job || !ctx.current() || job.scope !== ctx.scope || !job.frames) return false;
+            const actor = planStatus({ ...job, entries: [] });
+            if (actor === 'account' || actor === 'actor_unknown') return false;
             const targets = evidencedTargets(job, evidence);
             if (!targets.length) return false;
             const known = accepted(job); for (const index of targets) known.add(index);
@@ -246,9 +248,12 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             const latest = jobs.get(job.id) || job;
             if (latest.frames || latest.confirmed) canCancel = false;
             const plan = planStatus({ ...latest, entries: remaining(latest) });
-            const state = latest.media && latest.peerConfirmed && !latest.mediaReleased ? (plan === 'changed' ? 'mediaAttention' : 'media') : latest.confirmed ? 'cleanup' : latest.peerConfirmed ? (plan === 'changed' ? 'syncAttention' : 'sync') : plan === 'changed' ? 'attention'
-                : failures.has(job.id) ? 'storage' : !canSend(latest) || plan !== 'ready' ? 'waiting'
-                    : latest.frames ? 'confirmation' : 'waiting';
+            const state = plan === 'actor_unknown' ? 'unbound' : plan === 'account'
+                ? latest.media ? 'mediaAttention' : latest.peerConfirmed ? 'accountConfirmed' : 'account'
+                : latest.media && latest.peerConfirmed && !latest.mediaReleased ? 'media'
+                    : latest.confirmed ? 'cleanup' : latest.peerConfirmed ? (plan === 'changed' ? 'syncAttention' : 'sync')
+                        : plan === 'changed' ? 'attention' : failures.has(job.id) ? 'storage'
+                            : !canSend(latest) || plan !== 'ready' ? 'waiting' : latest.frames ? 'confirmation' : 'waiting';
             const canRetry = remaining(latest).some(entry => planStatus({ ...latest, entries: [entry] }) === 'ready');
             rows.push({ id: latest.id, peer: latest.peer, timestamp: latest.record.timestamp, state, canCancel, canRetry });
         }

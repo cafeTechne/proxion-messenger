@@ -193,6 +193,9 @@ export function createCrossMode({
         if (callTo) { _routeCall(cmd, callTo); return true; }
         const to = webIdTarget(cmd);
         if (to) {
+            // Never reauthor a frozen outbox send through replacement pod
+            // credentials. This marker is local routing metadata, not wire data.
+            if (cmd.expected_pod_webid && cmd.expected_pod_webid !== _state.webid) return true;
             if (_dm && _state.ready) {
                 const generation = _generation, self = getSelfId();
                 _dm.dropDm(cmd).then((ok) => {

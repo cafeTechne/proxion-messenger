@@ -1,8 +1,9 @@
+import { bridgeAccountJourney } from './scripts/bridge-account-journey.mjs';
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 // Cross-mode DM smoke: Proxion desktop (a gateway with a pod) and the Proxion
 // browser build messaging each other through their pods.
 //
-// A throwaway CSS holds two accounts. Alice runs the desktop client: a gateway
+// A throwaway CSS holds two conversation accounts and a replacement pod account. Alice runs the desktop client: a gateway
 // connected to her pod (only inside this smoke, pointed at the throwaway CSS).
 // Bob runs the browser build, signed in to his pod. Checks:
 //   - Bob adds Alice by WebID and sends; Alice gets a message request, accepts,
@@ -121,6 +122,7 @@ try {
   const stamp = Date.now();
   const alice = await provisionAccount(css.url, { email: `alice-${stamp}@test.example`, password: 'pw-12345678', label: 'alice' });
   const bob = await provisionAccount(css.url, { email: `bob-${stamp}@test.example`, password: 'pw-12345678', label: 'bob' });
+  const alternate = await provisionAccount(css.url, { email: `alternate-${stamp}@test.example`, password: 'pw-12345678', label: 'alternate' });
   const aliceSession = await makeAuthSession(alice);
   ok('CSS up, Alice (desktop) and Bob (browser build) provisioned');
 
@@ -272,6 +274,17 @@ try {
   step = 'durable-text-outbox';
   await dmOutboxJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId),
     openReceiver: () => openThread(pageB, alice.webId), label: 'bridge text outbox' });
+  step = 'bridge-source-account';
+  await bridgeAccountJourney({ sender: pageA, receiver: pageB, originalActor: alice.webId, replacementActor: alternate.webId,
+    openSender: () => openThread(pageA, bob.webId), openReceiver: () => openThread(pageB, alice.webId),
+    setAccount: async which => {
+      const account = which === 'original' ? alice : alternate;
+      const response = await fetch(new URL('setup/pod', A.url), { method: 'POST', headers: {
+        'Content-Type': 'application/json', Origin: new URL(A.url).origin },
+        body: JSON.stringify({ css_url: css.url, email: account.email, password: account.password }) });
+      if (!response.ok) throw Error('isolated pod credential replacement failed: ' + response.status);
+    },
+  });
 
   // Exercise the shared encrypted asset storage protocol in both directions.
   step = 'encrypted-assets';

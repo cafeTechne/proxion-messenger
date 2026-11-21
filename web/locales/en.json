@@ -1200,5 +1200,10 @@
   "dmMedia.legacyPending": "Earlier delivery is unknown. Review before sending a new copy.",
   "dmMedia.legacyConfirm": "The original encrypted delivery was not saved and may already have arrived. Send a new copy with a new message id and file key? The recipient may receive a duplicate.",
   "dmMedia.openConversation": "Open conversation",
-  "dmMedia.originalAccount": "Message confirmed. Sign in to the original pod account to finish saving it."
+  "dmMedia.originalAccount": "Message confirmed. Sign in to the original pod account to finish saving it.",
+  "outbox.originalAccount": "Waiting for the original pod account. Sign in to that account to retry this saved message.",
+  "outbox.confirmedAccount": "Message confirmed. Sign in to the original pod account to finish remaining work.",
+  "outbox.unknownAccount": "This older saved send did not record its pod account. Automatic retry is paused; review before sending a new copy.",
+  "outbox.actorReviewConfirm": "The original sender account was not recorded. Copy the text to the composer? Pressing Send creates a new message from the current account and may duplicate an earlier delivery.",
+  "outbox.actorNeeded": "Connect your pod account before sending in this conversation. Your draft is kept."
 }

@@ -334,3 +334,40 @@ it('reuses a media intent without changing its frozen recipients and rejects a c
     replacement.record.content = 'different file key';
     await expect(engine.queue(replacement, { reuseMedia: true })).rejects.toThrow('already exists');
 });
+
+describe('bridge source account binding', () => {
+    it('waits for the original actor and refuses replacement-account acceptance evidence', async () => {
+        const h = harness(); let actor = 'pod-B';
+        h.options.planStatus = job => !job.podActor ? 'actor_unknown' : job.podActor === actor ? 'ready' : 'account';
+        const engine = h.engine(), job = { ...clone(input), podActor: 'pod-A' }; await engine.queue(job);
+        expect(await engine.send(job.id)).toBe(false); expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled();
+        expect((await engine.inspect())[0].state).toBe('account');
+        actor = 'pod-A'; await engine.send(job.id); const original = clone(h.frames[0]);
+        actor = 'pod-B'; expect(await engine.confirm(job.id, { kind: 'pod', from: 'alice' })).toBe(false);
+        expect(h.disk.get(job.id).peerConfirmed).toBe(false); h.frames.length = 0;
+        await h.engine().restore({ force: true }); expect(h.frames).toEqual([]);
+        actor = 'pod-A'; const restored = h.engine(); await restored.restore({ force: true });
+        expect(h.frames).toEqual([original]); expect(h.disk.get(job.id).podActor).toBe('pod-A');
+        await restored.confirm(job.id, { kind: 'pod', from: 'alice' }); expect(h.disk.size).toBe(0);
+    });
+    it('keeps older actor-less prepared jobs for review without adopting the active account', async () => {
+        const h = harness(), old = h.engine(); await old.queue(input); await old.send(input.id);
+        h.options.planStatus = job => job.podActor ? 'ready' : 'actor_unknown'; h.frames.length = 0;
+        const engine = h.engine(); await engine.restore({ force: true });
+        expect(h.frames).toEqual([]); expect(h.disk.get(input.id).podActor).toBeUndefined();
+        expect((await engine.inspect())[0]).toMatchObject({ state: 'unbound', canCancel: false, canRetry: false });
+        expect(await engine.confirm(input.id, { kind: 'pod', from: 'alice' })).toBe(false);
+        expect(h.disk.size).toBe(1);
+    });
+    it('cancels delayed preparation across an A-to-B-to-A bridge generation change', async () => {
+        const h = harness(); let generation = 1, release, started;
+        h.options.getGeneration = () => generation;
+        const waiting = new Promise(resolve => { release = resolve; }), entered = new Promise(resolve => { started = resolve; });
+        const encrypt = h.e2e.ratchetEncrypt.getMockImplementation();
+        h.e2e.ratchetEncrypt.mockImplementationOnce(async (...args) => { started(); await waiting; return encrypt(...args); });
+        const engine = h.engine(), job = { ...clone(input), podActor: 'pod-A' }; await engine.queue(job);
+        const pending = engine.send(job.id); await entered; generation++; generation++; release();
+        expect(await pending).toBe(false); expect(h.frames).toEqual([]); expect(h.disk.get(job.id).podActor).toBe('pod-A');
+        await engine.send(job.id); expect(h.frames).toHaveLength(1);
+    });
+});

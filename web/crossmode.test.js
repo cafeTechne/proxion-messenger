@@ -309,3 +309,17 @@ describe('createCrossMode calls', () => {
         expect(await n.cm.expectedCallSigner(null, { caller_webid: BOB })).toBe(UNRESOLVED_SIGNER + BOB);
     });
 });
+
+it('refuses to publish a frozen command through another pod account at the final routing boundary', async () => {
+    const h = harness(); await ready(h); const initial = h.sent.length;
+    expect(h.cm.route({ cmd: 'local_dm', target_webid: BOB, message_id: 'foreign-actor', content: 'CT',
+        expected_pod_webid: 'https://other.example/#me' })).toBe(true);
+    await settle(); expect(h.sent.slice(initial).some(message => message.method === 'POST')).toBe(false);
+    expect(h.events.some(event => event.message_id === 'foreign-actor')).toBe(false);
+    expect(h.cm.route({ cmd: 'local_dm', target_webid: BOB, message_id: 'original-actor', content: 'CT', expected_pod_webid: ME })).toBe(true);
+    await settle();
+    const post = h.sent.slice(initial).find(message => message.method === 'POST');
+    expect(JSON.parse(post.body).from_webid).toBe(ME);
+    expect(JSON.parse(post.body).expected_pod_webid).toBeUndefined(); // local guard never enters the signed envelope
+    h.cm.onReconnect();
+});

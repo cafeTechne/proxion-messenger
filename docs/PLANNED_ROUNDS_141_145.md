@@ -1,6 +1,7 @@
 # Planned rounds 141–145
 
-Status: planned after the audited completion of Rounds 136–140. Earlier rounds
+Status: Round 141 complete; Rounds 142–145 planned after the audited completion
+of Rounds 136–140. Earlier rounds
 remain closed; retained limitations become new bounded work, not additions to
 closed rounds. This tracked file is authoritative; ignored root-level plan
 files are local IDE copies.
@@ -24,7 +25,7 @@ review before activation. Local commits are separate from pushing/deployment.
 
 ## Round 141: Bind bridge text sends to their originating pod account
 
-Status: planned. Depends on 140.
+Status: complete. See [Round 141 closeout](ROUND_141_CLOSEOUT.md).
 
 ### Problem and result
 
@@ -35,19 +36,19 @@ under a replacement pod account merely because it uses the same browser/device.
 
 ### Bounded work
 
-- [ ] Capture the bridge WebID when freezing new WebID text intents. Retain it
+- [x] Capture the bridge WebID when freezing new WebID text intents. Retain it
   across disconnect/reload without putting transient session epochs in persisted
   job scopes. Device-only gateway conversations retain their existing identity.
-- [ ] Check actor and bridge generation before preparation, dispatch, confirmation
+- [x] Check actor and bridge generation before preparation, dispatch, confirmation
   and recovery. Switching away and back cancels old work; reconnecting the same
   account resumes the original ciphertext.
-- [ ] Define conservative treatment of pre-141 prepared bridge jobs that lack
+- [x] Define conservative treatment of pre-141 prepared bridge jobs that lack
   actor evidence. Do not infer ownership from the active pod or silently rewrite
   an already transmitted envelope. Keep unsupported legacy recovery visible.
-- [ ] Make pending status distinguish original-account reauthentication from a
+- [x] Make pending status distinguish original-account reauthentication from a
   changed recipient. Do not present account mismatch as delivery failure when
   acceptance was already saved.
-- [ ] Add deterministic account-switch and live bridge recovery coverage.
+- [x] Add deterministic account-switch and live bridge recovery coverage.
 
 ### Acceptance and validation
 

@@ -641,3 +641,32 @@ def test_temporary_signer_failure_retains_watch_and_drains_when_recovered(gw, ex
         be_consumer(gw, did)
         run(gw._pb_poll_watches(106.0))
     assert {'type': 'pod_changed', 'url': box} in sent(ws)
+
+
+def test_fetch_refuses_a_request_bound_to_another_pod_before_network_io(gw):
+    ws, did = make_ws()
+    register(gw, ws, did)
+    run(gw._handle_pod_fetch(ws, {"req_id": "old-actor", "method": "GET",
+        "url": ROOT + "proxion/identity/x25519-pub.json", "expected_webid": "https://other.example/profile/card#me"}))
+    reply = sent(ws)[-1]
+    assert reply["status"] == 409 and reply["error"] == "pod_changed"
+    assert gw._pod.calls == []
+
+
+@pytest.mark.parametrize("expected", [None, 12, {}, "", "x" * 2049])
+def test_fetch_rejects_malformed_expected_actor(gw, expected):
+    ws, did = make_ws()
+    register(gw, ws, did)
+    run(gw._handle_pod_fetch(ws, {"req_id": "bad-actor", "method": "GET",
+        "url": ROOT + "proxion/identity/x25519-pub.json", "expected_webid": expected}))
+    assert sent(ws)[-1]["status"] == 400
+    assert gw._pod.calls == []
+
+
+def test_fetch_allows_the_current_expected_actor(gw):
+    ws, did = make_ws()
+    register(gw, ws, did)
+    run(gw._handle_pod_fetch(ws, {"req_id": "current-actor", "method": "GET",
+        "url": ROOT + "proxion/identity/x25519-pub.json", "expected_webid": gw._pod_webid}))
+    assert sent(ws)[-1]["status"] == 404
+    assert len(gw._pod.calls) == 1

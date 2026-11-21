@@ -87,7 +87,8 @@ export function createGwPodBridge({ send, timeoutMs = 20000, queueTimeoutMs = 60
         return new Promise((resolve, reject) => {
             if (_pending.size >= 256) { reject(new TypeError('pod bridge request queue full')); return; }
             const timer = setTimeout(() => finish(req_id, null, 'pod bridge request expired before dispatch'), queueTimeoutMs);
-            const command = { cmd: 'pod_fetch', req_id, method: (opts.method || 'GET').toUpperCase(), url, headers, body };
+            const command = { cmd: 'pod_fetch', req_id, method: (opts.method || 'GET').toUpperCase(), url, headers, body,
+                ...(_info.webid ? { expected_webid: _info.webid } : {}) };
             _pending.set(req_id, { resolve, reject, timer, command });
             _queue.push(req_id);
             pump();
@@ -146,7 +147,12 @@ export function createGwPodBridge({ send, timeoutMs = 20000, queueTimeoutMs = 60
             };
             if (onInfo) { try { onInfo(_info); } catch { /* listener errors stay local */ } }
         } else if (ev.type === 'pod_fetch_result') {
-            finish(ev.req_id, responseFromResult(ev));
+            if (ev.error === 'pod_changed' && _pending.has(ev.req_id)) {
+                reset();
+                _info = { ready: false, reason: 'pod_changed' };
+                if (onInfo) { try { onInfo(_info); } catch { /* listener errors stay local */ } }
+                try { send({ cmd: 'pod_bridge_info' }); } catch { /* reconnect retries discovery */ }
+            } else finish(ev.req_id, responseFromResult(ev));
         } else if (ev.type === 'pod_changed') {
             const w = _watches.get(ev.url);
             if (w) for (const cb of [...w.cbs]) { try { cb(ev.url); } catch { /* one watcher's error */ } }

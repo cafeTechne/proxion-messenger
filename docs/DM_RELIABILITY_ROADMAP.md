@@ -52,3 +52,6 @@ resumable chunk transfers, evidence-based prepared-send retirement and durable
 recipient-commit acknowledgements. See [the bounded plans](PLANNED_ROUNDS_141_145.md).
 No completed round is reopened. New cryptographic/control protocol activation
 requires its own safety and compatibility checkpoint.
+
+Round 141 is complete: [bridge publisher ownership closeout](ROUND_141_CLOSEOUT.md).
+Rounds 142–145 remain planned.

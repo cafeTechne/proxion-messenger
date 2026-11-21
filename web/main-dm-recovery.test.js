@@ -10,7 +10,7 @@ describe('legacy send review in the composition root', () => {
     it('copies only after consent, leaving encryption and message id creation to a new Send gesture', async () => {
         let consent;
         const input = { value: '', dispatchEvent: vi.fn(), focus: vi.fn() };
-        const deps = { _dmOutbox: { send: vi.fn() }, _outgoingScope: () => 'alice/device', authContext: () => ({ epoch: 1 }),
+        const deps = { _outgoingGeneration: () => 'generation', _dmOutbox: { send: vi.fn() }, _outgoingScope: () => 'alice/device', authContext: () => ({ epoch: 1 }),
             showConfirm: vi.fn((text, yes) => { consent = yes; }), t: key => key,
             document: { getElementById: () => input }, activeView: { id: 'bob-thread' }, showToast: vi.fn() };
         const review = handler('_resendStoredDm', deps);
@@ -21,7 +21,7 @@ describe('legacy send review in the composition root', () => {
     it('does not overwrite another draft or apply a delayed prompt after account replacement', async () => {
         let consent, epoch = 1;
         const input = { value: 'new draft' }, toast = vi.fn();
-        const deps = { _dmOutbox: {}, _outgoingScope: () => 'alice', authContext: () => ({ epoch }),
+        const deps = { _outgoingGeneration: () => 'generation', _dmOutbox: {}, _outgoingScope: () => 'alice', authContext: () => ({ epoch }),
             showConfirm: (text, yes) => { consent = yes; }, t: key => key,
             document: { getElementById: () => input }, activeView: { id: 'bob' }, showToast: toast };
         const review = handler('_resendStoredDm', deps);
@@ -41,7 +41,7 @@ describe('legacy send review in the composition root', () => {
 });
 it('pauses unknown or revoked frozen devices without adding a newly linked device', () => {
     const send = vi.fn(), rosters = {}, requested = new Map();
-    const inspect = handler('_frozenDmPlanStatus', { _peerDeviceKeys: rosters, _rosterRequested: requested,
+    const inspect = handler('_frozenDmPlanStatus', { transport: { mode: 'web' }, _peerDeviceKeys: rosters, _rosterRequested: requested,
         socket: { readyState: 1, send }, WebSocket: { OPEN: 1 }, cachedPeerPub: () => 'pub' });
     const job = { entries: [{ account: 'bob', device: 'original', pub: 'pub' }] };
     expect(inspect(job)).toBe('waiting'); expect(inspect(job)).toBe('waiting'); expect(send).toHaveBeenCalledTimes(1);
@@ -75,7 +75,7 @@ it('binds media upload/delivery work to the initiating bridge and auth generatio
 
 it('does not send a media envelope under a replacement pod account', () => {
     const inspect = handler('_frozenDmPlanStatus', { transport: { mode: 'gateway' }, crossMode: { state: () => ({ webid: 'replacement-pod' }) } });
-    expect(inspect({ media: { actor: 'original-pod' }, entries: [] })).toBe('changed');
+    expect(inspect({ media: { actor: 'original-pod' }, entries: [] })).toBe('account');
 });
 
 it('releases accepted media only when its draft is gone and the original account is still current', async () => {
@@ -89,4 +89,27 @@ it('releases accepted media only when its draft is gone and the original account
     exists = false; release(job); await Promise.all([...pending.values()]); expect(releaseMedia).toHaveBeenCalledOnce();
     releaseMedia.mockClear(); deps._dmMediaStore.has.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
     release(job); authEpoch++; resolve(false); await Promise.all([...pending.values()]); expect(releaseMedia).not.toHaveBeenCalled();
+});
+
+it('freezes bridge text to its active or previously bound account, retaining the source across an offline reload', () => {
+    const storage = { getItem: vi.fn(() => 'https://original.example/#me') };
+    const actor = handler('_bridgeActorForSend', { transport: { mode: 'gateway' }, isDmPeerWebId: value => value?.startsWith('https://'),
+        crossMode: { state: () => ({ webid: null }) }, _boundBridgeWebId: null, localStorage: storage, clientDid: 'device' });
+    expect(actor('did:key:peer')).toBeNull();
+    expect(actor('https://bob.example/#me')).toBe('https://original.example/#me');
+    expect(storage.getItem).toHaveBeenCalledWith('proxion_bridge_actor::device');
+    storage.getItem.mockReturnValue(null);
+    expect(() => actor('https://bob.example/#me')).toThrow('Connect the originating');
+});
+
+it('holds ambiguous pre-owner bridge jobs and separates account mismatch from recipient changes', () => {
+    let active = 'https://replacement.example/#me';
+    const inspect = handler('_frozenDmPlanStatus', { transport: { mode: 'gateway' }, isDmPeerWebId: value => value?.startsWith('https://'),
+        crossMode: { state: () => ({ webid: active }) } });
+    const job = { peer: 'https://bob.example/#me', entries: [] };
+    expect(inspect(job)).toBe('actor_unknown');
+    job.podActor = 'https://original.example/#me'; expect(inspect(job)).toBe('account');
+    active = job.podActor; expect(inspect(job)).toBe('ready');
+    active = null; expect(inspect(job)).toBe('waiting');
+    expect(inspect({ peer: 'did:key:bob', entries: [] })).toBe('ready');
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDmOutboxUi } from './dm-outbox-ui.js';
-function fixture() {
+function fixture({ reviewUnknown = vi.fn() } = {}) {
     let scope = 'alice', active = true;
     const elements = {};
     const doc = { getElementById: id => elements[id] ||= { innerHTML: '', textContent: '',
@@ -8,11 +8,11 @@ function fixture() {
     const outbox = { inspect: vi.fn(async () => [{ id: 'one', peer: '<img src=x>', timestamp: 'yesterday', state: 'waiting', canCancel: true }]),
         cancel: vi.fn(async () => true), send: vi.fn(async () => true) };
     const reviewLegacy = vi.fn();
-    const ui = createDmOutboxUi({ doc, outbox, getScope: () => scope, isActive: () => active, reviewLegacy });
+    const ui = createDmOutboxUi({ doc, outbox, getScope: () => scope, isActive: () => active, reviewLegacy, reviewUnknown });
     const el = name => doc.getElementById('dm-outbox-' + name);
     const click = (action, id = 'one') => el('rows').click({ target: { closest: () => ({ disabled: false,
         dataset: { outboxAction: action, outboxId: id } }) } });
-    return { ui, outbox, el, click, reviewLegacy, switchAccount: () => { scope = 'bob'; }, stop: () => { active = false; } };
+    return { ui, outbox, el, click, reviewLegacy, reviewUnknown, switchAccount: () => { scope = 'bob'; }, stop: () => { active = false; } };
 }
 describe('pending message review', () => {
     it('escapes names and offers labelled keyboard buttons for safe cancellation', async () => {
@@ -51,4 +51,10 @@ it('links confirmed media to its conversation instead of pretending another uplo
     await ui.refresh(); expect(elements['dm-outbox-rows'].innerHTML).toContain('data-outbox-action="media"');
     await elements['dm-outbox-rows'].click({ target: { closest: () => ({ dataset: { outboxAction: 'media', outboxId: 'file' } }) } });
     expect(reviewMedia).toHaveBeenCalledWith('file');
+});
+
+it('offers manual review for an older unbound actor without retrying its saved ciphertext', async () => {
+    const h = fixture(); h.outbox.inspect.mockResolvedValue([{ id: 'one', peer: 'bob', state: 'unbound', canCancel: false, canRetry: false }]);
+    await h.ui.refresh(); expect(h.el('rows').innerHTML).toContain('data-outbox-action="unknown"');
+    await h.click('unknown'); expect(h.reviewUnknown).toHaveBeenCalledWith('one'); expect(h.outbox.send).not.toHaveBeenCalled();
 });

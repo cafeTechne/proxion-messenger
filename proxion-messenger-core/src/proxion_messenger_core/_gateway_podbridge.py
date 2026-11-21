@@ -317,6 +317,16 @@ class PodBridgeMixin:
         if not status["ready"]:
             await self._pod_fetch_reply(websocket, req_id, 503, error=status["reason"] or "not_ready")
             return
+        # A queued browser request may have been created before credentials
+        # changed on the gateway. Never dispatch it as the replacement WebID.
+        expected_webid = data.get("expected_webid")
+        if "expected_webid" in data:
+            if not isinstance(expected_webid, str) or not expected_webid or len(expected_webid) > 2048:
+                await self._pod_fetch_reply(websocket, req_id, 400, error="bad_expected_webid")
+                return
+            if expected_webid != status["webid"]:
+                await self._pod_fetch_reply(websocket, req_id, 409, error="pod_changed")
+                return
         acting_identity = self._client_webids.get(websocket, "") or None
         acting_signer = self._pb_signing_did(websocket)
         method = str(data.get("method") or "GET").upper()

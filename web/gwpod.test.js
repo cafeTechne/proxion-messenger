@@ -186,3 +186,27 @@ describe('createGwPodBridge', () => {
         expect(Object.keys(sent[0].headers)).toEqual(['Accept']);
     });
 });
+
+it('captures the expected WebID on queued bridge requests', async () => {
+    const sent = [], bridge = createGwPodBridge({ send: message => sent.push(message) });
+    bridge.handleEvent(READY);
+    const first = bridge.fetch(READY.pod_root + 'proxion/identity/x25519-pub.json');
+    const second = bridge.fetch(READY.pod_root + 'proxion/identity/signer.json');
+    expect(sent[0].expected_webid).toBe(READY.webid);
+    bridge.handleEvent({ type: 'pod_fetch_result', req_id: sent[0].req_id, status: 200, body: '{}' });
+    expect(sent[1].expected_webid).toBe(READY.webid);
+    bridge.handleEvent({ type: 'pod_fetch_result', req_id: sent[1].req_id, status: 200, body: '{}' });
+    await Promise.all([first, second]);
+});
+
+it('cancels stale queued requests and rediscovers the bridge after the gateway rejects an old actor', async () => {
+    const sent = [], onInfo = vi.fn(), bridge = createGwPodBridge({ send: message => sent.push(message), onInfo });
+    bridge.handleEvent(READY);
+    const first = bridge.fetch(READY.pod_root + 'proxion/identity/x25519-pub.json').catch(error => error);
+    const second = bridge.fetch(READY.pod_root + 'proxion/identity/signer.json').catch(error => error);
+    bridge.handleEvent({ type: 'pod_fetch_result', req_id: sent[0].req_id, status: 409, error: 'pod_changed' });
+    expect(await first).toBeInstanceOf(TypeError); expect(await second).toBeInstanceOf(TypeError);
+    expect(bridge.info().ready).toBe(false); expect(onInfo).toHaveBeenLastCalledWith({ ready: false, reason: 'pod_changed' });
+    expect(sent.filter(message => message.cmd === 'pod_fetch')).toHaveLength(1);
+    expect(sent.at(-1).cmd).toBe('pod_bridge_info');
+});

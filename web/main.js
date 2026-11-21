@@ -855,11 +855,16 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         });
         const _dmMediaStore = createDmMediaStore();
         const _mediaCleanup = new Map();
+        const _outgoingGeneration = () => JSON.stringify([authContext().epoch, crossMode?.generation() || 0]);
         const _outgoingScope = () => JSON.stringify(['outgoing', selfWebId || clientDid, clientDid, e2eScopedKey('')]);
         const _dmOutbox = createDmOutbox({
             e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
-            getScope: _outgoingScope, getGeneration: () => JSON.stringify([authContext().epoch, crossMode?.generation() || 0]), isActive: () => !!clientDid && tabLock.isLeader(),
-            send: frame => socketSendOrQueue(frame),
+            getScope: _outgoingScope, getGeneration: _outgoingGeneration, isActive: () => !!clientDid && tabLock.isLeader(),
+            send: (frame, job) => {
+                const actor = job.podActor || job.media?.actor;
+                const bound = transport.mode !== 'web' && isDmPeerWebId(job.peer) && actor;
+                return socketSendOrQueue(bound ? { ...frame, expected_pod_webid: actor } : frame);
+            },
             canSend: job => transport.mode === 'web' ? !!solidSession.info.isLoggedIn && navigator.onLine !== false
                 : job.route.cmd === 'local_dm' && isDmPeerWebId(job.route.target_webid)
                     ? !!crossMode?.isReady() : !!socket && socket.readyState === WebSocket.OPEN,
@@ -894,11 +899,21 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             run.finally(() => { if (_mediaCleanup.get(job.id) === run) _mediaCleanup.delete(job.id); });
         }
         const _rosterRequested = new Map();
+        function _bridgeActorForSend(peer) {
+            if (transport.mode === 'web' || !isDmPeerWebId(peer)) return null;
+            let actor = crossMode?.state().webid || _boundBridgeWebId;
+            if (!actor) { try { actor = localStorage.getItem('proxion_bridge_actor::' + clientDid); } catch { /* unavailable */ } }
+            if (!actor || !isDmPeerWebId(actor)) { const error = Error('Connect the originating pod account'); error.name = 'BridgeActorUnavailable'; throw error; }
+            return actor;
+        }
         function _frozenDmPlanStatus(job) {
-            if (job.media) {
+            const bridgeText = !job.media && transport.mode !== 'web' && isDmPeerWebId(job.peer);
+            if (bridgeText && !job.podActor) return 'actor_unknown';
+            const expectedActor = job.media?.actor || job.podActor;
+            if (expectedActor) {
                 const actor = transport.mode === 'web' ? selfWebId : crossMode?.state().webid;
                 if (!actor) return 'waiting';
-                if (actor !== job.media.actor) return 'changed';
+                if (actor !== expectedActor) return 'account';
             }
             for (const entry of job.entries) {
                 if (entry.primary) {
@@ -922,6 +937,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             getName: id => resolvePeerName(id) || id,
             getLegacy: () => [..._undeliveredDms.values()].filter(record => !record.outbox_id && record.from_webid === selfWebId),
             reviewLegacy: id => _resendStoredDm(_undeliveredDms.get(id)),
+            reviewUnknown: id => { const record = _dmOutbox.record(id); if (record) _resendStoredDm(record, 'outbox.actorReviewConfirm'); },
             reviewMedia: id => { const record = _dmOutbox.record(id); if (record) { _closeSettings(); _navigateToThread(record.thread_id); _dmMedia?.refresh(); } },
         });
         for (const event of ['login', 'logout', 'sessionExpired', 'sessionRestore']) {
@@ -1148,7 +1164,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         });
         // Desktop DMs with browser-build (WebID) contacts go through the pod
         // (crossmode.js); everything else goes to the gateway as before.
-        let crossMode = null;
+        let crossMode = null, _boundBridgeWebId = null;
         let crossRooms = null;   // desktop pod rooms shared with browser-build users (crossrooms.js)
         function socketSendOrQueue(payload, opts) {
             if (crossMode && crossMode.route(payload)) return;
@@ -1411,6 +1427,11 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 crossMode: _isPodDmView(view) });
         }
         function _showCrossModeState(st) {
+            if (st.ready && st.webid) {
+                _boundBridgeWebId = st.webid;
+                try { localStorage.setItem('proxion_bridge_actor::' + clientDid, st.webid); } catch { /* private mode */ }
+            }
+            _pendingSendsUi.reset();
             _assetInventory?.sync();
             const el = document.getElementById('settings-crossmode-status');
             if (!el) return;
@@ -3936,6 +3957,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // event.available — watchdog mid-session reachability change
                     const isConnected = event.connected;
                     const isAvailable = event.available;
+                    // Availability/setup events can carry replacement pod
+                    // credentials; retire old bridge work before rediscovery.
+                    if (crossMode && typeof isAvailable === 'boolean') crossMode.onReconnect();
 
                     if (isConnected === true) {
                         localStorage.setItem("proxion_pod_connected", "1");
@@ -6170,12 +6194,12 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         // A legacy history row has no saved ciphertext. Review it manually in
         // the composer; pressing Send creates a fresh id and a new frozen plan.
-        async function _resendStoredDm(rec) {
+        async function _resendStoredDm(rec, prompt = 'outbox.legacyConfirm') {
             if (rec?.outbox_id) return _dmOutbox.send(rec.outbox_id);
             if (!rec || typeof rec.content !== 'string') return;
-            const scope = _outgoingScope(), epoch = authContext().epoch;
-            showConfirm(t('outbox.legacyConfirm'), () => {
-                if (scope !== _outgoingScope() || epoch !== authContext().epoch) return;
+            const scope = _outgoingScope(), epoch = authContext().epoch, session = _outgoingGeneration();
+            showConfirm(t(prompt), () => {
+                if (scope !== _outgoingScope() || epoch !== authContext().epoch || session !== _outgoingGeneration()) return;
                 const input = document.getElementById('message-input');
                 if (!input || input.value || activeView?.id !== rec.thread_id) { showToast(t('outbox.openOriginal')); return; }
                 input.value = rec.content; input.dispatchEvent(new Event('input')); input.focus();
@@ -6294,6 +6318,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 if (composeScope !== _outgoingScope()) return;
                 if (!input.value) input.value = draft;
                 if (err instanceof DmKeyMissingError) _explainMissingKey(err);
+                else if (err.name === 'BridgeActorUnavailable') showToast(t('outbox.actorNeeded'), 'error');
                 else {
                     console.warn('[send] failed:', err);
                     if (activeView?.type === 'dm' || activeView?.type === 'local_dm') showToast(t('outbox.saveFailed'), 'error');
@@ -6368,7 +6393,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         async function _sendComposed(content) {
             if (content) {
                 const _sendView = { ...activeView }, _sendActor = selfWebId, _sendDevice = clientDid;
-                const _sendScope = _outgoingScope(), _sendReply = replyingTo ? { ...replyingTo } : null;
+                const _sendScope = _outgoingScope(), _sendGeneration = _outgoingGeneration(), _sendReply = replyingTo ? { ...replyingTo } : null;
                 let payload;
                 let _e2ePlainTarget = null; // peer to ratchet-encrypt for, ONLY if the plain path actually sends
                 const clientMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -6420,7 +6445,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     }
                 }
 
-                if (_sendScope !== _outgoingScope()) throw Error('Send context changed');
+                if (_sendScope !== _outgoingScope() || _sendGeneration !== _outgoingGeneration()) throw Error('Send context changed');
                 if (_sendReply) {
                     payload.reply_to_id = _sendReply.id;
                     if (replyingTo?.id === _sendReply.id) cancelReply();
@@ -6434,7 +6459,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 if (_dmPeer && (_e2ePlainTarget || identity.devicesForPeer(_dmPeer).length >= 2)) {
                     const peerDevs = identity.devicesForPeer(_dmPeer).filter(dev => dev.device_id && dev.pub_b64u);
                     const ownDevs = (await _ownDevicesForSend(_dmPeer)).filter(dev => dev.device_id && dev.pub_b64u);
-                    if (_sendScope !== _outgoingScope()) throw Error('Send context changed');
+                    if (_sendScope !== _outgoingScope() || _sendGeneration !== _outgoingGeneration()) throw Error('Send context changed');
                     const mode = peerDevs.length >= 2 ? 'fanout' : 'single';
                     const entries = mode === 'fanout' ? peerDevs.map(dev => ({
                         peerId: _dmPeer + '#' + dev.device_id, account: _dmPeer, device: dev.device_id, pub: dev.pub_b64u,
@@ -6442,7 +6467,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     for (const dev of ownDevs) entries.push({ peerId: _sendActor + '#' + dev.device_id,
                         account: _sendActor, device: dev.device_id, pub: dev.pub_b64u });
                     await _dmOutbox.queue({ id: clientMsgId, peer: _dmPeer, actor: _sendActor, device: _sendDevice,
-                        pub: myX25519PubB64u(), mode, entries, route: payload,
+                        pub: myX25519PubB64u(), podActor: _bridgeActorForSend(_dmPeer), mode, entries, route: payload,
                         record: { message_id: clientMsgId, thread_id: _sendView.id, from_webid: _sendActor,
                             from_display_name: localStorage.getItem('proxion_display_name') || '',
                             content, timestamp: _clientTs, reply_to_id: payload.reply_to_id || null } });
@@ -8502,6 +8527,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     showToast(t('pod.signOutFailed'), 'error');
                     return;
                 }
+                _boundBridgeWebId = null;
+                try { localStorage.removeItem('proxion_bridge_actor::' + clientDid); } catch { /* private mode */ }
                 // End the Solid session and purge what this browser cached from
                 // it: decrypted DM history, saved messages, ratchet state, the
                 // SW cache and the offline queue.
