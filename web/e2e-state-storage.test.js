@@ -1,3 +1,4 @@
+import { createAuthContextTracker } from './auth-context.js';
 /**
  * Ratchet state storage: per-device pod path, newest copy wins, legacy migration.
  *
@@ -24,7 +25,9 @@ const pod = new Map();          // url -> body
 let failPuts = false;
 let _session = { info: { isLoggedIn: false } };
 let _root = null;
+let _authTracker = createAuthContextTracker(() => _session.info);
 vi.mock('./auth.js', () => ({
+    authContext: () => _authTracker.current(),
     get solidSession() { return _session; },
     podStorageRoot: () => _root,
 }));
@@ -64,7 +67,7 @@ async function makePeer() {
 // Re-open the module as a fresh page load on the same device (same identity key,
 // which lives in localStorage in this IndexedDB-less test environment).
 async function reload() {
-    _resetForTesting();
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _session.info);
     await initE2E();
 }
 
@@ -75,14 +78,14 @@ beforeEach(async () => {
     fetchMock.mockClear();
     _root = ROOT;
     _session = { info: { isLoggedIn: true, webId: WEBID }, fetch: fetchMock };
-    _resetForTesting();
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _session.info);
     await initE2E();
 });
 
 afterEach(() => {
     _session = { info: { isLoggedIn: false } };
     _root = null;
-    _resetForTesting();
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _session.info);
 });
 
 describe('ratchet state pod path', () => {
@@ -293,7 +296,7 @@ describe('ratchet backups keep their initiating context', () => {
         _root = 'https://other.example/';
         try {
             await saveRatchetState(peer, { rootKey: [2], skippedKeys: {} });
-            expect(replacementFetch).toHaveBeenCalledTimes(1);
+            expect(replacementFetch.mock.calls.filter(([url]) => url.includes('/e2e/'))).toHaveLength(1);
             expect(replacementFetch.mock.calls[0][0]).toMatch(/^https:\/\/other.example\//);
         } finally {
             waiting.resolve({ ok: true, status: 201 });
@@ -322,6 +325,7 @@ describe('ratchet backups keep their initiating context', () => {
         const originalFetch = vi.fn(() => stage === 'response' ? waiting.promise : Promise.resolve({ ok: true, text: body }));
         _session.fetch = originalFetch;
         const read = loadRatchetState('did:key:read-switch');
+        await vi.waitFor(() => expect(originalFetch).toHaveBeenCalled());
         if (stage === 'body') await vi.waitFor(() => expect(body).toHaveBeenCalled());
         const replacement = vi.fn(async () => ({ ok: false, status: 404 }));
         _session = { info: { isLoggedIn: true, webId: 'https://other.example/#me' }, fetch: replacement };

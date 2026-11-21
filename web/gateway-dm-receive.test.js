@@ -152,3 +152,19 @@ describe('gateway DM receive recovery', () => {
         expect(h.delivered).toHaveLength(0); expect(h.history.size).toBe(0); expect(h.journal.size).toBe(0);
     });
 });
+
+it('does not display or finalize a delayed decrypt after same-account reauthentication', async () => {
+    const h = harness(); let generation = 1, release, started;
+    h.options.getGeneration = () => generation;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const decrypt = h.e2e.ratchetDecrypt.getMockImplementation();
+    h.e2e.ratchetDecrypt.mockImplementationOnce(async (...args) => {
+        const plain = await decrypt(...args); started(); await waiting; return plain;
+    });
+    const engine = h.engine(), pending = engine.receive(event);
+    await entered; generation++; release();
+    expect(await pending).toBe(false);
+    expect(h.delivered).toEqual([]); expect(h.history.size).toBe(0); expect(h.journal.size).toBe(1);
+    await engine.recover(); expect(h.delivered).toHaveLength(1); expect(h.journal.size).toBe(0);
+});

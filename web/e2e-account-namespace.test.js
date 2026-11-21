@@ -1,3 +1,5 @@
+import * as E2E from './e2e.js';
+import { createAuthContextTracker } from './auth-context.js';
 // e2e-account-namespace.test.js (R134) — the E2E identity key, cached peer keys
 // and verification badges are namespaced per signed-in Solid account, so two
 // accounts on one browser never share an identity. The migration is
@@ -24,7 +26,9 @@ globalThis.localStorage = makeLS();
 // ── Mutable auth session so a test can switch accounts ─────────────────────────
 let _sess = { info: { isLoggedIn: false } };
 let _root = null;
+let _authTracker = createAuthContextTracker(() => _sess.info);
 vi.mock('./auth.js', () => ({
+    authContext: () => _authTracker.current(),
     get solidSession() { return _sess; },
     podStorageRoot: () => _root,
 }));
@@ -39,8 +43,8 @@ const WEBID_B = 'https://bob.example/profile/card#me';
 const KEY_DB = 'proxion-e2e-keys';
 const KEY_STORE = 'keys';
 
-function login(webId) { _sess = { info: { isLoggedIn: true, webId } }; }
-function logout() { _sess = { info: { isLoggedIn: false } }; }
+function login(webId) { _authTracker.note('login'); _sess = { info: { isLoggedIn: true, webId } }; }
+function logout() { _authTracker.note('logout'); _sess = { info: { isLoggedIn: false } }; }
 
 // Read a record straight from IndexedDB (to assert the legacy 'self' survives).
 function idbGet(recKey) {
@@ -77,14 +81,14 @@ function clearKeyStore() {
 
 // Boot the module afresh for a given session (mimics a page reload).
 async function boot(webId) {
-    _resetForTesting();
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info);
     if (webId) login(webId); else logout();
     await initE2E();
     return myX25519PubB64u();
 }
 
 describe('E2E per-account identity namespacing', () => {
-    beforeEach(async () => { _resetForTesting(); logout(); localStorage.clear(); await clearKeyStore(); });
+    beforeEach(async () => { _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info); logout(); localStorage.clear(); await clearKeyStore(); });
 
     it('logged out uses the legacy self record and sets no account marker', async () => {
         const pub = await boot(null);
@@ -185,7 +189,7 @@ describe('E2E per-account identity namespacing', () => {
 
 
 describe('peer-key discovery keeps its initiating account', () => {
-    beforeEach(() => { _resetForTesting(); logout(); _root = null; localStorage.clear(); });
+    beforeEach(() => { _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info); logout(); _root = null; localStorage.clear(); });
     const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
     it.each(['response', 'json'])('ignores an account switch while waiting for %s', async stage => {
         login(WEBID_A); _root = 'https://alice.example/';
@@ -245,7 +249,7 @@ describe('peer-key discovery keeps its initiating account', () => {
 
 describe('gateway recovery account namespace', () => {
     beforeEach(async () => {
-        _resetForTesting(); logout(); _root = null; localStorage.clear(); await clearKeyStore();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info); logout(); _root = null; localStorage.clear(); await clearKeyStore();
     });
     it('keeps encrypted outgoing drafts scoped to their initiating account', async () => {
         await boot(WEBID_A);
@@ -269,4 +273,158 @@ describe('gateway recovery account namespace', () => {
         await boot(WEBID_A);
         expect((await pendingDmReceives()).map(row => row.content)).toEqual(['alice-private']);
     });
+});
+
+describe('live E2E lifecycle isolation without module resets', () => {
+    beforeEach(async () => {
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info);
+        logout(); _root = null; localStorage.clear(); await clearKeyStore();
+    });
+    async function peerKey() {
+        const pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+        return (await crypto.subtle.exportKey('jwk', pair.publicKey)).x;
+    }
+    it('reopens each account identity, ratchet and pending job on a live switch back', async () => {
+        login(WEBID_A); await initE2E(); const a = myX25519PubB64u();
+        const peerPub = await peerKey();
+        await ratchetEncrypt('shared-peer', 'from A', { peerPub });
+        await saveDmSendJob({ id: 'a-job', content: 'A only' });
+        login(WEBID_B);
+        expect(myX25519PubB64u()).toBeNull();
+        await initE2E(); expect(myX25519PubB64u()).not.toBe(a);
+        expect(await listDmSendJobs()).toEqual([]);
+        expect((await ratchetEncrypt('shared-peer', 'from B', { peerPub })).msgNum).toBe(0);
+        login(WEBID_A); await initE2E(); expect(myX25519PubB64u()).toBe(a);
+        expect((await listDmSendJobs()).map(job => job.id)).toEqual(['a-job']);
+        expect((await ratchetEncrypt('shared-peer', 'A again', { peerPub })).msgNum).toBe(1);
+    });
+    it('keeps the same identity and send counter through expiry, pausing encrypted work', async () => {
+        login(WEBID_A); await initE2E(); const a = myX25519PubB64u(), peerPub = await peerKey();
+        await ratchetEncrypt('peer', 'before expiry', { peerPub });
+        await saveDmSendJob({ id: 'pending' });
+        _sess.info.isLoggedIn = false;
+        expect(E2E.e2eScopedKey('key')).toBe('key::' + WEBID_A);
+        await expect(listDmSendJobs()).rejects.toMatchObject({ name: 'E2EContextError' });
+        await expect(ratchetEncrypt('peer', 'expired', { peerPub })).rejects.toMatchObject({ name: 'E2EContextError' });
+        login(WEBID_A); await initE2E(); expect(myX25519PubB64u()).toBe(a);
+        expect((await listDmSendJobs())[0].id).toBe('pending');
+        expect((await ratchetEncrypt('peer', 'after expiry', { peerPub })).msgNum).toBe(1);
+        expect(localStorage.getItem('proxion_e2e_state_peer')).toBeNull();
+    });
+    it('does not let a delayed initializer replace another account identity', async () => {
+        const original = crypto.subtle.generateKey.bind(crypto.subtle);
+        let release, started;
+        const waiting = new Promise(resolve => { release = resolve; });
+        const entered = new Promise(resolve => { started = resolve; });
+        const spy = vi.spyOn(crypto.subtle, 'generateKey').mockImplementationOnce(async (...args) => {
+            started(); await waiting; return original(...args);
+        });
+        try {
+            login(WEBID_A); const pending = initE2E().catch(err => err); await entered;
+            login(WEBID_B); await initE2E(); const b = myX25519PubB64u();
+            release(); expect(await pending).toMatchObject({ name: 'E2EContextError' });
+            expect(myX25519PubB64u()).toBe(b);
+            expect(await idbGet('self::' + WEBID_A)).toBeNull();
+        } finally { release(); spy.mockRestore(); }
+    });
+    it.each(['switch', 'replacement', 'return'])('cancels delayed encryption after %s and leaves counters retryable', async kind => {
+        login(WEBID_A); await initE2E(); const peerPub = await peerKey();
+        const original = crypto.subtle.encrypt.bind(crypto.subtle);
+        let release, started;
+        const waiting = new Promise(resolve => { release = resolve; });
+        const entered = new Promise(resolve => { started = resolve; });
+        const spy = vi.spyOn(crypto.subtle, 'encrypt').mockImplementationOnce(async (...args) => {
+            started(); await waiting; return original(...args);
+        });
+        try {
+            const pending = ratchetEncrypt('peer', 'stale message', { peerPub }).catch(err => err); await entered;
+            if (kind !== 'replacement') { login(WEBID_B); await initE2E(); }
+            if (kind !== 'switch') { login(WEBID_A); await initE2E(); }
+            release(); expect(await pending).toBeInstanceOf(Error);
+            expect(localStorage.getItem(E2E.e2eScopedKey('proxion_e2e_state_peer'))).toBeNull();
+            expect((await ratchetEncrypt('peer', 'valid message', { peerPub })).msgNum).toBe(0);
+        } finally { release(); spy.mockRestore(); }
+    });
+    it('isolates and preserves scoped fallback identities while IndexedDB is unavailable', async () => {
+        const database = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            login(WEBID_A); await initE2E(); const a = myX25519PubB64u();
+            login(WEBID_B); await initE2E(); expect(myX25519PubB64u()).not.toBe(a);
+            login(WEBID_A); await initE2E(); expect(myX25519PubB64u()).toBe(a);
+            globalThis.indexedDB = database;
+            _resetForTesting(); await initE2E(); expect(myX25519PubB64u()).toBe(a);
+        } finally { globalThis.indexedDB = database; }
+    });
+});
+
+it('concurrent initializers in two tabs retain the one committed account identity', async () => {
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info);
+    localStorage.clear(); await clearKeyStore(); login(WEBID_A);
+    const otherTab = await import('./e2e.js?concurrent-tab');
+    try {
+        await Promise.all([initE2E(), otherTab.initE2E()]);
+        expect(myX25519PubB64u()).toBe(otherTab.myX25519PubB64u());
+        expect((await idbGet('self::' + WEBID_A)).x25519Pub).toBe(myX25519PubB64u());
+    } finally { otherTab._resetForTesting(); }
+});
+
+it('cancels a delayed first decrypt without using the replacement account private key', async () => {
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info);
+    localStorage.clear(); await clearKeyStore(); login(WEBID_A); await initE2E();
+    const a = myX25519PubB64u();
+    login(WEBID_B); await initE2E();
+    const wire = await ratchetEncrypt('alice', 'private for Alice', { peerPub: a });
+    login(WEBID_A); await initE2E();
+    const original = crypto.subtle.importKey.bind(crypto.subtle);
+    let release, started;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const spy = vi.spyOn(crypto.subtle, 'importKey').mockImplementationOnce(async (...args) => {
+        started(); await waiting; return original(...args);
+    });
+    try {
+        const pending = E2E.ratchetDecrypt('bob', wire.ciphertext, wire.nonce, wire.msgNum, wire.ratchetPub, wire.pn).catch(err => err);
+        await entered; login(WEBID_B); await initE2E(); release();
+        expect(await pending).toBeInstanceOf(Error);
+        expect(localStorage.getItem(E2E.e2eScopedKey('proxion_e2e_state_bob'))).toBeNull();
+        login(WEBID_A); await initE2E();
+        expect(await E2E.ratchetDecrypt('bob', wire.ciphertext, wire.nonce, wire.msgNum, wire.ratchetPub, wire.pn)).toBe('private for Alice');
+    } finally { release(); spy.mockRestore(); }
+});
+
+it('lets a new account send while old same-peer work is blocked, cancelling old queued work', async () => {
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info);
+    localStorage.clear(); await clearKeyStore(); login(WEBID_A); await initE2E();
+    const pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+    const peerPub = (await crypto.subtle.exportKey('jwk', pair.publicKey)).x;
+    const original = crypto.subtle.encrypt.bind(crypto.subtle);
+    let release, started;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const spy = vi.spyOn(crypto.subtle, 'encrypt').mockImplementationOnce(async (...args) => {
+        started(); await waiting; return original(...args);
+    });
+    try {
+        const pending = ratchetEncrypt('same-peer', 'A old', { peerPub }).catch(err => err);
+        await entered;
+        const queued = ratchetEncrypt('same-peer', 'A queued', { peerPub }).catch(err => err);
+        login(WEBID_B); await initE2E();
+        expect((await ratchetEncrypt('same-peer', 'B now', { peerPub })).msgNum).toBe(0);
+        release(); expect(await pending).toBeInstanceOf(Error); expect(await queued).toBeInstanceOf(Error);
+        login(WEBID_A); await initE2E();
+        expect((await ratchetEncrypt('same-peer', 'A retry', { peerPub })).msgNum).toBe(0);
+    } finally { release(); spy.mockRestore(); }
+});
+
+it('rejects crypto work while the tab no longer owns the ratchet', async () => {
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _sess.info);
+    localStorage.clear(); await clearKeyStore(); login(WEBID_A); await initE2E();
+    let active = true;
+    E2E.setE2EActivityCheck(() => active);
+    await saveDmSendJob({ id: 'still-pending' });
+    active = false;
+    await expect(listDmSendJobs()).rejects.toMatchObject({ name: 'E2EContextError' });
+    active = true;
+    expect((await listDmSendJobs())[0].id).toBe('still-pending');
 });

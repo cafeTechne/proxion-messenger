@@ -2,14 +2,14 @@ import { dmEnvelopeFingerprint } from './dm-receipts.js';
 
 // A frozen send plan precedes every ratchet advance. Per-peer pendingSends then
 // bridge a crash between encryption and saving the fully prepared wire frames.
-export function createDmOutbox({ e2e, getScope, isActive = () => true, send,
+export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActive = () => true, send,
     persistMessage, clearDelivery, canSend = () => true, onPending = () => {}, onConfirmed = () => {},
     onError = err => console.warn('[dm-outbox] pending:', err), now = Date.now }) {
     const jobs = new Map(), queues = new Map(), notified = new Set(), settled = new Set(), attempts = new Map();
     let generation = 0, timer = null, restoring = null;
     const context = () => {
-        const scope = getScope(), epoch = generation;
-        return { scope, current: () => generation === epoch && scope === getScope() && isActive() };
+        const scope = getScope(), epoch = generation, session = getGeneration();
+        return { scope, current: () => generation === epoch && scope === getScope() && session === getGeneration() && isActive() };
     };
     function serialized(id, work) {
         const run = (queues.get(id) || Promise.resolve()).catch(() => {}).then(work);

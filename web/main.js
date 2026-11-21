@@ -1,6 +1,6 @@
-import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, takeAuthError, reauthIssuer } from './auth.js';
+import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, authContext, takeAuthError, reauthIssuer } from './auth.js';
 import {
-    initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
+    initE2E, setE2EActivityCheck, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
     ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
@@ -552,6 +552,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const _dmReceipts = createDmReceiptStore();
         const _gatewayReceives = createGatewayDmReceiver({
             e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives }, receipts: _dmReceipts,
+            getGeneration: () => authContext().epoch,
             getScope: () => JSON.stringify(['gateway', selfWebId || clientDid, clientDid, e2eScopedKey('')]),
             isActive: () => !!clientDid && tabLock.isLeader() && transport.mode !== 'web',
             persistMessage: dmHistorySave, handleEvent: message => handleEvent(message), isSealedPlain,
@@ -854,7 +855,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const _outgoingScope = () => JSON.stringify(['outgoing', selfWebId || clientDid, clientDid, e2eScopedKey('')]);
         const _dmOutbox = createDmOutbox({
             e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob },
-            getScope: _outgoingScope, isActive: () => !!clientDid && tabLock.isLeader(),
+            getScope: _outgoingScope, getGeneration: () => authContext().epoch, isActive: () => !!clientDid && tabLock.isLeader(),
             send: frame => socketSendOrQueue(frame),
             canSend: job => transport.mode === 'web' ? !!solidSession.info.isLoggedIn
                 : job.route.cmd === 'local_dm' && isDmPeerWebId(job.route.target_webid)
@@ -1072,6 +1073,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // One active tab per browser profile (tablock.js): only the leader
         // connects and runs the DM ratchet, or two tabs would fork it.
         const tabLock = createTabLock();
+        setE2EActivityCheck(() => tabLock.isLeader());
         let _forwardedRoomInvite = null;
         tabLock.onInvite(code => {
             if (transport.mode !== 'web' || !solidSession.info.isLoggedIn || socket?.readyState !== WebSocket.OPEN || !parseInvite(code)) return false;
@@ -9274,6 +9276,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // R103: gateway-free DM engine — drops encrypted envelopes into
                     // the peer's pod on send, and watches our own drop box to receive.
                     const webDm = createWebDm({
+                        getGeneration: () => authContext().epoch,
                         pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop, podDmDropExists },
                         e2e: { cachePeerPub, ratchetDecrypt, finishDmReceive, pendingDmReceives, hasSession: hasRatchetSession },
                         notify: { watchResource },

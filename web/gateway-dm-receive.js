@@ -24,13 +24,13 @@ export function gatewayDmEnvelope(event) {
 }
 
 export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleEvent,
-    getScope, toMessage, isActive = () => true, isSealedPlain = () => false,
+    getScope, getGeneration = () => 0, toMessage, isActive = () => true, isSealedPlain = () => false,
     onError = err => console.warn('[gateway-dm] receive pending:', err) }) {
     let generation = 0, timer = null, recovering = null;
     const queues = new Map(), presented = new Set(), waiting = new Map();
     const context = () => {
-        const scope = getScope(), epoch = generation;
-        return { scope, current: () => epoch === generation && scope === getScope() && isActive() };
+        const scope = getScope(), epoch = generation, session = getGeneration();
+        return { scope, current: () => epoch === generation && scope === getScope() && session === getGeneration() && isActive() };
     };
     function serialized(key, work) {
         const run = (queues.get(key) || Promise.resolve()).catch(() => {}).then(work);

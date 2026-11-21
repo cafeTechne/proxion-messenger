@@ -13,7 +13,7 @@ globalThis.localStorage = {
     removeItem: k => { delete _ls[k]; },
     clear: () => { for (const k in _ls) delete _ls[k]; },
 };
-vi.mock('./auth.js', () => ({ solidSession: { info: { isLoggedIn: false } }, podStorageRoot: () => null }));
+vi.mock('./auth.js', () => ({ authContext: () => ({ webId: null, authenticated: false, epoch: 0 }), solidSession: { info: { isLoggedIn: false } }, podStorageRoot: () => null }));
 vi.mock('./pod.js', () => ({ podPublishIdentityAcl: async () => true }));
 
 import { initE2E, myX25519PubB64u, cachePeerPub, isE2EEnabled, ratchetEncrypt, ratchetDecrypt, _resetForTesting } from './e2e.js';

@@ -74,8 +74,10 @@ async function startGateway(name) {
 const online = (p, ms = 20000) => p.waitForFunction(
   () => document.querySelector('.dot')?.classList.contains('online') && !document.getElementById('tab-notice'),
   { timeout: ms }).then(() => true, () => false);
+// A stepped-down tab is hidden. Chromium suspends animation frames there;
+// observe DOM mutations rather than waiting on a background frame callback.
 const hasNotice = (p, ms = 15000) => p.waitForFunction(
-  () => !!document.getElementById('tab-notice'), { timeout: ms }).then(() => true, () => false);
+  () => !!document.getElementById('tab-notice'), { timeout: ms, polling: 'mutation' }).then(() => true, () => false);
 
 async function openTab(ctx, url, name, { expectNotice = false } = {}) {
   const page = await ctx.newPage();

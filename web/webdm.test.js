@@ -513,3 +513,14 @@ describe('createWebDm blocks', () => {
         expect(events).toHaveLength(1);
     });
 });
+
+it('does not publish a delayed signed drop after a replacement session with the same WebID', async () => {
+    let generation = 1, release;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const pod = { podDropDm: vi.fn(async () => true) };
+    const dm = createWebDm({ pod, e2e: {}, getSelfWebId: () => 'https://alice.example/#me',
+        getGeneration: () => generation, signEnvelope: () => waiting });
+    const pending = dm.dropDm({ target_webid: 'https://bob.example/#me', message_id: 'delayed', content: 'cipher' });
+    generation++; release({ signature: 'old-session-signature' });
+    expect(await pending).toBe(false); expect(pod.podDropDm).not.toHaveBeenCalled();
+});

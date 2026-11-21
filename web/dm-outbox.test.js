@@ -145,3 +145,18 @@ describe('durable encrypted text outbox', () => {
         expect(h.frames).toHaveLength(1); expect(h.e2e.ratchetEncrypt).toHaveBeenCalledTimes(1);
     });
 });
+
+it('abandons an old session generation even when the account/device scope is unchanged', async () => {
+    const h = harness(); let generation = 1, release, started;
+    h.options.getGeneration = () => generation;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const encrypt = h.e2e.ratchetEncrypt.getMockImplementation();
+    h.e2e.ratchetEncrypt.mockImplementationOnce(async (...args) => { started(); await waiting; return encrypt(...args); });
+    const engine = h.engine(); await engine.queue(input);
+    const pending = engine.send(input.id); await entered; generation++; release();
+    expect(await pending).toBe(false); expect(h.frames).toEqual([]);
+    expect(h.disk.get(input.id).frames).toBeUndefined();
+    expect(await engine.send(input.id)).toBe(true);
+    expect(h.frames).toHaveLength(1);
+});

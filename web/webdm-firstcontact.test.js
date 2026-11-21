@@ -14,7 +14,7 @@ globalThis.localStorage = {
     removeItem: k     => { delete _ls[k]; },
     clear:      ()    => { for (const k in _ls) delete _ls[k]; },
 };
-vi.mock('./auth.js', () => ({
+vi.mock('./auth.js', () => ({ authContext: () => ({ webId: null, authenticated: false, epoch: 0 }),
     solidSession: { info: { isLoggedIn: false } },
     podStorageRoot: () => null,
 }));

@@ -8,7 +8,7 @@
  *
  * Phase 1 states (no rootKey field) are silently discarded on load.
  */
-import { solidSession, podStorageRoot } from './auth.js';
+import { solidSession, podStorageRoot, authContext } from './auth.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
 import { podPublishIdentityAcl } from './pod.js';
 
@@ -40,6 +40,48 @@ let _initDone    = false;
 let _initPromise = null;
 const _stateCache = {};   // peerId -> state (in-memory, cleared on reset)
 
+// Private runtime state is owned by one account. Session generations cancel
+// async work without changing persisted account/device namespaces.
+let _runtimeOwner = undefined, _runtimeEpoch = null, _runtimeGeneration = 0;
+let _activityCheck = () => true, _wasActive = true;
+export function setE2EActivityCheck(current) {
+    _activityCheck = current; _runtimeGeneration++; _initPromise = null;
+}
+export class E2EContextError extends Error {
+    constructor() { super('Encryption context changed; retry after signing in'); this.name = 'E2EContextError'; }
+}
+function _syncRuntime() {
+    const context = authContext();
+    if (_runtimeOwner !== context.webId) {
+        _runtimeOwner = context.webId;
+        _myPrivKey = _myPubB64u = _stateEncKey = null;
+        _initDone = false; e2eSupported = false;
+        for (const key in _stateCache) delete _stateCache[key];
+    }
+    const active = !!_activityCheck();
+    if (_runtimeEpoch !== context.epoch || active !== _wasActive) {
+        _wasActive = active;
+        _runtimeEpoch = context.epoch;
+        _runtimeGeneration++;
+        _initPromise = null;
+    }
+    return context;
+}
+function _cryptoContext() {
+    const auth = _syncRuntime(), generation = _runtimeGeneration;
+    const current = () => {
+        const next = _syncRuntime();
+        return generation === _runtimeGeneration && _activityCheck() && (!next.webId || next.authenticated);
+    };
+    return { webId: auth.webId, generation, current,
+        assert: () => { if (!current()) throw new E2EContextError(); } };
+}
+async function _ready(context) {
+    context.assert();
+    await initE2E();
+    context.assert();
+}
+
 // Per-peer serialization. ratchetEncrypt/ratchetDecrypt each load -> mutate ->
 // saveRatchetState (a wholesale replace of the cached state); if a send and a
 // pod-drain receive for the same peer interleave across awaits, the later save
@@ -47,10 +89,19 @@ const _stateCache = {};   // peerId -> state (in-memory, cleared on reset)
 // dropped messages). Run one ratchet op per peer at a time via a promise chain.
 const _peerQueues = {};   // peerId -> tail promise of the queue
 function _serialize(peerId, fn) {
-    const prev = _peerQueues[peerId] || Promise.resolve();
-    const run = prev.catch(() => {}).then(fn);   // wait for prev to settle, then run
-    _peerQueues[peerId] = run.catch(() => {});    // a failed op must not poison the chain
-    return run;                                    // caller gets fn's real result/rejection
+    const context = _cryptoContext();
+    const key = JSON.stringify([context.webId, context.generation, peerId]);
+    const prev = _peerQueues[key] || Promise.resolve();
+    const run = prev.catch(() => {}).then(async () => {
+        context.assert();
+        const result = await fn(context);
+        context.assert();
+        return result;
+    });
+    const tail = run.catch(() => {});
+    _peerQueues[key] = tail;
+    tail.then(() => { if (_peerQueues[key] === tail) delete _peerQueues[key]; });
+    return run;
 }
 
 // Resolves once every ratchet operation queued so far has finished and saved
@@ -93,13 +144,34 @@ async function _idbGetKeys(recKey) {
         r.onerror = () => reject(r.error);
     });
 }
-async function _idbPutKeys(rec, recKey) {
+// Atomic insert/legacy claim: concurrent tabs cannot replace an identity or
+// let two accounts adopt the same unclaimed legacy key.
+async function _idbEnsureKeys(candidate, recKey, legacy, context) {
     const db = await _openKeyDb();
+    context.assert();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction(_KEY_STORE, 'readwrite');
-        tx.objectStore(_KEY_STORE).put(rec, recKey);
-        tx.oncomplete = () => resolve(true);
-        tx.onerror = () => reject(tx.error);
+        const tx = db.transaction(_KEY_STORE, 'readwrite'), store = tx.objectStore(_KEY_STORE);
+        let result;
+        const read = store.get(recKey);
+        const claim = store.get('legacy-owner');
+        claim.onsuccess = () => {
+            if (!context.current()) { tx.abort(); return; }
+            result = read.result;
+            if (!result) {
+                const owner = claim.result || _legacyClaimant();
+                const useLegacy = legacy && context.webId && (!owner || owner === context.webId);
+                result = useLegacy ? legacy : candidate;
+                store.put(result, recKey);
+                if (useLegacy) {
+                    // Reserve the local fallback claim before this transaction
+                    // can finish; a subsequent storage outage must honor it.
+                    _setLegacyClaimant(context.webId);
+                    store.put(context.webId, 'legacy-owner');
+                }
+            }
+        };
+        tx.oncomplete = () => resolve({ record: result, claimant: claim.result || (result === legacy ? context.webId : null) });
+        tx.onabort = tx.onerror = () => reject(context.current() ? (tx.error || Error('Key storage failed')) : new E2EContextError());
     });
 }
 
@@ -125,15 +197,10 @@ const _LS_PEER_PREFIXES = [
 ];
 
 function _currentWebId() {
-    return (solidSession?.info?.isLoggedIn && solidSession.info.webId) || null;
+    return _syncRuntime().webId;
 }
 
 // IndexedDB record key for the identity: account-scoped when signed in, else 'self'.
-function _selfKeyId() {
-    const webId = _currentWebId();
-    return webId ? _LEGACY_ID + '::' + webId : _LEGACY_ID;
-}
-
 // Account-scope a localStorage key to the signed-in WebID (mirrors accountDbName).
 // Exported so the UI modules that read/write these keys stay consistent.
 export function e2eScopedKey(key) {
@@ -179,9 +246,9 @@ async function _genIdentity() {
 // Load the ancient pre-IndexedDB localStorage JWK identity (R110 and earlier), if
 // present, deriving the state key at its EXISTING value so stored state decrypts.
 // Returns a record or null.
-async function _identityFromLsJwk() {
-    const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
-    const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
+async function _identityFromLsJwk(suffix = '') {
+    const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk' + suffix);
+    const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u' + suffix);
     if (!savedJwk || !savedPub) return null;
     try {
         const jwk = JSON.parse(savedJwk);
@@ -283,102 +350,94 @@ export async function safetyNumber(myPubB64u, peerPubB64u) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 export async function initE2E() {
+    const context = _cryptoContext();
+    context.assert();
     if (_initDone) return;
-    if (_initPromise) return _initPromise;
-    _initPromise = _doInit().catch(err => {
-        console.warn('[e2e] init failed, E2E disabled:', err);
-    });
+    if (!_initPromise) {
+        _initPromise = _doInit(context).catch(err => {
+            if (err instanceof E2EContextError) throw err;
+            console.warn('[e2e] init failed, E2E disabled:', err);
+        });
+    }
     return _initPromise;
 }
 
-async function _doInit() {
-    try {
-        void await crypto.subtle.generateKey(
-            { name: 'X25519' }, false, ['deriveBits']);
-    } catch {
-        return;
+async function _fallbackIdentity(context) {
+    const suffix = context.webId ? '::' + context.webId : '';
+    const privKey = 'proxion_e2e_x25519_priv_jwk' + suffix;
+    const pubKey = 'proxion_e2e_x25519_pub_b64u' + suffix;
+    context.assert();
+    // Claim legacy synchronously before any crypto await. Other accounts must
+    // create their own scoped key, including when IndexedDB is unavailable.
+    if (context.webId && !localStorage.getItem(privKey)
+            && (!_legacyClaimant() || _legacyClaimant() === context.webId)) {
+        const priv = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
+        const pub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
+        if (priv && pub) {
+            _setLegacyClaimant(context.webId);
+            localStorage.setItem(privKey, priv); localStorage.setItem(pubKey, pub);
+            _migrateLegacyLsCaches(context.webId);
+        }
     }
-
-    // Preferred path: keep the identity key and state key as non-extractable
-    // CryptoKeys in IndexedDB, under a per-account record key (see _selfKeyId).
-    // A returning account loads its own record; the FIRST account to sign in on
-    // this browser claims the pre-existing legacy identity (non-destructively);
-    // any later account gets a fresh key of its own. Fall back to the legacy
-    // localStorage keypair only when IndexedDB is unavailable.
-    let usedIdb = false;
-    try {
-        const webId = _currentWebId();
-        const keyId = _selfKeyId();
-        const rec = await _idbGetKeys(keyId);
-        if (rec && rec.x25519Priv && rec.stateKey && rec.x25519Pub) {
-            _myPrivKey = rec.x25519Priv;
-            _myPubB64u = rec.x25519Pub;
-            _stateEncKey = rec.stateKey;
-            usedIdb = true;
+    let jwk = null, pub = localStorage.getItem(pubKey);
+    try { jwk = JSON.parse(localStorage.getItem(privKey)); } catch { /* missing legacy key */ }
+    if (!jwk || !pub) {
+        const pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+        jwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
+        pub = (await crypto.subtle.exportKey('jwk', pair.publicKey)).x;
+        context.assert();
+        // A parallel initializer may already have committed this same identity.
+        if (localStorage.getItem(privKey) && localStorage.getItem(pubKey)) {
+            jwk = JSON.parse(localStorage.getItem(privKey)); pub = localStorage.getItem(pubKey);
         } else {
-            // No record for this account yet. When signed in, try to claim the
-            // legacy identity — but only if unclaimed or already ours, so a second
-            // account never adopts the first's key. Legacy is copied, never moved.
-            let id = null;
-            if (webId) {
-                const claimant = _legacyClaimant();
-                if (!claimant || claimant === webId) {
-                    const legacy = await _loadLegacyIdentity();
-                    if (legacy) {
-                        id = { x25519Priv: legacy.x25519Priv, x25519Pub: legacy.x25519Pub, stateKey: legacy.stateKey };
-                        await _idbPutKeys(id, keyId);
-                        _setLegacyClaimant(webId);
-                        _migrateLegacyLsCaches(webId);
-                    }
-                }
-            }
-            if (!id) {
-                // Not-signed-in path also runs the ancient localStorage-JWK
-                // migration (single local identity, unchanged from R110); a fresh
-                // account with no legacy simply generates a new key.
-                if (keyId === _LEGACY_ID) id = await _identityFromLsJwk();
-                if (!id) id = await _genIdentity();
-                await _idbPutKeys(id, keyId);
-                // Only the single-identity ('self') path removes the extractable
-                // scalar from localStorage; the account paths leave the legacy
-                // record intact (never destructive to a claimable identity).
-                if (keyId === _LEGACY_ID) {
-                    try { localStorage.removeItem('proxion_e2e_x25519_priv_jwk'); } catch { /* ignore */ }
-                    try { localStorage.setItem('proxion_e2e_x25519_pub_b64u', id.x25519Pub); } catch { /* ignore */ }
-                }
-            }
-            _myPrivKey = id.x25519Priv; _myPubB64u = id.x25519Pub; _stateEncKey = id.stateKey;
-            usedIdb = true;
+            localStorage.setItem(privKey, JSON.stringify(jwk)); localStorage.setItem(pubKey, pub);
         }
-    } catch { usedIdb = false; }
-
-    if (!usedIdb) {
-        // Legacy fallback (no IndexedDB): keep the extractable JWK in localStorage
-        // so the key persists at all. Less private, but preserves functionality.
-        const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
-        const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
-        let jwk = null;
-        if (savedJwk && savedPub) { try { jwk = JSON.parse(savedJwk); _myPubB64u = savedPub; } catch { jwk = null; } }
-        if (!jwk) {
-            const kp = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
-            jwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
-            const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
-            _myPubB64u = pubJwk.x;
-            localStorage.setItem('proxion_e2e_x25519_priv_jwk', JSON.stringify(jwk));
-            localStorage.setItem('proxion_e2e_x25519_pub_b64u', _myPubB64u);
-        }
-        _myPrivKey = await crypto.subtle.importKey('jwk', jwk, { name: 'X25519' }, false, ['deriveBits']);
-        const raw = await hkdf(b64uDec(jwk.d), 'proxion-e2e-state-v1', '', 256);
-        _stateEncKey = await _aesKey(raw);
     }
-
-    _initDone = true;
-    e2eSupported = true;
-
-    _publishPubToPod().catch(() => {});
+    const priv = await crypto.subtle.importKey('jwk', jwk, { name: 'X25519' }, false, ['deriveBits']);
+    const raw = await hkdf(b64uDec(jwk.d), 'proxion-e2e-state-v1', '', 256);
+    const stateKey = await _aesKey(raw);
+    context.assert();
+    return { x25519Priv: priv, x25519Pub: pub, stateKey };
 }
 
-async function _publishPubToPod() {
+async function _doInit(context) {
+    const keyId = context.webId ? _LEGACY_ID + '::' + context.webId : _LEGACY_ID;
+    let identity;
+    try {
+        identity = await _idbGetKeys(keyId);
+        context.assert();
+        if (!identity) {
+            const legacy = context.webId ? await _loadLegacyIdentity() : await _identityFromLsJwk();
+            context.assert();
+            // Account-scoped fallback keys must migrate into IndexedDB too when
+            // storage becomes available again; never rotate a returning user.
+            const scoped = context.webId ? await _identityFromLsJwk('::' + context.webId) : null;
+            const candidate = scoped || (!context.webId && legacy) || await _genIdentity();
+            context.assert();
+            const saved = await _idbEnsureKeys(candidate, keyId, scoped ? null : legacy, context);
+            context.assert();
+            identity = saved.record;
+            if (context.webId && saved.claimant === context.webId) {
+                _setLegacyClaimant(context.webId); _migrateLegacyLsCaches(context.webId);
+            }
+            if (!context.webId) {
+                localStorage.removeItem('proxion_e2e_x25519_priv_jwk');
+                localStorage.setItem('proxion_e2e_x25519_pub_b64u', identity.x25519Pub);
+            }
+        }
+    } catch (err) {
+        context.assert(); // cancellation is never a reason to use legacy keys
+        if (err instanceof E2EContextError) throw err;
+        identity = await _fallbackIdentity(context);
+    }
+    context.assert();
+    _myPrivKey = identity.x25519Priv; _myPubB64u = identity.x25519Pub; _stateEncKey = identity.stateKey;
+    _initDone = true; e2eSupported = true;
+    _publishPubToPod(context).catch(() => {});
+}
+
+async function _publishPubToPod(context) {
+    context.assert();
     const root = typeof podStorageRoot === 'function' ? podStorageRoot() : null;
     if (!root || !solidSession?.info?.isLoggedIn) return;
     const url = root + 'proxion/identity/x25519-pub.json';
@@ -387,7 +446,7 @@ async function _publishPubToPod() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version: 1, pub: _myPubB64u }),
     });
-    if (!res || !res.ok) return;
+    if (!context.current() || !res || !res.ok) return;
     // A peer must READ this public X25519 key from our pod to discover it without a
     // gateway; give it a public-read ACL so it does not inherit proxion/'s owner-only
     // default and 403 the peer. Public data only (the X25519 public key).
@@ -396,7 +455,7 @@ async function _publishPubToPod() {
 
 // ── Peer key management ───────────────────────────────────────────────────────
 
-export function myX25519PubB64u() { return _myPubB64u; }
+export function myX25519PubB64u() { _syncRuntime(); return _myPubB64u; }
 
 export function cachePeerPub(peerId, pubB64u) {
     if (!peerId || !pubB64u || typeof pubB64u !== 'string') return;
@@ -422,6 +481,7 @@ function _peerPub(peerId) {
 }
 
 export function isE2EEnabled(peerId) {
+    _syncRuntime();
     return e2eSupported && !!_peerPub(peerId);
 }
 
@@ -446,6 +506,7 @@ export function markPeerVerified(peerId) {
 // via: { fetch, ownRoot, current? } reads through another pod fetch (the desktop client's
 // gateway pod bridge, gwpod.js) instead of the Solid session.
 export async function fetchAndCachePeerPub(peerId, peerPodRoot, via = null) {
+    const cryptoContext = _cryptoContext();
     const session = solidSession;
     const webId = _currentWebId();
     const sessionId = session?.info?.sessionId;
@@ -454,7 +515,7 @@ export async function fetchAndCachePeerPub(peerId, peerPodRoot, via = null) {
     if (!peerPodRoot || !(via || solidSession?.info?.isLoggedIn)) return false;
     if (!isPeerPodRootAllowed(peerPodRoot, ownRoot)) return false;   // SSRF gate, see ssrf.js
     // Never apply a delayed result to a different account's cache or trust mark.
-    const current = () => solidSession === session && _currentWebId() === webId
+    const current = () => cryptoContext.current() && solidSession === session && _currentWebId() === webId
         && session?.info?.sessionId === sessionId
         && (via ? (!via.current || via.current())
             : session?.info?.isLoggedIn && podStorageRoot() === ownRoot);
@@ -526,6 +587,7 @@ function _statePodUrls(peerId) {
 // Storage awaits and queued backups must never inherit a replacement account's
 // credentials, root or device key. Capture before doing any asynchronous work.
 function _stateContext() {
+    const cryptoContext = _cryptoContext();
     const session = solidSession;
     const webId = _currentWebId();
     const loggedIn = !!session?.info?.isLoggedIn;
@@ -535,7 +597,7 @@ function _stateContext() {
     return {
         webId,
         fetch: session?.fetch?.bind(session),
-        current: () => solidSession === session && _currentWebId() === webId
+        current: () => cryptoContext.current() && solidSession === session && _currentWebId() === webId
             && !!session?.info?.isLoggedIn === loggedIn && session?.info?.sessionId === sessionId
             && podStorageRoot() === root && _myPubB64u === pub && _stateEncKey === stateKey,
     };
@@ -590,6 +652,7 @@ export async function _podStateWritesSettled() {
 }
 
 export async function loadRatchetState(peerId) {
+    await _ready(_cryptoContext());
     const context = _stateContext();
     if (_stateCache[peerId]) {
         const s = _stateCache[peerId];
@@ -629,6 +692,8 @@ export async function loadRatchetState(peerId) {
 }
 
 export async function saveRatchetState(peerId, state, { current = () => true } = {}) {
+    if (!current()) throw new E2EContextError();
+    await _ready(_cryptoContext());
     const context = _stateContext();
     const storageKey = e2eScopedKey('proxion_e2e_state_' + peerId);
     const next = { ...state, ver: (Number.isSafeInteger(state.ver) ? state.ver : 0) + 1 };
@@ -652,7 +717,9 @@ export async function saveRatchetState(peerId, state, { current = () => true } =
 // Recovery entries contain plaintext only inside the existing encrypted state.
 // Remove one only after history and a durable exact-envelope receipt were saved.
 export function finishDmReceive(peerId, receiveId, current = () => true) {
-    return _serialize(peerId, async () => {
+    return _serialize(peerId, async context => {
+        const callerCurrent = current;
+        current = () => context.current() && callerCurrent();
         if (!current()) return false;
         const state = await loadRatchetState(peerId);
         if (!current()) return false;
@@ -671,7 +738,7 @@ export function finishDmReceive(peerId, receiveId, current = () => true) {
 // Local recovery needs message metadata when a gateway will not replay a socket
 // event after reload. The metadata is encrypted in the same state record.
 export async function pendingDmReceives() {
-    if (!_initDone) await initE2E();
+    await _ready(_cryptoContext());
     const context = _stateContext(), webId = _currentWebId();
     const prefix = 'proxion_e2e_state_', suffix = webId ? '::' + webId : '';
     const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i));
@@ -695,7 +762,9 @@ export async function pendingDmReceives() {
 }
 
 export function finishDmSend(peerId, sendId, current = () => true) {
-    return _serialize(peerId, async () => {
+    return _serialize(peerId, async context => {
+        const callerCurrent = current;
+        current = () => context.current() && callerCurrent();
         if (!current()) return false;
         const state = await loadRatchetState(peerId);
         if (!current()) return false;
@@ -713,7 +782,7 @@ function _sendJobKey(id) {
     return e2eScopedKey(_SEND_JOB_PREFIX + id);
 }
 export async function saveDmSendJob(job, current = () => true) {
-    if (!_initDone) await initE2E();
+    await _ready(_cryptoContext());
     if (!_stateEncKey) throw Error('Encrypted send storage unavailable');
     const context = _stateContext(), key = _sendJobKey(job.id);
     const enc = await _encState({ job });
@@ -721,7 +790,7 @@ export async function saveDmSendJob(job, current = () => true) {
     localStorage.setItem(key, enc);
 }
 export async function listDmSendJobs() {
-    if (!_initDone) await initE2E();
+    await _ready(_cryptoContext());
     const context = _stateContext(), webId = _currentWebId(), suffix = webId ? '::' + webId : '';
     const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i));
     const jobs = [];
@@ -736,7 +805,7 @@ export async function listDmSendJobs() {
     return jobs;
 }
 export function removeDmSendJob(id, current = () => true) {
-    if (!current()) return false;
+    if (!current() || !_cryptoContext().current()) return false;
     localStorage.removeItem(_sendJobKey(id));
     return true;
 }
@@ -773,13 +842,13 @@ async function _initSenderState(peerPubB64u) {
     };
 }
 
-async function _initReceiverState(senderRatchetPubB64u) {
+async function _initReceiverState(senderRatchetPubB64u, identityKey) {
     const senderRatchetKey = await crypto.subtle.importKey(
         'raw', b64uDec(senderRatchetPubB64u), { name: 'X25519' }, false, []);
 
     // Derive initial recv chain (symmetric with sender's send chain)
     const dhBits = new Uint8Array(await crypto.subtle.deriveBits(
-        { name: 'X25519', public: senderRatchetKey }, _myPrivKey, 256));
+        { name: 'X25519', public: senderRatchetKey }, identityKey, 256));
     const { newRootKey: rootKey, chainKey: recvChain } = await kdfRk(ZERO_ROOT, dhBits);
 
     // Pre-derive send chain: generate own ratchet keypair + DH ratchet step
@@ -888,10 +957,11 @@ async function _dhRatchetSend(state) {
 // ── ratchetEncrypt ────────────────────────────────────────────────────────────
 
 export function ratchetEncrypt(peerId, plaintext, opts = {}) {
-    return _serialize(peerId, () => _ratchetEncryptImpl(peerId, plaintext, opts));
+    return _serialize(peerId, context => _ratchetEncryptImpl(peerId, plaintext,
+        { ...opts, current: () => context.current() && (!opts.current || opts.current()) }));
 }
 async function _ratchetEncryptImpl(peerId, plaintext, opts = {}) {
-    if (!_initDone) await initE2E();
+    await _ready(_cryptoContext());
     if (!e2eSupported) throw new Error('E2E not supported in this browser');
 
     const current = opts.current || (() => true), sendId = opts.sendId;
@@ -939,7 +1009,8 @@ async function _ratchetEncryptImpl(peerId, plaintext, opts = {}) {
 // message's ratchet_pub. Callers that have not authenticated the sender pass
 // false, so an unauthenticated message can never establish the peer's session.
 export function ratchetDecrypt(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0, opts = {}) {
-    return _serialize(peerId, () => _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn, opts));
+    return _serialize(peerId, context => _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn,
+        { ...opts, current: () => context.current() && (!opts.current || opts.current()) }));
 }
 
 // True when a ratchet session exists for peerId (serialized with ratchet ops).
@@ -947,7 +1018,7 @@ export function hasRatchetSession(peerId) {
     return _serialize(peerId, async () => !!(await loadRatchetState(peerId)));
 }
 async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0, opts = {}) {
-    if (!_initDone) await initE2E();
+    await _ready(_cryptoContext());
     if (!e2eSupported) throw new E2EDecryptError('E2E not supported');
     if (!ratchetPubB64u) throw new E2EDecryptError('ratchet_pub required');
     msgNum = Number(msgNum);
@@ -957,6 +1028,7 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
     }
 
     const current = opts.current || (() => true);
+    const identityKey = _myPrivKey;
     if (!current()) throw new E2EDecryptError('Receive context changed');
     const receiveId = opts.receiveId;
     if (receiveId !== undefined && (typeof receiveId !== 'string' || !/^[a-f0-9]{64}$/.test(receiveId))) {
@@ -990,7 +1062,7 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
     } else {
         if (!state) {
             if (opts && opts.allowInit === false) throw new E2ENoSessionError('No session for peer');
-            state = await _initReceiverState(ratchetPubB64u);
+            state = await _initReceiverState(ratchetPubB64u, identityKey);
         } else if (ratchetPubB64u !== state.theirRatchetPub) {
             state = await _dhRatchetReceive(state, ratchetPubB64u, pn);
         }
@@ -1037,6 +1109,8 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
 // ── Test utility (not for production use) ────────────────────────────────────
 
 export function _resetForTesting() {
+    _runtimeOwner = undefined; _runtimeEpoch = null; _runtimeGeneration++;
+    _activityCheck = () => true; _wasActive = true;
     _myPrivKey = null;
     _myPubB64u = null;
     _stateEncKey = null;

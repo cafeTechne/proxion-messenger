@@ -1,3 +1,4 @@
+import { createAuthContextTracker } from './auth-context.js';
 /**
  * web/e2e.test.js — Unit tests for the Phase 2 Double Ratchet E2E module.
  *
@@ -29,7 +30,9 @@ globalThis.localStorage = {
 // the many initE2E() calls below leave the pod publish path a no-op.
 let _e2eSession = { info: { isLoggedIn: false } };
 let _e2eRoot = null;
+let _authTracker = createAuthContextTracker(() => _e2eSession.info);
 vi.mock('./auth.js', () => ({
+    authContext: () => _authTracker.current(),
     get solidSession() { return _e2eSession; },
     podStorageRoot: () => _e2eRoot,
 }));
@@ -81,7 +84,7 @@ async function makeX25519Pair() {
 
 // Swap the module's identity to a given keypair.
 async function swapIdentity(privJwk, pubB64u) {
-    _resetForTesting();
+    _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
     localStorage.setItem('proxion_e2e_x25519_priv_jwk', JSON.stringify(privJwk));
     localStorage.setItem('proxion_e2e_x25519_pub_b64u', pubB64u);
     await initE2E();
@@ -217,7 +220,7 @@ describe('contact verification', () => {
 describe('initE2E', () => {
     beforeEach(() => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
     });
 
     it('sets e2eSupported=true and generates keypair', async () => {
@@ -232,7 +235,7 @@ describe('initE2E', () => {
     it('reloads persisted keypair', async () => {
         await initE2E();
         const pub1 = myX25519PubB64u();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
         expect(myX25519PubB64u()).toBe(pub1);
     });
@@ -245,7 +248,7 @@ describe('Alice→Bob ratchet (Phase 2)', () => {
 
     beforeAll(async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
         alice = {
             pubB64u: myX25519PubB64u(),
@@ -310,7 +313,7 @@ describe('Alice→Bob ratchet (Phase 2)', () => {
 describe('multi-round DH ratchet', () => {
     it('ratchetPub rotates on each direction switch', async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
 
         const alice = {
@@ -364,7 +367,7 @@ describe('multi-round DH ratchet', () => {
 describe('within-chain out-of-order decrypt', () => {
     it('delivers msgs 0,1,2 out-of-order via skip buffer', async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
 
         const alice = {
@@ -395,7 +398,7 @@ describe('within-chain out-of-order decrypt', () => {
 describe('cross-chain out-of-order decrypt', () => {
     it('delivers msgs from old chain after new ratchet pub received', async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
 
         const alice = {
@@ -450,7 +453,7 @@ describe('skip buffer overflow', () => {
 
     beforeAll(async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
         alice = {
             pubB64u: myX25519PubB64u(),
@@ -505,7 +508,7 @@ describe('hostile-message hardening', () => {
 
     beforeAll(async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
         alice = {
             pubB64u: myX25519PubB64u(),
@@ -566,7 +569,7 @@ describe('hostile-message hardening', () => {
 describe('Phase 1 state migration', () => {
     it('Phase 1 state (no rootKey) is discarded → clean re-init on next encrypt', async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
 
         const bob = await makeX25519Pair();
@@ -594,7 +597,7 @@ describe('Phase 1 state migration', () => {
 describe('state persistence', () => {
     it('state survives localStorage round-trip', async () => {
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
 
         const bob = await makeX25519Pair();
@@ -604,7 +607,7 @@ describe('state persistence', () => {
         await ratchetEncrypt('bob-persist', 'msg0');
 
         // Wipe in-memory cache; keep localStorage
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E(); // reloads same keypair
         cachePeerPub('bob-persist', bob.pubB64u);
 
@@ -642,7 +645,7 @@ describe('publishing the x25519 public key makes it peer-readable (D2)', () => {
         _publishIdentityAcl.mockClear();
         try {
             localStorage.clear();
-            _resetForTesting();
+            _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
             await initE2E();
             await flush();
             const pubUrl = 'https://me.pod.example/proxion/identity/x25519-pub.json';
@@ -654,14 +657,14 @@ describe('publishing the x25519 public key makes it peer-readable (D2)', () => {
         } finally {
             _e2eSession = { info: { isLoggedIn: false } };
             _e2eRoot = null;
-            _resetForTesting();
+            _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         }
     });
 
     it('does not touch the pod (or its ACL) when logged out', async () => {
         _publishIdentityAcl.mockClear();
         localStorage.clear();
-        _resetForTesting();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
         await initE2E();
         await flush();
         expect(_publishIdentityAcl).not.toHaveBeenCalled();
@@ -688,11 +691,11 @@ describe('recoverable pod DM receives', () => {
         expect(await decrypt(encrypted, { receiveId })).toBe('recover this message');
         const version = (await loadRatchetState('recovery-alice')).ver;
         expect(localStorage.getItem('proxion_e2e_state_recovery-alice')).not.toContain('recover this message');
-        _resetForTesting(); await initE2E();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         expect(await decrypt(encrypted, { receiveId })).toBe('recover this message');
         expect((await loadRatchetState('recovery-alice')).ver).toBe(version);
         await finishDmReceive('recovery-alice', receiveId);
-        _resetForTesting(); await initE2E();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         await expect(decrypt(encrypted)).rejects.toThrow('already consumed');
         expect((await loadRatchetState('recovery-alice')).pendingReceives).toEqual({});
     });
@@ -749,7 +752,7 @@ describe('recoverable pod DM receives', () => {
         await dm.drainOnce();
         expect(events).toHaveLength(1); expect(deleted).not.toHaveBeenCalled();
         if (mode === 'reload') {
-            _resetForTesting(); await initE2E();
+            _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
             dm = reader(createDmReceiptStore(db), persist, [d], events, deleted);
         }
         await dm.drainOnce();
@@ -772,7 +775,7 @@ describe('recoverable pod DM receives', () => {
         const persist = async msg => { history.set(msg.message_id, msg); return true; };
         await reader(receipts, persist, [d], events, deleted).drainOnce();
         expect(deleted).not.toHaveBeenCalled(); expect(history.size).toBe(1);
-        _resetForTesting(); await initE2E();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         remember.mockRestore();
         await reader(createDmReceiptStore(db), persist, [d], [], deleted).drainOnce();
         expect(deleted).toHaveBeenCalledTimes(1); expect(history.size).toBe(1);
@@ -819,7 +822,7 @@ describe('recoverable pod DM receives', () => {
         persist.mockResolvedValueOnce(false);
         await dm.drainOnce();
         expect(events).toHaveLength(1); expect(deleted).not.toHaveBeenCalled();
-        _resetForTesting(); await initE2E();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         dm = createWebDm({ ...options, receipts: createDmReceiptStore(db) });
         await dm.drainOnce();
         expect(deleted).toHaveBeenCalledTimes(1);
@@ -847,7 +850,7 @@ describe('recoverable pod DM receives', () => {
         expect(await receiver.receive(event)).toBe(false);
         expect(events).toHaveLength(1);
         expect(await pendingDmReceives()).toHaveLength(1);
-        receiver.stop(); _resetForTesting(); await initE2E();
+        receiver.stop(); _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         storageWorks = true;
         receiver = createGatewayDmReceiver({ ...options, receipts: createDmReceiptStore(db) });
         await receiver.recover();
@@ -866,7 +869,7 @@ describe('recoverable pod DM receives', () => {
         await decrypt(encrypted, { receiveId: fingerprint });
         const scope = JSON.stringify(['https://bob.example/profile/card#me', 'bob-device']);
         await receipts.remember(scope, fingerprint, d.url);
-        _resetForTesting(); await initE2E();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         const persist = vi.fn(), events = [], deleted = vi.fn(async () => true);
         await reader(receipts, persist, [d], events, deleted).drainOnce();
         expect(events).toHaveLength(0); expect(persist).not.toHaveBeenCalled();
@@ -880,7 +883,7 @@ describe('atomic encrypted sender outbox', () => {
     let bob;
     beforeEach(async () => {
         _e2eSession = { info: { isLoggedIn: false } }; _e2eRoot = null;
-        localStorage.clear(); _resetForTesting(); await initE2E();
+        localStorage.clear(); _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         bob = await makeX25519Pair(); cachePeerPub('atomic-bob', bob.pubB64u);
     });
     const input = () => ({ id: 'atomic-send', actor: 'alice', device: 'alice-device', peer: 'bob-account',
@@ -917,7 +920,7 @@ describe('atomic encrypted sender outbox', () => {
         const [exact] = Object.values(spent.pendingSends);
         expect(spent.sendMsgNum).toBe(1); expect((await listDmSendJobs())[0].frames).toBeUndefined();
         expect(localStorage.getItem('proxion_e2e_send_job_atomic-send')).not.toContain('durable hello');
-        _resetForTesting(); await initE2E();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         await h.engine().restore({ force: true });
         expect(h.frames[0]).toMatchObject({ content: exact.ciphertext, nonce: exact.nonce, msg_num: exact.msgNum });
         expect((await loadRatchetState('atomic-bob')).sendMsgNum).toBe(1);
@@ -950,7 +953,7 @@ describe('atomic encrypted sender outbox', () => {
         });
         expect(await engine.send('atomic-send')).toBe(false); spy.mockRestore(); expect(h.frames).toHaveLength(0);
         const [firstCipher] = Object.values((await loadRatchetState('bob-device-1')).pendingSends);
-        _resetForTesting(); await initE2E();
+        _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info); await initE2E();
         const restored = h.engine(); await restored.restore({ force: true });
         expect(h.frames[0].fanout[0].payload.content).toBe(firstCipher.ciphertext);
         expect((await loadRatchetState('bob-device-1')).sendMsgNum).toBe(1);

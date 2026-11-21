@@ -93,7 +93,7 @@ export function createSenderVerifier({ verifyDmSig, verifyFanoutSig, fetchSigner
 // as a message request (left in the inbox, not decrypted) until the user
 // accepts; strictSender also refuses an unverified unencrypted drop instead of
 // showing it. The browser build passes none of these and behaves as before.
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked, isKnownSender, onMessageRequest, strictSender = false, receipts = null }) {
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked, isKnownSender, onMessageRequest, strictSender = false, receipts = null, getGeneration = () => 0 }) {
     let _unsub = null;
     let _draining = null;
     let _drainingGeneration = 0;
@@ -188,8 +188,8 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
     async function dropDm(payload) {
-        const generation = _generation, accountScope = scope();
-        const current = () => generation === _generation && accountScope === scope();
+        const generation = _generation, accountScope = scope(), session = getGeneration();
+        const current = () => generation === _generation && accountScope === scope() && session === getGeneration();
         const to = payload.target_webid || payload.to_webid;
         if (!to) return false;
         const root = peerPodRootFromWebId(to);
@@ -206,8 +206,8 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     // our own other devices). Each entry goes to that WebID's pod inbox, tagged
     // with to_device_id so the right device claims it (devices share a pod inbox).
     async function dropFanout(cmd) {
-        const generation = _generation, accountScope = scope();
-        const current = () => generation === _generation && accountScope === scope();
+        const generation = _generation, accountScope = scope(), session = getGeneration();
+        const current = () => generation === _generation && accountScope === scope() && session === getGeneration();
         const entries = cmd && cmd.fanout;
         if (!Array.isArray(entries)) return false;
         // Every intended recipient device must accept its copy. The fanout also
@@ -396,8 +396,8 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     }
 
     async function _drain(generation) {
-        const accountScope = scope();
-        const current = () => generation === _generation && accountScope === scope();
+        const accountScope = scope(), session = getGeneration();
+        const current = () => generation === _generation && accountScope === scope() && session === getGeneration();
         await _reconcile(accountScope, current);
         if (!current()) return;
         const drops = await pod.podReadDmDrops();

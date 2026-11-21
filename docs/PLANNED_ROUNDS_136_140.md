@@ -1,6 +1,6 @@
 # Planned rounds 136–140
 
-Status: Round 136 complete; Round 137 in progress; Rounds 138–140 remain planned.
+Status: Rounds 136–137 complete; Rounds 138–140 remain planned.
 Rounds 130–135 remain closed; the limitations recorded in their closeouts are inputs to new work,
 not additions to those completed rounds.
 
@@ -93,17 +93,7 @@ explicit unless an existing protocol can close it safely.
 
 ## Round 137: E2E identity and session lifecycle isolation
 
-Status: in progress. Round 136 is complete. Rounds 130–135 remain closed.
-
-Progress: added a bound account/session generation tracker, retained the account
-namespace on expiry, invalidated cached storage roots on account changes, and
-dropped delayed root discovery after account/session replacement (including a
-switch away and back). Shell cache v299 includes the new module. Auth/root/cache
-checks pass; the frontend suite has 2,516 passing checks and 64 optional skips
-(two subprocess checks required a permitted rerun). The isolated live browser
-account journey passes. Crypto initialization, ratchet caches/queues, legacy-key
-fallback and outbox/receive generation integration remain open; this is not an
-E2E isolation closeout.
+Status: complete. See [Round 137 closeout](ROUND_137_CLOSEOUT.md). Rounds 130–136 remain closed.
 
 ### Problem and result
 
@@ -114,19 +104,19 @@ expiry, reauthentication or tab takeover cannot reuse another identity's state.
 
 ### Bounded work
 
-- [ ] Inventory ownership of `_initDone`, initialization promises, identity/state
+- [x] Inventory ownership of `_initDone`, initialization promises, identity/state
   keys, ratchet caches, per-peer serialization and queued backup jobs. Define one
   consistent account/device context for these resources.
-- [ ] Namespace or replace live caches/queues on context changes. Old async work
+- [x] Namespace or replace live caches/queues on context changes. Old async work
   must finish only in its own context or cancel before committing/rendering;
   new account initialization must not await or adopt an old account's promise.
-- [ ] Preserve the bound account during temporary session expiry: expiry must
+- [x] Preserve the bound account during temporary session expiry: expiry must
   not silently fall back to anonymous keys or unscoped storage. Resume only when
   the same account is authenticated again.
-- [ ] Coordinate identity initialization, outbox/receive recovery and tab
+- [x] Coordinate identity initialization, outbox/receive recovery and tab
   leadership. Preserve per-peer operation ordering and existing immutable send
   payloads during a legitimate same-account recovery.
-- [ ] Preserve intentional key migration and same-account re-login identity;
+- [x] Preserve intentional key migration and same-account re-login identity;
   explicit logout/reset must keep their documented purge semantics. Do not
   regenerate identities merely to bypass a lifecycle failure.
 
