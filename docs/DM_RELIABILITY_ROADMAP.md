@@ -26,3 +26,20 @@ The round stayed limited to outgoing encrypted text DMs and device fanout.
 No new messaging features, new cryptographic primitives or broad transport or
 database rewrite belongs to Round 135. Secondary sealed events and media sending
 remain separate unless an existing text-send dependency requires a narrow fix.
+
+
+## Next five rounds: planned only
+
+Rounds 136–140 address the retained limits in this order:
+
+| Round | Scope |
+| --- | --- |
+| 136 | Persist accepted gateway offline-device queues across restart. |
+| 137 | Bind the complete E2E identity/cache/queue lifecycle to its account/device. |
+| 138 | Expose pending sends and provide safe retry, discard and recipient-change handling. |
+| 139 | Track and recover sender self-sync independently of primary delivery. |
+| 140 | Extend stable encrypted outbox delivery to existing DM media flows. |
+
+See [the five bounded plans](PLANNED_ROUNDS_136_140.md) for dependencies,
+acceptance tests, likely code areas and explicit exclusions. None of these
+rounds has started; completed-round scope remains unchanged.
