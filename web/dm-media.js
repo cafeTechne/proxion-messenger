@@ -61,6 +61,7 @@ export function createDmMediaStore(dbApi = globalThis.indexedDB) {
         }
     }
     return {
+        has: async key => (await operation('readonly', store => store.getKey(key))) !== undefined,
         list: async actor => (await operation('readonly', store => store.getAll())).filter(row => row.actor === actor),
         put: row => operation('readwrite', (store, tx) => {
             const request = store.getAll();
@@ -75,49 +76,45 @@ export function createDmMediaStore(dbApi = globalThis.indexedDB) {
     };
 }
 
-// Each delivery attempt uses fresh ratchet messages; retrying a spent ciphertext
-// under a new inbox URL would leave an undecryptable replay at the recipient.
-// File encryption/prepared chunks stay unchanged across these attempts.
-export async function deliverDmMedia(draft, ctx, { current, obtainKey, hasKey, encrypt, cachePeerPub,
-    getPeerDevices, getOwnDevices, getDeviceId, getPub, dropDm, dropFanout }) {
-    await obtainKey(ctx.peerWebId);
+// Uploaded assets keep their bytes in the draft/pod stores. Only the small
+// encrypted manifest and its frozen delivery plan enter the shared outbox.
+export async function deliverDmMedia(draft, ctx, { outbox, current, obtainKey, hasKey,
+    getPeerDevices, getOwnDevices, getDeviceId, getPub, getPeerPub }) {
+    if (!outbox || !current()) return false;
+    let job = await outbox.find(draft.id);
     if (!current()) return false;
-    const peers = getPeerDevices(), own = getOwnDevices(), pub = getPub();
-    const entry = async (account, device) => {
-        if (!current()) throw Error('context changed');
-        if (!device.device_id || !device.pub_b64u) throw Error('missing device key');
-        const pid = account + '#' + device.device_id;
-        cachePeerPub(pid, device.pub_b64u);
-        const enc = await encrypt(pid, draft.content);
-        return { to_webid: account, to_device_id: device.device_id, payload: {
-            content: enc.ciphertext, e2e: true, nonce: enc.nonce, msg_num: enc.msgNum,
-            pn: enc.pn, ratchet_pub: enc.ratchetPub, from_device_id: getDeviceId(),
-            thread_id: ctx.threadId, thread_peer: ctx.peerWebId, ...(pub ? { x25519_pub: pub } : {}),
-        } };
-    };
-    if (peers.length >= 2) {
-        const fanout = [];
-        for (const device of peers) fanout.push(await entry(ctx.peerWebId, device));
-        for (const device of own) fanout.push(await entry(ctx.actor, device));
-        return current() && await dropFanout({ message_id: draft.id, fanout });
+    if (job && (!job.media || job.media.draftKey !== draft.key || job.actor !== ctx.actor
+            || job.peer !== ctx.peerWebId || job.record.content !== draft.content)) throw Error('Media intent conflict');
+    if (!job) {
+        // Older uncertain attempts have no immutable envelope to resume. Their
+        // explicit Review action creates a new asset/key/id instead.
+        if (draft.deliveryJournal !== 1 && draft.deliveryState !== 'never') return false;
+        await obtainKey(ctx.peerWebId);
+        if (!current()) return false;
+        const peers = getPeerDevices().filter(device => device.device_id && device.pub_b64u);
+        const own = getOwnDevices().filter(device => device.device_id && device.pub_b64u);
+        const mode = peers.length >= 2 ? 'fanout' : 'single';
+        if (mode === 'single' && !hasKey(ctx.peerWebId)) return false;
+        const entries = mode === 'fanout' ? peers.map(device => ({ peerId: ctx.peerWebId + '#' + device.device_id,
+            account: ctx.peerWebId, device: device.device_id, pub: device.pub_b64u }))
+            : [{ peerId: ctx.peerWebId, account: ctx.peerWebId, primary: true, pub: getPeerPub(ctx.peerWebId) }];
+        for (const device of own) entries.push({ peerId: ctx.actor + '#' + device.device_id,
+            account: ctx.actor, device: device.device_id, pub: device.pub_b64u });
+        job = await outbox.queue({ id: draft.id, actor: ctx.actor, device: getDeviceId(), peer: ctx.peerWebId,
+            pub: getPub(), mode, entries, route: { cmd: 'local_dm', target_webid: ctx.peerWebId, thread_id: ctx.threadId },
+            media: { actor: ctx.actor, draftKey: draft.key, assetId: draft.id },
+            record: { message_id: draft.id, thread_id: ctx.threadId, from_webid: ctx.selfId || ctx.actor,
+                from_display_name: draft.senderName || '', content: draft.content, timestamp: draft.timestamp,
+                sender_verified: true, own: true, local: true },
+        }, { reuseMedia: true });
     }
-    if (!hasKey(ctx.peerWebId)) return false; // plaintext opt-in never exposes a file key
-    const enc = await encrypt(ctx.peerWebId, draft.content);
     if (!current()) return false;
-    const accepted = await dropDm({ target_webid: ctx.peerWebId, thread_id: ctx.threadId, message_id: draft.id,
-        content: enc.ciphertext, e2e: true, nonce: enc.nonce, msg_num: enc.msgNum,
-        pn: enc.pn, ratchet_pub: enc.ratchetPub, ...(pub ? { x25519_pub: pub } : {}) });
-    if (accepted && current() && own.length) {
-        try {
-            const fanout = [];
-            for (const device of own) fanout.push(await entry(ctx.actor, device));
-            if (current()) await dropFanout({ message_id: draft.id, fanout });
-        } catch { /* self-sync failure cannot undo confirmed peer delivery */ }
-    }
-    return !!accepted;
+    if (outbox.peerConfirmed(job.id)) return true;
+    await outbox.send(job.id);
+    return outbox.waitForPeer(job.id, current);
 }
 
-export function createDmMedia({ getContext, post, onMessage, showToast, confirmCleanup = async () => false, store = createDmMediaStore(), doc = document }) {
+export function createDmMedia({ getContext, post, onMessage, showToast, confirmCleanup = async () => false, confirmResend = async () => false, afterDelivery = async () => {}, isDelivered = () => false, store = createDmMediaStore(), doc = document }) {
     const busy = new Set(), cancelled = new Set(), progress = new Map();
     let generation = 0, displayed = null;
     const panel = () => doc.getElementById('dm-media-drafts');
@@ -146,14 +143,16 @@ export function createDmMedia({ getContext, post, onMessage, showToast, confirmC
         element.hidden = !rows.length;
         element.innerHTML = rows.map(row => {
             const cleaning = row.cleanup === true, active = busy.has(row.key);
-            const status = active ? (cleaning ? t('dmMedia.cleaning') : t('roomMedia.uploading', { count: progress.get(row.key) || 0 }))
-                : (cleaning ? t('dmMedia.cleanupPending') : t('roomMedia.pending'));
+            const legacy = row.deliveryJournal !== 1 && row.deliveryState !== 'never' && !row.delivered;
+            const delivered = !!row.delivered || isDelivered(row);
+            const status = active ? (cleaning ? t('dmMedia.cleaning') : row.uploaded ? t('dmMedia.awaitingConfirmation') : t('roomMedia.uploading', { count: progress.get(row.key) || 0 }))
+                : cleaning ? t('dmMedia.cleanupPending') : legacy ? t('dmMedia.legacyPending') : delivered ? t('dmMedia.finishHistory') : row.uploaded ? t('dmMedia.awaitingConfirmation') : t('roomMedia.pending');
             const disabled = active ? ' disabled' : '';
             return `<div data-dm-media-draft="${escHtml(row.key)}"><span>${escHtml(row.name)} — ${escHtml(status)}</span> `
-                + (cleaning ? '' : `<button type="button" class="btn btn--sm" data-dm-media-retry="${escHtml(row.key)}"${disabled}>${escHtml(t('btn.retry'))}</button> `)
+                + (cleaning ? '' : legacy ? `<button type="button" class="btn btn--sm" data-dm-media-review="${escHtml(row.key)}"${disabled}>${escHtml(t('outbox.review'))}</button> ` : `<button type="button" class="btn btn--sm" data-dm-media-retry="${escHtml(row.key)}"${disabled}>${escHtml(delivered ? t('dmMedia.finish') : t('btn.retry'))}</button> `)
                 + (row.deliveryState === 'never' && !row.delivered
                     ? `<button type="button" class="btn btn--sm" data-dm-media-cleanup="${escHtml(row.key)}"${disabled}>${escHtml(t(cleaning ? 'dmMedia.retryCleanup' : 'dmMedia.removeUnused'))}</button> ` : '')
-                + `<button type="button" class="btn btn--sm" title="${escHtml(t('dmMedia.discardHint'))}" data-dm-media-cancel="${escHtml(row.key)}"${disabled}>${escHtml(t('btn.cancel'))}</button></div>`;
+                + (row.deliveryState === 'never' || legacy ? `<button type="button" class="btn btn--sm" title="${escHtml(t('dmMedia.discardHint'))}" data-dm-media-cancel="${escHtml(row.key)}"${disabled}>${escHtml(t('btn.cancel'))}</button>` : `<span>${escHtml(t('dmMedia.keepPrepared'))}</span>`) + '</div>';
         }).join('');
     }
 
@@ -213,10 +212,12 @@ export function createDmMedia({ getContext, post, onMessage, showToast, confirmC
             // Once this is committed, even a lost delivery response cannot make
             // this upload eligible for deletion. Older unmarked drafts stay unknown.
             if (row.deliveryState === 'never') {
+                row.deliveryJournal = 1;
                 row.deliveryState = 'attempted';
                 await store.put(row);
             }
             if (!current()) return;
+            if (row.deliveryJournal !== 1 && !row.delivered) throw Error('legacy delivery needs review');
             const result = await post(row, ctx, current);
             if (!result.ok) throw Error('delivery unconfirmed');
             // A delivery can finish after navigation. Keep that acknowledgement
@@ -226,6 +227,7 @@ export function createDmMedia({ getContext, post, onMessage, showToast, confirmC
             if (!current()) return;
             if (result.historySaved === false) throw Error('history unconfirmed');
             await store.remove(row.key);
+            try { await afterDelivery(row, ctx); } catch { /* durable outbox retries final release */ }
             if (current() && onMessage) await onMessage(result.message, ctx);
         } catch {
             if (current()) showToast(t('file.sendFailed'), 'error');
@@ -237,13 +239,16 @@ export function createDmMedia({ getContext, post, onMessage, showToast, confirmC
     }
 
     panel()?.addEventListener('click', async event => {
-        const retry = event.target.closest('[data-dm-media-retry]'), cancel = event.target.closest('[data-dm-media-cancel]'), clean = event.target.closest('[data-dm-media-cleanup]');
-        const key = retry?.dataset.dmMediaRetry || cancel?.dataset.dmMediaCancel || clean?.dataset.dmMediaCleanup, ctx = getContext();
+        const review = event.target.closest('[data-dm-media-review]'), retry = event.target.closest('[data-dm-media-retry]'), cancel = event.target.closest('[data-dm-media-cancel]'), clean = event.target.closest('[data-dm-media-cleanup]');
+        const key = review?.dataset.dmMediaReview || retry?.dataset.dmMediaRetry || cancel?.dataset.dmMediaCancel || clean?.dataset.dmMediaCleanup, ctx = getContext();
         if (!key || !ctx) return;
         try {
             const row = (await store.list(ctx.actor)).find(candidate => candidate.key === key && candidate.peerWebId === ctx.peerWebId && candidate.threadId === ctx.threadId);
             if (!row || !ctx.current()) return;
-            if (cancel && !busy.has(key)) {
+            if (review && !busy.has(key)) {
+                if (!row.blob || !await confirmResend() || !ctx.current()) return;
+                await send(row.blob, { name: row.name, mime: row.mime, kind: row.kind, durationMs: row.durationMs, spoiler: row.spoiler });
+            } else if (cancel && !busy.has(key) && (row.deliveryState === 'never' || row.deliveryJournal !== 1)) {
                 cancelled.add(key);
                 await store.remove(key);
                 cancelled.delete(key);
@@ -304,6 +309,7 @@ export function createDmMedia({ getContext, post, onMessage, showToast, confirmC
             content: prep.content,
             uploaded: false,
             deliveryState: 'never',
+            deliveryJournal: 1,
         };
         if (!ctx.current()) return;
         try {

@@ -303,3 +303,34 @@ it('delivers the peer copy even when own-device preparation fails, then recovers
     expect(h.frames[1].fanout[0].to_device_id).toBe('a2');
     expect(h.e2e.ratchetEncrypt.mock.calls.filter(([peer]) => peer === 'bob')).toHaveLength(1);
 });
+
+it('holds accepted media proof until draft/history release, then retains only unfinished mirrors', async () => {
+    const h = harness(), engine = h.engine();
+    const job = { ...clone(input), media: { actor: 'alice', draftKey: 'alice\nmedia-asset', assetId: 'media-asset' },
+        entries: [...clone(input.entries), { peerId: 'alice#a2', account: 'alice', device: 'a2', pub: 'pub' }] };
+    await engine.queue(job); await engine.send(job.id);
+    await engine.confirm(job.id, { kind: 'echo', from: 'alice' });
+    expect(engine.peerConfirmed(job.id)).toBe(true); expect(h.disk.size).toBe(1);
+    expect((await engine.inspect())[0].state).toBe('media');
+    expect(await engine.releaseMedia(job.id)).toBe(true); expect(h.disk.get(job.id).mediaReleased).toBe(true);
+    expect((await engine.inspect())[0].state).toBe('sync');
+    await engine.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'alice', to_device_id: 'a2' }] });
+    expect(h.disk.size).toBe(0);
+});
+
+it('preserves a fully accepted media job across cleanup/reload until its owner explicitly releases it', async () => {
+    const h = harness(), engine = h.engine(); const job = { ...clone(input), media: { actor: 'alice', draftKey: 'asset' } };
+    await engine.queue(job); await engine.send(job.id); await engine.confirm(job.id, { kind: 'echo', from: 'alice' });
+    expect(h.disk.get(job.id).confirmed).toBe(true); expect(h.cipher.size).toBe(0);
+    h.frames.length = 0; const restored = h.engine(); await restored.restore({ force: true });
+    expect(h.frames).toEqual([]); expect(restored.peerConfirmed(job.id)).toBe(true);
+    await restored.releaseMedia(job.id); expect(h.disk.size).toBe(0);
+});
+
+it('reuses a media intent without changing its frozen recipients and rejects a conflicting key manifest', async () => {
+    const h = harness(), engine = h.engine(), job = { ...clone(input), media: { actor: 'alice', draftKey: 'asset' } };
+    await engine.queue(job); const replacement = { ...clone(job), entries: [{ peerId: 'new', account: 'bob', primary: true }] };
+    expect((await engine.queue(replacement, { reuseMedia: true })).entries).toEqual(job.entries);
+    replacement.record.content = 'different file key';
+    await expect(engine.queue(replacement, { reuseMedia: true })).rejects.toThrow('already exists');
+});

@@ -42,3 +42,13 @@ describe('pending message review', () => {
         expect(h.el('status').textContent).toBe('outbox.cannotCancel');
     });
 });
+
+it('links confirmed media to its conversation instead of pretending another upload is needed', async () => {
+    const elements = {}, reviewMedia = vi.fn(), outbox = { inspect: async () => [{ id: 'file', peer: 'bob', state: 'media', canCancel: false }] };
+    const doc = { getElementById: id => elements[id] ||= { innerHTML: '', textContent: '', replaceChildren() { this.innerHTML = ''; },
+        addEventListener(type, callback) { this[type] = callback; } } };
+    const ui = createDmOutboxUi({ doc, outbox, getScope: () => 'alice', isActive: () => true, reviewMedia });
+    await ui.refresh(); expect(elements['dm-outbox-rows'].innerHTML).toContain('data-outbox-action="media"');
+    await elements['dm-outbox-rows'].click({ target: { closest: () => ({ dataset: { outboxAction: 'media', outboxId: 'file' } }) } });
+    expect(reviewMedia).toHaveBeenCalledWith('file');
+});

@@ -63,7 +63,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
     async function settleAccepted(job, ctx) {
         if (!ctx.current()) return false;
         if (job.peerConfirmed) {
-            onConfirmed(job.id);
+            onConfirmed(job.id, job);
             if (await clearDelivery(job.id) === false || !ctx.current()) return false;
         }
         for (const index of accepted(job)) {
@@ -74,6 +74,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
     }
     async function cleanup(job, ctx) {
         if (!await settleAccepted(job, ctx)) return false;
+        if (job.media && !job.mediaReleased) return true; // draft/history owns final release
         if (!ctx.current() || await e2e.removeDmSendJob(job.id, ctx.current) === false) return false;
         jobs.delete(job.id); attempts.delete(job.id); notified.delete(job.id);
         settled.add(job.id);
@@ -90,22 +91,30 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         });
     }
     const intentQueues = new Map();
-    function queue(input) {
+    function queue(input, { reuseMedia = false } = {}) {
         const ctx = context();
         const key = JSON.stringify([ctx.scope, generation, getGeneration()]);
         const run = (intentQueues.get(key) || Promise.resolve()).catch(() => {}).then(() => {
             if (!ctx.current()) throw Error('Send context changed');
-            return queueIntent(input);
+            return queueIntent(input, reuseMedia);
         });
         intentQueues.set(key, run);
         run.finally(() => { if (intentQueues.get(key) === run) intentQueues.delete(key); }).catch(() => {});
         return run;
     }
-    async function queueIntent(input) {
+    async function queueIntent(input, reuseMedia) {
         const ctx = context();
         if (!ctx.current()) throw Error('Send context changed');
         const existing = (await e2e.listDmSendJobs()).filter(job => job.scope === ctx.scope);
-        if (existing.some(job => job.id === input.id)) throw Error('Send job already exists');
+        if (!ctx.current()) throw Error('Send context changed');
+        const prior = existing.find(job => job.id === input.id);
+        if (prior) {
+            if (!reuseMedia || !input.media || !prior.media || prior.peer !== input.peer
+                    || prior.actor !== input.actor || prior.device !== input.device
+                    || prior.media.draftKey !== input.media.draftKey || prior.record.content !== input.record.content) throw Error('Send job already exists');
+            const job = newer(jobs.get(prior.id), normalized(prior));
+            jobs.set(job.id, job); return job;
+        }
         if (existing.length >= 128) throw Error('DM outbox is full');
         if (!input.entries?.length || !input.entries.some(entry => entry.account === input.peer)) throw Error('Missing recipient');
         if (!['single', 'fanout'].includes(input.mode) || input.entries.some(entry => typeof entry.peerId !== 'string' || !entry.peerId)
@@ -227,7 +236,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             const live = jobs.get(snapshot.id);
             const job = newer(live, snapshot);
             jobs.set(job.id, job);
-            let canCancel = !job.frames && !job.confirmed && !!e2e.hasPendingDmSend;
+            let canCancel = !job.media && !job.frames && !job.confirmed && !!e2e.hasPendingDmSend;
             if (canCancel) for (const entry of job.entries) {
                 if (await e2e.hasPendingDmSend(entry.peerId, job.sendId)) { canCancel = false; break; }
             }
@@ -237,7 +246,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             const latest = jobs.get(job.id) || job;
             if (latest.frames || latest.confirmed) canCancel = false;
             const plan = planStatus({ ...latest, entries: remaining(latest) });
-            const state = latest.confirmed ? 'cleanup' : latest.peerConfirmed ? (plan === 'changed' ? 'syncAttention' : 'sync') : plan === 'changed' ? 'attention'
+            const state = latest.media && latest.peerConfirmed && !latest.mediaReleased ? (plan === 'changed' ? 'mediaAttention' : 'media') : latest.confirmed ? 'cleanup' : latest.peerConfirmed ? (plan === 'changed' ? 'syncAttention' : 'sync') : plan === 'changed' ? 'attention'
                 : failures.has(job.id) ? 'storage' : !canSend(latest) || plan !== 'ready' ? 'waiting'
                     : latest.frames ? 'confirmation' : 'waiting';
             const canRetry = remaining(latest).some(entry => planStatus({ ...latest, entries: [entry] }) === 'ready');
@@ -250,7 +259,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         return serialized(id, async () => {
             if (!ctx.current()) return false;
             const job = jobs.get(id) || (await e2e.listDmSendJobs()).find(row => row.id === id && row.scope === ctx.scope);
-            if (!ctx.current() || !job || job.frames || job.confirmed || !e2e.hasPendingDmSend) return false;
+            if (!ctx.current() || !job || job.media || job.frames || job.confirmed || !e2e.hasPendingDmSend) return false;
             for (const entry of job.entries) {
                 if (!ctx.current() || await e2e.hasPendingDmSend(entry.peerId, job.sendId)) return false;
             }
@@ -258,6 +267,38 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             settled.add(id); if (settled.size > 512) settled.delete(settled.values().next().value);
             jobs.delete(id); notified.delete(id); attempts.delete(id); failures.delete(id);
             onCancelled(id);
+            return true;
+        });
+    }
+    async function find(id) {
+        const ctx = context(); if (!ctx.current()) return null;
+        const live = jobs.get(id);
+        if (live?.scope === ctx.scope) return live;
+        const row = (await e2e.listDmSendJobs()).find(job => job.id === id && job.scope === ctx.scope);
+        if (!ctx.current() || !row || settled.has(id)) return null;
+        const job = newer(jobs.get(id), normalized(row)); jobs.set(id, job); return job;
+    }
+    function peerConfirmed(id) {
+        const job = jobs.get(id);
+        return job?.scope === getScope() && !!job.peerConfirmed;
+    }
+    async function waitForPeer(id, current = () => true, timeoutMs = 10000) {
+        const ctx = context(), end = performance.now() + timeoutMs;
+        while (ctx.current() && current()) {
+            if (peerConfirmed(id)) return true;
+            if (performance.now() >= end) return false;
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
+    }
+    function releaseMedia(id) {
+        const ctx = context();
+        return serialized(id, async () => {
+            const job = jobs.get(id);
+            if (!ctx.current() || !job?.media || !job.peerConfirmed) return false;
+            const released = { ...job, mediaReleased: true };
+            await save(released, ctx);
+            if (released.confirmed) await cleanup(released, ctx);
             return true;
         });
     }
@@ -286,7 +327,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         return run;
     }
     return {
-        queue, send: transmit, confirm, restore, inspect, cancel,
+        queue, send: transmit, confirm, restore, inspect, cancel, find, peerConfirmed, waitForPeer, releaseMedia,
         has: id => jobs.has(id) && jobs.get(id).scope === getScope(),
         record: id => jobs.get(id)?.scope === getScope() ? jobs.get(id).record : null,
         start() {

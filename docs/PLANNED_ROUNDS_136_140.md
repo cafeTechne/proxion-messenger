@@ -1,6 +1,6 @@
 # Planned rounds 136–140
 
-Status: Rounds 136–139 complete; Round 140 remains planned.
+Status: Rounds 136–140 complete within their audited boundaries.
 Rounds 130–135 remain closed; the limitations recorded in their closeouts are inputs to new work,
 not additions to those completed rounds.
 
@@ -267,8 +267,10 @@ sender-device mirrors belong to this round.
 
 ## Round 140: durable encrypted DM media delivery
 
-Status: planned. Execute after the text/account/self-sync foundations above.
-Rounds 130–135 stay closed.
+Status: complete for pod-asset routes. See [Round 140 closeout](ROUND_140_CLOSEOUT.md).
+Native gateway secondary-file/transfer durability is an audited follow-up;
+browser pairing and multi-device WebID consumption remain unsupported. Rounds
+130–139 remain closed.
 
 ### Problem and result
 
@@ -279,22 +281,22 @@ flows so retry cannot strand an uploaded asset or spend another delivery key.
 
 ### Bounded work
 
-- [ ] Audit the boundary between media draft/upload completion, encrypted
+- [x] Audit the boundary between media draft/upload completion, encrypted
   attachment-key envelope preparation, outbox persistence and delivery evidence
   for files, voice notes and existing forward flows.
-- [ ] Persist stable logical ids, encrypted delivery envelopes and recipient
+- [x] Persist stable logical ids, encrypted delivery envelopes and recipient
   plans before transmission. Recover partially prepared per-device envelopes
   without ratchet re-encryption, using the established send journal.
-- [ ] Keep large bytes in the existing media/draft storage rather than copying
+- [x] Keep large bytes in the existing media/draft storage rather than copying
   base64 payloads into localStorage outbox jobs. Define ownership/lifetime of
   references so interrupted cleanup cannot orphan the only usable draft.
-- [ ] Distinguish uploaded, awaiting delivery and confirmed states. A failed send
+- [x] Distinguish uploaded, awaiting delivery and confirmed states. A failed send
   retains its retriable draft; an uncertain result never triggers destructive
   cleanup of an asset that may already be referenced by a delivered message.
-- [ ] Preserve private forwarding's fresh file key/id behavior, exact decrypted
+- [x] Preserve private forwarding's fresh file key/id behavior, exact decrypted
   bytes, spoiler metadata and supported playback. Do not reuse a source
   conversation's attachment key when forwarding.
-- [ ] Apply account/tab isolation and recipient/self-sync policies consistently
+- [x] Apply account/tab isolation and recipient/self-sync policies consistently
   in browser pod, desktop bridge and supported gateway media paths.
 
 ### Acceptance and validation

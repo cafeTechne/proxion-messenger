@@ -234,6 +234,7 @@ export function createCrossMode({
         route, onReconnect,
         requestInfo: () => bridge.requestInfo(),
         state: () => _state,
+        generation: () => _generation,
         isReady: () => !!(_state.ready && _dm),
         webId: () => _state.webid,
         fetchPeerPub: (peerId) => (_state.ready && fetchAndCachePeerPub

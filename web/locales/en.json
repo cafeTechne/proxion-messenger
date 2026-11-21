@@ -1192,5 +1192,13 @@
   "outbox.openOriginal": "Open the original conversation and finish your current draft before reviewing this message.",
   "outbox.saveFailed": "The message could not be saved for sending. Your draft is kept. Check available storage and try again.",
   "outbox.sync": "Message confirmed. Waiting to sync to your other linked devices.",
-  "outbox.syncAttention": "Message confirmed. Sync to an earlier linked device needs attention; its device or key changed."
+  "outbox.syncAttention": "Message confirmed. Sync to an earlier linked device needs attention; its device or key changed.",
+  "dmMedia.awaitingConfirmation": "Uploaded. Awaiting delivery confirmation; retry keeps the saved message.",
+  "dmMedia.finishHistory": "Message confirmed. Finish saving it on this device.",
+  "dmMedia.finish": "Finish saving",
+  "dmMedia.keepPrepared": "This prepared message is kept for safe retry.",
+  "dmMedia.legacyPending": "Earlier delivery is unknown. Review before sending a new copy.",
+  "dmMedia.legacyConfirm": "The original encrypted delivery was not saved and may already have arrived. Send a new copy with a new message id and file key? The recipient may receive a duplicate.",
+  "dmMedia.openConversation": "Open conversation",
+  "dmMedia.originalAccount": "Message confirmed. Sign in to the original pod account to finish saving it."
 }

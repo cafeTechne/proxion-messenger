@@ -69,10 +69,34 @@ export async function dmMediaJourney({ sender, receiver, openSender, openReceive
     await sender.waitForFunction(() => window.__dmMediaDeliveryFailed === true, { timeout: 30000 });
     await sender.waitForSelector('[data-dm-media-retry]:not([disabled])', { timeout: 20000 });
     if (await sender.$('[data-dm-media-cleanup]')) throw Error('Possibly delivered upload offered unsafe cleanup');
+    if (await sender.$('[data-dm-media-cancel]')) throw Error('Prepared media offered unsafe cancellation');
+    const prepared = await sender.evaluate(async id => {
+        const job = (await (await import('./e2e.js')).listDmSendJobs()).find(row => row.id === id);
+        return { frames: job?.frames, media: job?.media, size: JSON.stringify(job).length };
+    }, id);
+    if (!prepared.frames?.length || !prepared.media || prepared.size > 100000) throw Error('Missing/bloated prepared media outbox job');
+    // The real delivery succeeds, but its local acceptance commit is lost. The
+    // immutable job must survive and repeat its saved envelope after reload.
+    const lostConfirmation = await sender.evaluateOnNewDocument(() => {
+        const write = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+            if (key.startsWith('proxion_e2e_send_job_')) throw new DOMException('lost media acceptance', 'QuotaExceededError');
+            return write.call(this, key, value);
+        };
+    });
+    await sender.reload({ waitUntil: 'networkidle2' }); await ready(sender); await openSender();
+    await sender.waitForSelector('[data-dm-media-retry]:not([disabled])', { timeout: 20000 });
+    await sender.click('[data-dm-media-retry]');
+    await sender.waitForSelector('[data-dm-media-retry]:not([disabled])', { timeout: 20000 });
+    await until(receiver, id => !!document.getElementById('msg-' + id), id);
+    const uncertain = await sender.evaluate(async id => (await (await import('./e2e.js')).listDmSendJobs()).find(row => row.id === id), id);
+    if (!uncertain || uncertain.peerConfirmed || JSON.stringify(uncertain.frames) !== JSON.stringify(prepared.frames)) throw Error('Uncertain media acceptance changed or discarded its ciphertext');
+    await sender.removeScriptToEvaluateOnNewDocument(lostConfirmation.identifier);
     await sender.reload({ waitUntil: 'networkidle2' }); await ready(sender); await openSender();
     await sender.waitForSelector('[data-dm-media-retry]:not([disabled])', { timeout: 20000 });
     await sender.click('[data-dm-media-retry]');
     await sender.waitForFunction(() => document.getElementById('dm-media-drafts').hidden, { timeout: 30000 });
+    await sender.waitForFunction(async id => !(await (await import('./e2e.js')).listDmSendJobs()).some(row => row.id === id), { timeout: 15000 }, id);
     if (intercept) { await sender.setRequestInterception(false); sender.off('request', intercept); }
     await until(receiver, id => !!document.getElementById('msg-' + id)?.querySelector('[data-dm-asset]:not([disabled])'), id);
     await receiver.bringToFront();
@@ -109,7 +133,7 @@ export async function dmMediaJourney({ sender, receiver, openSender, openReceive
     const load = await receiver.$(`#msg-${id} [data-dm-asset]:not([disabled])`);
     if (load) await load.click();
     await receiver.waitForFunction(checkBytes, { timeout: 20000 }, { name, text });
-    console.log(`  ✓ ${label}: upload and delivery failures retain the draft across reload; retry delivers one stable message; exact file bytes restore`);
+    console.log(`  ✓ ${label}: upload/delivery failures and lost acceptance retain exact ciphertext across reload; draft completion releases the job and exact file bytes restore`);
 
     await openSender();
     await sender.click('#voice-record-btn');

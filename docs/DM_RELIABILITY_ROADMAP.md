@@ -38,8 +38,8 @@ Rounds 136–140 address the retained limits in this order:
 | 137 | Complete: account/session isolation. See [closeout](ROUND_137_CLOSEOUT.md). |
 | 138 | Complete: pending-send review and safe controls. See [closeout](ROUND_138_CLOSEOUT.md). |
 | 139 | Complete: independent sender-device synchronization. See [closeout](ROUND_139_CLOSEOUT.md). |
-| 140 | Extend stable encrypted outbox delivery to existing DM media flows. |
+| 140 | Complete for pod-asset DM media. Native gateway transfers remain follow-up. See [closeout](ROUND_140_CLOSEOUT.md). |
 
 See [the five bounded plans](PLANNED_ROUNDS_136_140.md) for dependencies,
-acceptance tests, likely code areas and explicit exclusions. Rounds 136–139 are
-complete; 140 remains planned. Earlier completed-round scope is unchanged.
+acceptance tests, likely code areas and explicit exclusions. Rounds 136–140 are
+complete within their audited boundaries; see closeouts for retained limits. Earlier completed-round scope is unchanged.

@@ -57,7 +57,7 @@ import { createMedia, captureMediaTarget } from './media.js';
 import { createRoomAttachments, parseRoomAttachment } from './room-attachments.js';
 import { createRoomMedia } from './room-media.js';
 import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attachments.js';
-import { createDmMedia, deliverDmMedia, forwardDmMedia } from './dm-media.js';
+import { createDmMedia, createDmMediaStore, deliverDmMedia, forwardDmMedia } from './dm-media.js';
 import { createDmReceiptStore } from './dm-receipts.js';
 import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receive.js';
 import { createDmOutbox } from './dm-outbox.js';
@@ -853,10 +853,12 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             podNoteText: () => t(transport.mode === 'web' ? 'send.notSent' : 'send.notSavedToPod'),
             onPodRetry: () => flushPodQueue(),
         });
+        const _dmMediaStore = createDmMediaStore();
+        const _mediaCleanup = new Map();
         const _outgoingScope = () => JSON.stringify(['outgoing', selfWebId || clientDid, clientDid, e2eScopedKey('')]);
         const _dmOutbox = createDmOutbox({
             e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
-            getScope: _outgoingScope, getGeneration: () => authContext().epoch, isActive: () => !!clientDid && tabLock.isLeader(),
+            getScope: _outgoingScope, getGeneration: () => JSON.stringify([authContext().epoch, crossMode?.generation() || 0]), isActive: () => !!clientDid && tabLock.isLeader(),
             send: frame => socketSendOrQueue(frame),
             canSend: job => transport.mode === 'web' ? !!solidSession.info.isLoggedIn && navigator.onLine !== false
                 : job.route.cmd === 'local_dm' && isDmPeerWebId(job.route.target_webid)
@@ -866,14 +868,38 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             persistMessage: record => dmHistorySave(record, { delivery: 'pending', outbox: true }),
             clearDelivery: id => dmHistorySetDelivery(id, null),
             onPending: job => {
+                if (job.media) { _dmMedia?.refresh(); return; }
                 _undeliveredDms.set(job.id, { ...job.record, outbox_id: job.id });
                 sendStatus.track(job.id, () => _dmOutbox.send(job.id));
                 renderMessage({ ...job.record, local: true }, { live: false });
             },
-            onConfirmed: id => { _undeliveredDms.delete(id); sendStatus.confirm(id, { known: true }); },
+            onConfirmed: (id, job) => {
+                _undeliveredDms.delete(id); sendStatus.confirm(id, { known: true });
+                if (job?.media) { _dmMedia?.refresh(); if (!job.mediaReleased) _releaseCompletedMedia(job); }
+            },
         });
+        function _releaseCompletedMedia(job) {
+            if (_mediaCleanup.has(job.id)) return;
+            const scope = _outgoingScope(), epoch = authContext().epoch, bridgeEpoch = crossMode?.generation() || 0;
+            const current = () => scope === _outgoingScope() && epoch === authContext().epoch
+                && bridgeEpoch === (crossMode?.generation() || 0) && tabLock.isLeader()
+                && job.media.actor === (transport.mode === 'web' ? selfWebId : crossMode?.state().webid);
+            const run = (async () => {
+                // Removing a journalled draft follows durable acceptance and
+                // history completion. A crash in the final release gap is safe.
+                const exists = await _dmMediaStore.has(job.media.draftKey);
+                if (current() && !exists) await _dmOutbox.releaseMedia(job.id);
+            })().catch(error => console.warn('[dm-media] completion cleanup pending:', error));
+            _mediaCleanup.set(job.id, run);
+            run.finally(() => { if (_mediaCleanup.get(job.id) === run) _mediaCleanup.delete(job.id); });
+        }
         const _rosterRequested = new Map();
         function _frozenDmPlanStatus(job) {
+            if (job.media) {
+                const actor = transport.mode === 'web' ? selfWebId : crossMode?.state().webid;
+                if (!actor) return 'waiting';
+                if (actor !== job.media.actor) return 'changed';
+            }
             for (const entry of job.entries) {
                 if (entry.primary) {
                     const pub = cachedPeerPub(entry.peerId);
@@ -891,11 +917,12 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             return 'ready';
         }
         const _pendingSendsUi = createDmOutboxUi({ outbox: _dmOutbox,
-            getScope: () => JSON.stringify([_outgoingScope(), authContext().epoch]),
+            getScope: () => JSON.stringify([_outgoingScope(), authContext().epoch, crossMode?.generation() || 0]),
             isActive: () => tabLock.isLeader() && (!boundWebId() || authContext().authenticated),
             getName: id => resolvePeerName(id) || id,
             getLegacy: () => [..._undeliveredDms.values()].filter(record => !record.outbox_id && record.from_webid === selfWebId),
             reviewLegacy: id => _resendStoredDm(_undeliveredDms.get(id)),
+            reviewMedia: id => { const record = _dmOutbox.record(id); if (record) { _closeSettings(); _navigateToThread(record.thread_id); _dmMedia?.refresh(); } },
         });
         for (const event of ['login', 'logout', 'sessionExpired', 'sessionRestore']) {
             solidSession.events?.on(event, () => _pendingSendsUi.reset());
@@ -6596,30 +6623,34 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 getSessionId: _webRoomSessionId, canSend: () => _conversationSupports('files') });
             if (!target || !_isPodDmView(target.view)) return null;
             const actor = transport.mode === 'web' ? selfWebId : crossMode?.state().webid;
+            const epoch = authContext().epoch, bridgeEpoch = crossMode?.generation() || 0;
             const peerWebId = target.view.peerWebid || target.view.peerDid || (isDmPeerWebId(target.view.id) ? target.view.id : null);
             if (!actor || !peerWebId) return null;
             return {
                 actor, peerWebId, threadId: target.view.id, selfId: selfWebId,
                 senderName: localStorage.getItem('proxion_display_name') || '',
-                current: () => target.current() && actor === (transport.mode === 'web' ? selfWebId : crossMode?.state().webid),
+                current: () => target.current() && tabLock.isLeader() && epoch === authContext().epoch
+                    && bridgeEpoch === (crossMode?.generation() || 0)
+                    && actor === (transport.mode === 'web' ? selfWebId : crossMode?.state().webid),
                 fetch: (url, options) => transport.mode === 'web' ? solidSession.fetch(url, options) : crossMode.bridge.fetch(url, options),
                 readFetch: (url, options) => transport.mode === 'web' ? fetch(url, { ...options, credentials: 'omit' }) : crossMode.bridge.fetch(url, options),
             };
         }
         _dmMedia = createDmMedia({
-            getContext: _dmMediaContext, showToast,
+            getContext: _dmMediaContext, showToast, store: _dmMediaStore,
+            isDelivered: row => _dmOutbox.peerConfirmed(row.id),
+            afterDelivery: (row, ctx) => ctx.current() && _dmOutbox.releaseMedia(row.id),
+            confirmResend: () => new Promise(resolve => showConfirm(t('dmMedia.legacyConfirm'), () => resolve(true), () => resolve(false))),
             confirmCleanup: () => new Promise(resolve => showConfirm(t('dmMedia.cleanupConfirm'), () => resolve(true), () => resolve(false),
                 { title: t('dmMedia.removeUnused'), confirmLabel: t('dmMedia.removeUnused'), danger: true })),
             post: async (draft, ctx, current) => {
                 if (!clientDid || !current()) return { ok: false };
-                const engine = transport.mode === 'web' ? _podDmEngine : crossMode;
-                if (!engine) return { ok: false };
+                if (!(transport.mode === 'web' ? _podDmEngine : crossMode)) return { ok: false };
                 const accepted = draft.delivered || await deliverDmMedia(draft, ctx, {
-                    current, obtainKey: _obtainPeerKey, hasKey: isE2EEnabled, encrypt: ratchetEncrypt, cachePeerPub,
+                    outbox: _dmOutbox, current, obtainKey: _obtainPeerKey, hasKey: isE2EEnabled, getPeerPub: cachedPeerPub,
                     getPeerDevices: () => transport.mode === 'web' ? identity.devicesForPeer(ctx.peerWebId) : [],
                     getOwnDevices: () => transport.mode === 'web' ? identity.ownOtherDevices() : [],
                     getDeviceId: () => clientDid, getPub: myX25519PubB64u,
-                    dropDm: payload => engine.dropDm(payload), dropFanout: payload => engine.dropFanout(payload),
                 });
                 if (!accepted) return { ok: false };
                 const message = draft.delivered || {

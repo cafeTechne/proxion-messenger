@@ -1,3 +1,4 @@
+import { createDmOutbox } from './dm-outbox.js';
 import { describe, it, expect, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { createDmMedia, createDmMediaStore, deliverDmMedia, forwardDmMedia } from './dm-media.js';
@@ -34,12 +35,14 @@ describe('createDmMediaStore', () => {
         expect(await rows[0].prepared.text()).toBe('cipher');
         expect(await reopened.list('bob')).toHaveLength(1);
         await reopened.put({ ...rows[0], name: 'changed' });
+        expect(await reopened.has(rows[0].key)).toBe(true);
         await reopened.remove(rows[0].key);
+        expect(await reopened.has(rows[0].key)).toBe(false);
         expect(await reopened.list('alice')).toHaveLength(9);
     });
 });
 
-function fixture({ postFails = false, uploadFails = false, partialFailure = false, deleteFails = false } = {}) {
+function fixture({ postFails = false, uploadFails = false, partialFailure = false, deleteFails = false, confirmResend = async () => false } = {}) {
     const rows = new Map(), resources = new Map(), calls = [], onMessage = vi.fn(), showToast = vi.fn();
     let active = true, handler;
     const panel = { hidden: true, innerHTML: '', replaceChildren() { this.innerHTML = ''; }, addEventListener(_, fn) { handler = fn; } };
@@ -78,7 +81,7 @@ function fixture({ postFails = false, uploadFails = false, partialFailure = fals
         remove: async key => rows.delete(key),
     };
     const post = vi.fn(async row => ({ ok: !postFails, message: { content: row.content, message_id: row.id } }));
-    const options = { getContext: () => ctx, post, store, onMessage, showToast, confirmCleanup: async () => true, doc: { getElementById: () => panel } };
+    const options = { getContext: () => ctx, post, store, onMessage, showToast, confirmResend, confirmCleanup: async () => true, doc: { getElementById: () => panel } };
     const controller = createDmMedia(options);
     return {
         controller, rows, calls, resources, options, panel, post, onMessage, showToast, ctx,
@@ -88,6 +91,7 @@ function fixture({ postFails = false, uploadFails = false, partialFailure = fals
         restoreCleanup: () => { deleteFails = false; },
         cleanup: key => handler({ target: { closest: selector => selector.includes('cleanup') ? { dataset: { dmMediaCleanup: key } } : null } }),
         retry: key => handler({ target: { closest: selector => selector.includes('retry') ? { dataset: { dmMediaRetry: key } } : null } }),
+        review: key => handler({ target: { closest: selector => selector.includes('review') ? { dataset: { dmMediaReview: key } } : null } }),
         cancel: key => handler({ target: { closest: selector => selector.includes('cancel') ? { dataset: { dmMediaCancel: key } } : null } }),
     };
 }
@@ -272,12 +276,38 @@ describe('durable dm-media drafts', () => {
 
 describe('encrypted media delivery confirmation', () => {
     function fixture() {
-        const draft = { id: 'media-id', content: 'private manifest' }, ctx = { actor: 'alice', peerWebId: 'bob', threadId: 'thread' };
-        const deps = { current: () => true, obtainKey: vi.fn(async () => {}), hasKey: () => true,
+        const draft = { id: 'media-id', key: 'alice\nmedia-id', content: 'private manifest', deliveryJournal: 1,
+            timestamp: '2026-01-01T00:00:00Z' }, ctx = { actor: 'alice', peerWebId: 'bob', threadId: 'thread' };
+        const deps = { current: () => true, obtainKey: vi.fn(async () => {}), hasKey: () => true, getPeerPub: () => 'peer-pub',
             encrypt: vi.fn(async () => ({ ciphertext: 'opaque', nonce: 'n', msgNum: 1, pn: 0, ratchetPub: 'rp' })),
-            cachePeerPub: vi.fn(), getPeerDevices: () => [], getOwnDevices: () => [], getDeviceId: () => 'self-device', getPub: () => 'pub',
+            getPeerDevices: () => [], getOwnDevices: () => [], getDeviceId: () => 'self-device', getPub: () => 'pub',
             dropDm: vi.fn(async () => true), dropFanout: vi.fn(async () => false) };
-        return { draft, ctx, deps };
+        const disk = new Map(), frames = [], cipher = new Map();
+        const options = { getScope: () => 'alice/device', isActive: () => deps.current(), onError: vi.fn(),
+            e2e: { listDmSendJobs: async () => [...disk.values()],
+                saveDmSendJob: async (job, current) => { if (!current()) throw Error('stale'); disk.set(job.id, JSON.parse(JSON.stringify(job))); },
+                removeDmSendJob: async id => { disk.delete(id); return true; },
+                finishDmSend: async () => true,
+                ratchetEncrypt: async (peer, content, opts) => {
+                    if (!cipher.has(peer + opts.sendId)) cipher.set(peer + opts.sendId, await deps.encrypt(peer, content, opts));
+                    return cipher.get(peer + opts.sendId);
+                } },
+            persistMessage: async () => true, clearDelivery: async () => true,
+            send: async frame => {
+                frames.push(frame);
+                const accepted = frame.cmd === 'send_dm_fanout' ? await deps.dropFanout(frame) : await deps.dropDm(frame);
+                if (accepted) queueMicrotask(() => deps.outbox.confirm(frame.message_id, frame.cmd === 'send_dm_fanout'
+                    ? { kind: 'fanout', delivered: frame.fanout.map(row => ({ to_webid: row.to_webid, to_device_id: row.to_device_id })) }
+                    : { kind: 'pod', from: 'alice' }));
+            },
+        };
+        function engine() {
+            const outbox = createDmOutbox(options), wait = outbox.waitForPeer;
+            outbox.waitForPeer = (id, current) => wait(id, current, 1);
+            return outbox;
+        }
+        deps.outbox = engine();
+        return { draft, ctx, deps, disk, frames, engine };
     }
     it('waits for real acceptance and passes ciphertext only', async () => {
         const h = fixture(); let finish;
@@ -294,7 +324,7 @@ describe('encrypted media delivery confirmation', () => {
         expect(h.deps.dropDm).not.toHaveBeenCalled();
         h.deps.hasKey = () => true;
         h.deps.encrypt.mockRejectedValue(new Error('encryption failed'));
-        await expect(deliverDmMedia(h.draft, h.ctx, h.deps)).rejects.toThrow();
+        expect(await deliverDmMedia(h.draft, h.ctx, h.deps)).toBe(false);
         expect(h.deps.dropDm).not.toHaveBeenCalled();
     });
     it('confirms recipient-device fanout without falling back to a different session', async () => {
@@ -303,6 +333,28 @@ describe('encrypted media delivery confirmation', () => {
         expect(h.deps.dropDm).not.toHaveBeenCalled();
         expect(h.deps.dropFanout.mock.calls[0][0].fanout.map(entry => entry.to_device_id)).toEqual(['one', 'two']);
         expect(h.deps.encrypt.mock.calls.map(([pid]) => pid)).toEqual(['bob#one', 'bob#two']);
+    });
+    it('reuses saved media ciphertext and the original roster after reload and lost confirmation', async () => {
+        const h = fixture(); h.deps.dropDm.mockResolvedValue(false);
+        expect(await deliverDmMedia(h.draft, h.ctx, h.deps)).toBe(false);
+        const original = JSON.parse(JSON.stringify(h.frames[0]));
+        h.deps.outbox = h.engine(); h.deps.obtainKey.mockClear();
+        h.deps.getPeerDevices = () => [{ device_id: 'new1', pub_b64u: 'new1' }, { device_id: 'new2', pub_b64u: 'new2' }];
+        h.deps.dropDm.mockResolvedValue(true);
+        expect(await deliverDmMedia(h.draft, h.ctx, h.deps)).toBe(true);
+        expect(h.frames[1]).toEqual(original); expect(h.deps.encrypt).toHaveBeenCalledTimes(1);
+        expect(h.deps.obtainKey).not.toHaveBeenCalled();
+        expect(h.disk.get(h.draft.id).peerConfirmed).toBe(true); // kept until draft/history finish
+        await h.deps.outbox.releaseMedia(h.draft.id); expect(h.disk.size).toBe(0);
+    });
+    it('refuses to reconstruct uncertain legacy media or conflict with a different saved manifest', async () => {
+        const h = fixture(); delete h.draft.deliveryJournal; h.draft.deliveryState = 'unknown';
+        expect(await deliverDmMedia(h.draft, h.ctx, h.deps)).toBe(false); expect(h.deps.encrypt).not.toHaveBeenCalled();
+        h.draft.deliveryJournal = 1; h.deps.dropDm.mockResolvedValue(false);
+        await deliverDmMedia(h.draft, h.ctx, h.deps);
+        h.draft.content = 'changed key/manifest';
+        await expect(deliverDmMedia(h.draft, h.ctx, h.deps)).rejects.toThrow('Media intent conflict');
+        expect(h.deps.encrypt).toHaveBeenCalledTimes(1);
     });
     it('stops before sending if the original context changes during encryption', async () => {
         const h = fixture(); let current = true;
@@ -354,7 +406,7 @@ describe('unused DM upload cleanup eligibility and recovery', () => {
         expect(h.panel.innerHTML).not.toContain('data-dm-media-cleanup');
         await h.cleanup(key);
         expect(h.calls.some(call => call.method === 'DELETE')).toBe(false);
-        delete row.deliveryState; h.rows.set(key, row);
+        delete row.deliveryState; delete row.deliveryJournal; h.rows.set(key, row);
         await h.cleanup(key);
         expect(h.calls.some(call => call.method === 'DELETE')).toBe(false);
         await h.cancel(key);
@@ -383,4 +435,28 @@ describe('unused DM upload cleanup eligibility and recovery', () => {
         expect(h.post).not.toHaveBeenCalled();
         expect(h.rows.get(key).deliveryState).toBe('never');
     });
+});
+
+it('retains prepared media when a forged cancellation gesture bypasses the disabled UI', async () => {
+    const h = fixture({ postFails: true });
+    await h.controller.send(new Blob(['private file']), { name: 'kept.txt', mime: 'text/plain' });
+    const [key, row] = [...h.rows][0];
+    expect(row.deliveryJournal).toBe(1); expect(row.deliveryState).toBe('attempted');
+    expect(h.panel.innerHTML).not.toContain('data-dm-media-cancel');
+    await h.cancel(key); expect(h.rows.size).toBe(1);
+    expect(h.calls.some(call => call.method === 'DELETE')).toBe(false);
+});
+
+it('reviews an uncertain legacy draft as a fresh file id/key only after explicit consent', async () => {
+    const consent = vi.fn(async () => true), h = fixture({ postFails: true, confirmResend: consent });
+    await h.controller.send(new Blob(['legacy bytes']), { name: 'legacy.txt', mime: 'text/plain' });
+    const [key, row] = [...h.rows][0], original = parseDmAttachment(row.content);
+    delete row.deliveryJournal; row.deliveryState = 'unknown'; h.rows.set(key, row);
+    await h.controller.refresh(); expect(h.panel.innerHTML).toContain('data-dm-media-review');
+    await h.retry(key); expect(h.post).toHaveBeenCalledTimes(1); // no implicit reconstruction
+    h.restorePost(); await h.review(key);
+    expect(consent).toHaveBeenCalledOnce(); expect(h.post).toHaveBeenCalledTimes(2);
+    const fresh = parseDmAttachment(h.post.mock.calls[1][0].content);
+    expect(fresh.id).not.toBe(original.id); expect(fresh.key).not.toBe(original.key); expect(fresh.iv).not.toBe(original.iv);
+    expect(h.rows.has(key)).toBe(true); // uncertain prior asset is never deleted
 });

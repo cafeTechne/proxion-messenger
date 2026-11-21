@@ -59,3 +59,34 @@ it('waits for own-device discovery rather than freezing an empty mirror plan imm
     expect(await discover('bob')).toEqual(own); expect(wait).toHaveBeenCalledWith('alice'); expect(send).toHaveBeenCalledTimes(1);
     expect(await discover('bob')).toEqual(own); expect(send).toHaveBeenCalledTimes(1);
 });
+
+it('binds media upload/delivery work to the initiating bridge and auth generations', () => {
+    let bridgeEpoch = 1, authEpoch = 1, actor = 'alice-pod';
+    const target = { view: { id: 'thread', peerWebid: 'https://bob.example/#me' }, current: () => true };
+    const context = handler('_dmMediaContext', { _isPodDmView: () => true, transport: { mode: 'gateway' },
+        crossMode: { state: () => ({ webid: actor }), generation: () => bridgeEpoch }, authContext: () => ({ epoch: authEpoch }),
+        isDmPeerWebId: () => true, tabLock: { isLeader: () => true }, selfWebId: 'device-owner', localStorage: { getItem: () => '' } });
+    const first = context(target); expect(first.current()).toBe(true);
+    actor = 'bob-pod'; bridgeEpoch++; actor = 'alice-pod'; bridgeEpoch++;
+    expect(first.current()).toBe(false);
+    const restored = context(target); expect(restored.current()).toBe(true); authEpoch++;
+    expect(restored.current()).toBe(false);
+});
+
+it('does not send a media envelope under a replacement pod account', () => {
+    const inspect = handler('_frozenDmPlanStatus', { transport: { mode: 'gateway' }, crossMode: { state: () => ({ webid: 'replacement-pod' }) } });
+    expect(inspect({ media: { actor: 'original-pod' }, entries: [] })).toBe('changed');
+});
+
+it('releases accepted media only when its draft is gone and the original account is still current', async () => {
+    let exists = true, authEpoch = 1, resolve;
+    const releaseMedia = vi.fn(async () => true), pending = new Map();
+    const deps = { _mediaCleanup: pending, _outgoingScope: () => 'alice/device', authContext: () => ({ epoch: authEpoch }),
+        crossMode: null, transport: { mode: 'web' }, selfWebId: 'alice-pod', tabLock: { isLeader: () => true },
+        _dmMediaStore: { has: vi.fn(async () => exists) }, _dmOutbox: { releaseMedia } };
+    const release = handler('_releaseCompletedMedia', deps), job = { id: 'media', media: { actor: 'alice-pod', draftKey: 'draft' } };
+    release(job); await Promise.all([...pending.values()]); expect(releaseMedia).not.toHaveBeenCalled();
+    exists = false; release(job); await Promise.all([...pending.values()]); expect(releaseMedia).toHaveBeenCalledOnce();
+    releaseMedia.mockClear(); deps._dmMediaStore.has.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    release(job); authEpoch++; resolve(false); await Promise.all([...pending.values()]); expect(releaseMedia).not.toHaveBeenCalled();
+});
