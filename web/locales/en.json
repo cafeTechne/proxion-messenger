@@ -1190,5 +1190,7 @@
   "outbox.cannotCancel": "This message has already been prepared. Keep it for retry; stopping it could affect later messages.",
   "outbox.legacyConfirm": "The original encrypted send is unavailable and may already have arrived. Copy its text to the composer? Pressing Send will create a new message and may send a duplicate.",
   "outbox.openOriginal": "Open the original conversation and finish your current draft before reviewing this message.",
-  "outbox.saveFailed": "The message could not be saved for sending. Your draft is kept. Check available storage and try again."
+  "outbox.saveFailed": "The message could not be saved for sending. Your draft is kept. Check available storage and try again.",
+  "outbox.sync": "Message confirmed. Waiting to sync to your other linked devices.",
+  "outbox.syncAttention": "Message confirmed. Sync to an earlier linked device needs attention; its device or key changed."
 }

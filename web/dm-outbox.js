@@ -18,8 +18,25 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         run.finally(() => { if (queues.get(id) === run) queues.delete(id); }).catch(() => {});
         return run;
     }
+    const accepted = job => new Set(job.accepted || []);
+    function normalized(job) {
+        if (job.receiptsVersion === 1) return job;
+        // Old confirmed jobs proved peer acceptance only. If cleanup was
+        // interrupted, preserve their mirrors rather than assuming acceptance.
+        const known = job.confirmed ? job.entries.flatMap((entry, index) => entry.account === job.peer ? [index] : []) : [];
+        return { ...job, receiptsVersion: 1, accepted: known, peerConfirmed: !!job.confirmed,
+            confirmed: !!job.confirmed && known.length === job.entries.length };
+    }
+    const remaining = job => job.entries.filter((entry, index) => !accepted(job).has(index));
+    function newer(live, snapshot) {
+        if (!live) return snapshot;
+        if ((live.revision || 0) !== (snapshot.revision || 0)) return (live.revision || 0) > (snapshot.revision || 0) ? live : snapshot;
+        const stage = job => job.confirmed ? 10000 : (job.peerConfirmed ? 1000 : 0) + (job.frames ? 100 : 0) + accepted(job).size;
+        return stage(live) >= stage(snapshot) ? live : snapshot;
+    }
     async function save(job, ctx) {
         if (!ctx.current()) throw Error('Send context changed');
+        job = { ...job, revision: Math.max(job.revision || 0, jobs.get(job.id)?.revision || 0) + 1 };
         await e2e.saveDmSendJob(job, ctx.current);
         if (!ctx.current()) throw Error('Send context changed');
         jobs.set(job.id, job);
@@ -30,31 +47,47 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         const fanout = [];
         for (let index = 0; index < job.entries.length; index++) {
             const entry = job.entries[index];
-            if (entry.primary) continue;
+            if (entry.primary || !encrypted[index]) continue;
             fanout.push({ to_webid: entry.account, to_device_id: entry.device,
                 payload: { ...field(encrypted[index]), from_device_id: job.device,
                     thread_id: job.record.thread_id, thread_peer: job.peer,
                     x25519_pub: job.pub, ...(job.record.reply_to_id ? { reply_to_id: job.record.reply_to_id } : {}) } });
         }
-        if (job.mode === 'fanout') return [{ cmd: 'send_dm_fanout', message_id: job.id, fanout }];
+        if (job.mode === 'fanout') return fanout.length ? [{ cmd: 'send_dm_fanout', message_id: job.id, fanout }] : [];
         const primary = job.entries.findIndex(entry => entry.primary);
-        const frames = [{ ...job.route, ...field(encrypted[primary]), message_id: job.id,
-            timestamp: job.record.timestamp, from_display_name: job.record.from_display_name }];
+        const frames = encrypted[primary] ? [{ ...job.route, ...field(encrypted[primary]), message_id: job.id,
+            timestamp: job.record.timestamp, from_display_name: job.record.from_display_name }] : [];
         if (fanout.length) frames.push({ cmd: 'send_dm_fanout', message_id: job.id, fanout });
         return frames;
     }
-    async function cleanup(job, ctx) {
+    async function settleAccepted(job, ctx) {
         if (!ctx.current()) return false;
-        onConfirmed(job.id);
-        if (await clearDelivery(job.id) === false || !ctx.current()) return false;
-        for (const entry of job.entries) {
-            if (!ctx.current() || await e2e.finishDmSend(entry.peerId, job.sendId, ctx.current) === false) return false;
+        if (job.peerConfirmed) {
+            onConfirmed(job.id);
+            if (await clearDelivery(job.id) === false || !ctx.current()) return false;
         }
+        for (const index of accepted(job)) {
+            const entry = job.entries[index];
+            if (!entry || !ctx.current() || await e2e.finishDmSend(entry.peerId, job.sendId, ctx.current) === false) return false;
+        }
+        return ctx.current();
+    }
+    async function cleanup(job, ctx) {
+        if (!await settleAccepted(job, ctx)) return false;
         if (!ctx.current() || await e2e.removeDmSendJob(job.id, ctx.current) === false) return false;
         jobs.delete(job.id); attempts.delete(job.id); notified.delete(job.id);
         settled.add(job.id);
         if (settled.size > 512) settled.delete(settled.values().next().value);
         return true;
+    }
+    function pendingFrames(job, include = () => true) {
+        const pending = remaining(job).filter(entry => include(entry) && planStatus({ ...job, entries: [entry] }) === 'ready');
+        return job.frames.flatMap(frame => {
+            if (frame.cmd !== 'send_dm_fanout') return pending.some(entry => entry.primary) ? [frame] : [];
+            const fanout = frame.fanout.filter(target => pending.some(entry => !entry.primary
+                && entry.account === target.to_webid && entry.device === target.to_device_id));
+            return fanout.length ? [{ ...frame, fanout }] : [];
+        });
     }
     const intentQueues = new Map();
     function queue(input) {
@@ -80,11 +113,21 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 || (input.mode === 'single' && input.entries.filter(entry => entry.primary).length !== 1)) {
             throw Error('Invalid frozen send plan');
         }
-        const job = JSON.parse(JSON.stringify({ ...input, scope: ctx.scope,
+        const job = JSON.parse(JSON.stringify({ ...input, receiptsVersion: 1, accepted: [], peerConfirmed: false, scope: ctx.scope,
             sendId: await dmEnvelopeFingerprint({ scope: ctx.scope, message_id: input.id }) }));
         await save(job, ctx);
         notified.add(job.id); // the compose path renders/tracks its optimistic copy
         return job;
+    }
+    function preparedResults(job) {
+        const result = { ...job.prepared };
+        job.entries.forEach((entry, index) => {
+            const payload = entry.primary ? job.frames?.find(frame => frame.cmd !== 'send_dm_fanout')
+                : job.frames?.flatMap(frame => frame.fanout || []).find(target => target.to_webid === entry.account && target.to_device_id === entry.device)?.payload;
+            if (payload) result[index] = { ciphertext: payload.content, nonce: payload.nonce,
+                msgNum: payload.msg_num, pn: payload.pn, ratchetPub: payload.ratchet_pub };
+        });
+        return result;
     }
     function transmit(id, { force = true } = {}) {
         const ctx = context();
@@ -94,47 +137,81 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             if (job.confirmed) return cleanup(job, ctx);
             if (!force && attempts.has(id) && now() - attempts.get(id) < 18000) return false;
             try {
-                if (!canSend(job) || planStatus(job) !== 'ready') return false;
+                if (job.peerConfirmed) await settleAccepted(job, ctx);
+                if (!ctx.current() || !canSend(job)) return false;
                 failures.delete(id);
-                let ready = job;
+                let ready = job, transmitted = false;
+                const encrypted = preparedResults(job);
+                const prepare = async (entry, index) => {
+                    if (encrypted[index] || accepted(ready).has(index)) return;
+                    if (!ctx.current()) throw Error('Send context changed');
+                    encrypted[index] = await e2e.ratchetEncrypt(entry.peerId, job.record.content,
+                        { sendId: job.sendId, peerPub: entry.pub, current: ctx.current });
+                };
                 if (!job.frames) {
-                    const encrypted = [];
-                    for (const entry of job.entries) {
-                        if (!ctx.current()) return false;
-                        encrypted.push(await e2e.ratchetEncrypt(entry.peerId, job.record.content,
-                            { sendId: job.sendId, peerPub: entry.pub, current: ctx.current }));
+                    const peers = job.entries.filter(entry => entry.account === job.peer);
+                    if (planStatus({ ...job, entries: peers }) !== 'ready') return false;
+                    for (let index = 0; index < job.entries.length; index++) {
+                        if (job.entries[index].account === job.peer) await prepare(job.entries[index], index);
                     }
                     ready = { ...job, frames: framesFor(job, encrypted) };
-                    await save(ready, ctx); // no frame may leave before this commit
+                    await save(ready, ctx); // peer ciphertext is durable before transmission
                 }
-                if (!ctx.current() || await persistMessage(ready.record) === false || !ctx.current()) return false;
-                if (!canSend(ready)) return false;
-                attempts.set(id, now());
-                for (const frame of ready.frames) {
-                    if (!ctx.current()) return false;
-                    await send(JSON.parse(JSON.stringify(frame)));
+                const transmitPhase = async include => {
+                    if (!ctx.current() || !canSend(ready)) return;
+                    for (const frame of pendingFrames(ready, include)) {
+                        if (!ctx.current()) return;
+                        attempts.set(id, now());
+                        await send(JSON.parse(JSON.stringify(frame))); transmitted = true;
+                    }
+                };
+                if (!ctx.current() || (!ready.peerConfirmed && await persistMessage(ready.record) === false) || !ctx.current()) return false;
+                // Peer delivery precedes mirror preparation. A full/broken own
+                // journal must not strand an otherwise valid primary send.
+                await transmitPhase(entry => entry.account === job.peer);
+                for (let index = 0; index < job.entries.length; index++) {
+                    const entry = job.entries[index];
+                    if (entry.account === job.peer || encrypted[index] || accepted(ready).has(index)
+                            || planStatus({ ...ready, entries: [entry] }) !== 'ready') continue;
+                    try {
+                        await prepare(entry, index);
+                        const next = { ...ready, frames: framesFor(job, encrypted) };
+                        await save(next, ctx); ready = next;
+                    } catch (err) {
+                        if (!ctx.current()) throw err;
+                        failures.add(id); onError(err);
+                    }
                 }
-                return true; // transmitted/queued is still not delivery confirmation
+                await transmitPhase(entry => entry.account !== job.peer);
+                return transmitted;
             } catch (err) { if (ctx.current()) failures.add(id); onError(err); return false; }
         });
     }
-    function validEvidence(job, evidence) {
-        if (evidence?.kind === 'pod') return evidence.from === job.record.from_webid;
-        if (job.mode === 'single') return ['echo', 'history'].includes(evidence?.kind) && evidence.from === job.record.from_webid;
-        if (evidence?.kind !== 'fanout' || !Array.isArray(evidence.delivered)) return false;
-        return job.entries.filter(entry => entry.account === job.peer).every(entry =>
-            evidence.delivered.some(row => row.to_webid === entry.account && row.to_device_id === entry.device));
+    function evidencedTargets(job, evidence) {
+        if (['echo', 'history', 'pod'].includes(evidence?.kind)) {
+            if (evidence.from !== job.record.from_webid || job.mode !== 'single') return [];
+            return job.entries.flatMap((entry, index) => entry.primary ? [index] : []);
+        }
+        if (evidence?.kind !== 'fanout' || !Array.isArray(evidence.delivered)) return [];
+        const prepared = preparedResults(job);
+        return job.entries.flatMap((entry, index) => prepared[index] && !entry.primary && evidence.delivered.some(row =>
+            row.to_webid === entry.account && row.to_device_id === entry.device) ? [index] : []);
     }
     function confirm(id, evidence) {
         const ctx = context();
         return serialized(id, async () => {
             const job = jobs.get(id);
-            if (!job || !ctx.current() || job.scope !== ctx.scope || !job.frames || !validEvidence(job, evidence)) return false;
-            const confirmed = { ...job, confirmed: true };
+            if (!job || !ctx.current() || job.scope !== ctx.scope || !job.frames) return false;
+            const targets = evidencedTargets(job, evidence);
+            if (!targets.length) return false;
+            const known = accepted(job); for (const index of targets) known.add(index);
+            const peerConfirmed = job.entries.every((entry, index) => entry.account !== job.peer || known.has(index));
+            const confirmed = { ...job, accepted: [...known], peerConfirmed, confirmed: known.size === job.entries.length };
             try {
-                await save(confirmed, ctx); // a crash during cleanup must not send again
-                await cleanup(confirmed, ctx);
-                return true;
+                await save(confirmed, ctx); // every accepted target is durable before cleanup
+                if (confirmed.confirmed) await cleanup(confirmed, ctx);
+                else await settleAccepted(confirmed, ctx);
+                return peerConfirmed;
             } catch (err) { onError(err); return false; }
         });
     }
@@ -144,11 +221,11 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         const snapshots = await e2e.listDmSendJobs();
         if (!ctx.current()) return [];
         const rows = [];
-        for (const snapshot of snapshots) {
+        for (const row of snapshots) {
+            const snapshot = normalized(row);
             if (snapshot.scope !== ctx.scope || settled.has(snapshot.id)) continue;
             const live = jobs.get(snapshot.id);
-            const stage = job => job.confirmed ? 2 : job.frames ? 1 : 0;
-            const job = live && stage(live) >= stage(snapshot) ? live : snapshot;
+            const job = newer(live, snapshot);
             jobs.set(job.id, job);
             let canCancel = !job.frames && !job.confirmed && !!e2e.hasPendingDmSend;
             if (canCancel) for (const entry of job.entries) {
@@ -159,11 +236,12 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             // A live prepare/confirmation can overtake the scan's read awaits.
             const latest = jobs.get(job.id) || job;
             if (latest.frames || latest.confirmed) canCancel = false;
-            const plan = planStatus(latest);
-            const state = latest.confirmed ? 'cleanup' : plan === 'changed' ? 'attention'
+            const plan = planStatus({ ...latest, entries: remaining(latest) });
+            const state = latest.confirmed ? 'cleanup' : latest.peerConfirmed ? (plan === 'changed' ? 'syncAttention' : 'sync') : plan === 'changed' ? 'attention'
                 : failures.has(job.id) ? 'storage' : !canSend(latest) || plan !== 'ready' ? 'waiting'
                     : latest.frames ? 'confirmation' : 'waiting';
-            rows.push({ id: latest.id, peer: latest.peer, timestamp: latest.record.timestamp, state, canCancel });
+            const canRetry = remaining(latest).some(entry => planStatus({ ...latest, entries: [entry] }) === 'ready');
+            rows.push({ id: latest.id, peer: latest.peer, timestamp: latest.record.timestamp, state, canCancel, canRetry });
         }
         return rows;
     }
@@ -188,16 +266,16 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         const ctx = context();
         const run = (async () => {
             if (!ctx.current()) return;
-            for (const snapshot of await e2e.listDmSendJobs()) {
+            for (const row of await e2e.listDmSendJobs()) {
+                const snapshot = normalized(row);
                 if (!ctx.current()) return;
                 if (snapshot.scope !== ctx.scope || settled.has(snapshot.id)) continue;
                 // A disk scan may have started before prepare/confirm committed.
                 // Never roll a live job back to an earlier stage while restoring.
                 const live = jobs.get(snapshot.id);
-                const stage = job => job.confirmed ? 2 : job.frames ? 1 : 0;
-                const job = live && stage(live) >= stage(snapshot) ? live : snapshot;
+                const job = newer(live, snapshot);
                 jobs.set(job.id, job);
-                if (!job.confirmed && !notified.has(job.id)) {
+                if (!job.confirmed && !job.peerConfirmed && !notified.has(job.id)) {
                     notified.add(job.id); onPending(job);
                 }
                 await transmit(job.id, { force });

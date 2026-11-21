@@ -205,13 +205,13 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     // Multi-device send: one per-device encrypted entry per recipient device (and
     // our own other devices). Each entry goes to that WebID's pod inbox, tagged
     // with to_device_id so the right device claims it (devices share a pod inbox).
-    async function dropFanout(cmd) {
+    async function dropFanout(cmd, { onAccepted = () => {} } = {}) {
         const generation = _generation, accountScope = scope(), session = getGeneration();
         const current = () => generation === _generation && accountScope === scope() && session === getGeneration();
         const entries = cmd && cmd.fanout;
         if (!Array.isArray(entries)) return false;
         // Every intended recipient device must accept its copy. The fanout also
-        // carries best-effort self-sync copies to our own other devices; those
+        // carries self-sync copies to our own other devices; those
         // land in our own inbox and must not be counted as delivery, or a DM that
         // reached none of the peer's devices would falsely clear its pending state.
         const self = getSelfWebId();
@@ -232,7 +232,10 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             if (!current()) return false;
             const ok = await pod.podDropDm(root, envelope);
             if (!current()) return false;
-            if (e.to_webid !== self && ok) accepted++;
+            if (ok) {
+                onAccepted([{ to_webid: e.to_webid, to_device_id: e.to_device_id }]);
+                if (e.to_webid !== self) accepted++;
+            }
         }
         return recipients > 0 && accepted === recipients;
     }

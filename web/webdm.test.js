@@ -524,3 +524,15 @@ it('does not publish a delayed signed drop after a replacement session with the 
     generation++; release({ signature: 'old-session-signature' });
     expect(await pending).toBe(false); expect(pod.podDropDm).not.toHaveBeenCalled();
 });
+
+it('reports own-device and peer pod acceptance separately, including partial success', async () => {
+    const { dm, pod } = harness(); const accepted = [];
+    pod.podDropDm.mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const ok = await dm.dropFanout({ message_id: 'partial', fanout: [
+        { to_webid: 'https://me', to_device_id: 'sibling', payload: { content: 'own-cipher' } },
+        { to_webid: 'https://bob', to_device_id: 'b1', payload: { content: 'peer-cipher-1' } },
+        { to_webid: 'https://bob', to_device_id: 'b2', payload: { content: 'peer-cipher-2' } },
+    ] }, { onAccepted: rows => accepted.push(...rows) });
+    expect(ok).toBe(false);
+    expect(accepted).toEqual([{ to_webid: 'https://me', to_device_id: 'sibling' }, { to_webid: 'https://bob', to_device_id: 'b2' }]);
+});

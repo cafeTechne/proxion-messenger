@@ -49,3 +49,13 @@ it('pauses unknown or revoked frozen devices without adding a newly linked devic
     expect(inspect(job)).toBe('ready'); expect(job.entries).toHaveLength(1);
     rosters.bob = []; expect(inspect(job)).toBe('changed');
 });
+
+it('waits for own-device discovery rather than freezing an empty mirror plan immediately after reload', async () => {
+    const rosters = {}, own = [{ device_id: 'sibling', pub_b64u: 'key' }], send = vi.fn();
+    const wait = vi.fn(async () => { rosters.alice = own; return own; });
+    const discover = handler('_ownDevicesForSend', { transport: { mode: 'gateway' }, isDmPeerWebId: () => false,
+        _peerDeviceKeys: rosters, selfWebId: 'alice', socket: { readyState: 1, send }, WebSocket: { OPEN: 1 },
+        _deviceKeyWaiter: { wait }, identity: { ownOtherDevices: () => rosters.alice || [] } });
+    expect(await discover('bob')).toEqual(own); expect(wait).toHaveBeenCalledWith('alice'); expect(send).toHaveBeenCalledTimes(1);
+    expect(await discover('bob')).toEqual(own); expect(send).toHaveBeenCalledTimes(1);
+});

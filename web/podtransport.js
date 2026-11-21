@@ -185,8 +185,13 @@ export function createPodSocket({ getSelfWebId, getSessionId = getSelfWebId, han
                     // Multi-device: one per-device envelope per recipient/own
                     // device. Echo only after all intended recipient copies were dropped.
                     if (!dm?.dropFanout) { fail(cmd, true); break; }
-                    if (await dm.dropFanout(cmd)) _echoDm({ message_id: cmd.message_id });
-                    else fail(cmd);
+                    let accepted = false;
+                    const ok = await dm.dropFanout(cmd, { onAccepted: delivered => {
+                        if (!current()) return;
+                        accepted = true;
+                        handleEvent({ type: 'send_dm_fanout_ack', message_id: cmd.message_id, delivered });
+                    } });
+                    if (!ok && !accepted) fail(cmd);
                     break;
                 }
                 case 'get_rooms': {

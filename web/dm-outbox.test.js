@@ -89,11 +89,15 @@ describe('durable encrypted text outbox', () => {
             { peerId: 'alice#a2', account: 'alice', device: 'a2', pub: 'pub3' },
         ] };
         await engine.queue(job); await engine.send(job.id);
-        expect(h.frames[0].fanout).toHaveLength(3);
+        expect(h.frames[0].fanout).toHaveLength(2);
+        expect(h.frames[1].fanout).toHaveLength(1);
         expect(await engine.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'bob', to_device_id: 'b1' }] })).toBe(false);
         expect(await engine.confirm(job.id, { kind: 'fanout', delivered: [
             { to_webid: 'bob', to_device_id: 'b1' }, { to_webid: 'bob', to_device_id: 'b2' },
         ] })).toBe(true);
+        expect(h.disk.size).toBe(1);
+        expect(h.disk.get(job.id).peerConfirmed).toBe(true);
+        expect(await engine.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'alice', to_device_id: 'a2' }] })).toBe(true);
         expect(h.disk.size).toBe(0);
     });
     it('does not let a stale restore snapshot undo a committed confirmation', async () => {
@@ -208,4 +212,94 @@ describe('safe pending-send controls', () => {
         const cancelling = engine.cancel(input.id); release(); await sending;
         expect(await cancelling).toBe(false); expect(h.disk.size).toBe(1);
     });
+});
+
+describe('independent sender mirror recovery', () => {
+    const mirrorJob = () => ({ ...clone(input), entries: [...clone(input.entries),
+        { peerId: 'alice#a2', account: 'alice', device: 'a2', pub: 'own-pub' }] });
+    const ownAck = { kind: 'fanout', delivered: [{ to_webid: 'alice', to_device_id: 'a2' }] };
+    const peerAck = { kind: 'echo', from: 'alice' };
+    it.each(['peer-first', 'mirror-first'])('keeps peer delivery separate from own-device acceptance: %s', async order => {
+        const h = harness(), engine = h.engine(), job = mirrorJob(); await engine.queue(job); await engine.send(job.id);
+        const first = order === 'peer-first' ? peerAck : ownAck, second = order === 'peer-first' ? ownAck : peerAck;
+        expect(await engine.confirm(job.id, first)).toBe(order === 'peer-first');
+        expect(h.disk.size).toBe(1); expect(h.cipher.size).toBe(1);
+        expect(h.options.onConfirmed).toHaveBeenCalledTimes(order === 'peer-first' ? 1 : 0);
+        expect(await engine.confirm(job.id, second)).toBe(true); expect(h.disk.size).toBe(0); expect(h.cipher.size).toBe(0);
+    });
+    it('reloads after peer acceptance and retries only the exact unfinished mirror without reverting history', async () => {
+        const h = harness(), engine = h.engine(), job = mirrorJob(); await engine.queue(job); await engine.send(job.id);
+        const original = clone(h.frames[1]); await engine.confirm(job.id, peerAck);
+        expect((await engine.inspect())[0].state).toBe('sync');
+        h.frames.length = 0; h.options.persistMessage.mockClear(); h.options.onPending.mockClear();
+        const restored = h.engine(); await restored.restore({ force: true });
+        expect(h.frames).toEqual([original]); expect(h.options.persistMessage).not.toHaveBeenCalled(); expect(h.options.onPending).not.toHaveBeenCalled();
+        expect(h.e2e.ratchetEncrypt).toHaveBeenCalledTimes(2);
+        await restored.confirm(job.id, ownAck); expect(h.disk.size).toBe(0);
+    });
+    it('accumulates partial device evidence and retries only unaccepted primary devices', async () => {
+        const h = harness(), engine = h.engine();
+        const job = { ...clone(input), mode: 'fanout', entries: [
+            { peerId: 'bob#b1', account: 'bob', device: 'b1', pub: 'p1' },
+            { peerId: 'bob#b2', account: 'bob', device: 'b2', pub: 'p2' },
+        ] };
+        await engine.queue(job); await engine.send(job.id);
+        expect(await engine.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'bob', to_device_id: 'b1' }] })).toBe(false);
+        await engine.send(job.id);
+        expect(h.frames[1].fanout.map(row => row.to_device_id)).toEqual(['b2']);
+        expect(await engine.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'bob', to_device_id: 'b2' }] })).toBe(true);
+        expect(h.disk.size).toBe(0);
+    });
+    it('retains both targets when acceptance persistence fails, reusing exact ciphertext', async () => {
+        const h = harness(), engine = h.engine(), job = mirrorJob(); await engine.queue(job); await engine.send(job.id);
+        h.e2e.saveDmSendJob.mockRejectedValueOnce(Error('lost acceptance write'));
+        expect(await engine.confirm(job.id, peerAck)).toBe(false); expect(h.options.onConfirmed).not.toHaveBeenCalled();
+        await engine.send(job.id); expect(h.frames[2]).toEqual(h.frames[0]); expect(h.frames[3]).toEqual(h.frames[1]);
+        expect(h.e2e.ratchetEncrypt).toHaveBeenCalledTimes(2);
+    });
+    it('does not resurrect accepted targets from a delayed disk scan', async () => {
+        const h = harness(), engine = h.engine(), job = mirrorJob(); await engine.queue(job); await engine.send(job.id);
+        const old = clone(h.disk.get(job.id)); let resolve;
+        h.e2e.listDmSendJobs.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+        const scanning = engine.restore({ force: true }); await engine.confirm(job.id, peerAck);
+        h.frames.length = 0; resolve([old]); await scanning;
+        expect(h.frames).toHaveLength(1); expect(h.frames[0].cmd).toBe('send_dm_fanout');
+        expect(h.disk.get(job.id).peerConfirmed).toBe(true);
+    });
+    it('keeps a revoked mirror blocked without reverting confirmed peer delivery or sending to a new device', async () => {
+        const h = harness(); let changed = false;
+        h.options.planStatus = job => changed && job.entries.some(entry => entry.device === 'a2') ? 'changed' : 'ready';
+        const engine = h.engine(), job = mirrorJob(); await engine.queue(job); await engine.send(job.id); await engine.confirm(job.id, peerAck);
+        changed = true; const count = h.frames.length; expect(await engine.send(job.id)).toBe(false);
+        expect(h.frames).toHaveLength(count); expect((await engine.inspect())[0]).toMatchObject({ state: 'syncAttention', canCancel: false, canRetry: false });
+        expect(h.disk.get(job.id).peerConfirmed).toBe(true);
+    });
+    it('migrates interrupted legacy confirmed jobs by retaining unproven mirrors', async () => {
+        const h = harness(), engine = h.engine(), job = mirrorJob(); await engine.queue(job); await engine.send(job.id);
+        const legacy = h.disk.get(job.id); delete legacy.receiptsVersion; delete legacy.accepted; delete legacy.peerConfirmed; legacy.confirmed = true;
+        h.frames.length = 0; const restored = h.engine(); await restored.restore({ force: true });
+        expect(h.frames).toHaveLength(1); expect(h.frames[0].cmd).toBe('send_dm_fanout'); expect(h.disk.size).toBe(1);
+        await restored.confirm(job.id, ownAck); expect(h.disk.size).toBe(0);
+    });
+});
+
+it('delivers the peer copy even when own-device preparation fails, then recovers only the mirror', async () => {
+    const h = harness(), engine = h.engine();
+    const job = { ...clone(input), entries: [...clone(input.entries), { peerId: 'alice#a2', account: 'alice', device: 'a2', pub: 'pub' }] };
+    const encrypt = h.e2e.ratchetEncrypt.getMockImplementation(); let failOwn = true;
+    h.e2e.ratchetEncrypt.mockImplementation(async (...args) => {
+        if (args[0] === 'alice#a2' && failOwn) {
+            expect(h.frames[0].cmd).toBe('local_dm'); // peer already transmitted
+            throw Error('own-device journal is full');
+        }
+        return encrypt(...args);
+    });
+    await engine.queue(job); expect(await engine.send(job.id)).toBe(true);
+    expect(h.frames).toHaveLength(1); expect(h.disk.get(job.id).frames).toHaveLength(1);
+    await engine.confirm(job.id, { kind: 'echo', from: 'alice' });
+    expect(h.disk.get(job.id).peerConfirmed).toBe(true);
+    failOwn = false; await h.engine().restore({ force: true });
+    expect(h.frames).toHaveLength(2); expect(h.frames[1].cmd).toBe('send_dm_fanout');
+    expect(h.frames[1].fanout[0].to_device_id).toBe('a2');
+    expect(h.e2e.ratchetEncrypt.mock.calls.filter(([peer]) => peer === 'bob')).toHaveLength(1);
 });

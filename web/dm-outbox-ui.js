@@ -8,7 +8,7 @@ export function createDmOutboxUi({ outbox, getScope, isActive, getLegacy = () =>
     const el = suffix => doc.getElementById('dm-outbox-' + suffix);
     let generation = 0, displayedScope = null;
     const states = () => ({ waiting: t('outbox.waiting'), confirmation: t('outbox.confirmation'),
-        cleanup: t('outbox.cleanup'), attention: t('outbox.attention'), storage: t('outbox.storage'), legacy: t('outbox.legacy') });
+        cleanup: t('outbox.cleanup'), sync: t('outbox.sync'), syncAttention: t('outbox.syncAttention'), attention: t('outbox.attention'), storage: t('outbox.storage'), legacy: t('outbox.legacy') });
     function reset() { generation++; displayedScope = null; el('rows')?.replaceChildren(); if (el('status')) el('status').textContent = ''; }
     async function refresh() {
         reset();
@@ -25,7 +25,7 @@ export function createDmOutboxUi({ outbox, getScope, isActive, getLegacy = () =>
             el('status').textContent = rows.length ? t('outbox.uncertain') : t('outbox.empty');
             el('rows').innerHTML = rows.map(row => `<li><p>${escHtml(getName(row.peer))} · ${escHtml(formatTimestamp(row.timestamp))}</p>`
                 + `<p>${escHtml(states()[row.state] || states().waiting)}</p>`
-                + (row.state === 'cleanup' ? '' : `<button type="button" class="btn btn--sm" data-outbox-id="${escHtml(row.id)}" data-outbox-action="${row.state === 'legacy' ? 'review' : 'retry'}"${row.state === 'attention' ? ' disabled' : ''}>${escHtml(row.state === 'legacy' ? t('outbox.review') : t('send.retry'))}</button>`)
+                + (row.state === 'cleanup' ? '' : `<button type="button" class="btn btn--sm" data-outbox-id="${escHtml(row.id)}" data-outbox-action="${row.state === 'legacy' ? 'review' : 'retry'}"${((row.state === 'attention' || row.state === 'syncAttention') && !row.canRetry) ? ' disabled' : ''}>${escHtml(row.state === 'legacy' ? t('outbox.review') : t('send.retry'))}</button>`)
                 + (row.canCancel ? ` <button type="button" class="btn btn--sm" data-outbox-id="${escHtml(row.id)}" data-outbox-action="cancel">${escHtml(t('outbox.cancel'))}</button>` : '') + '</li>').join('');
         } catch { if (current()) el('status').textContent = t('outbox.unavailable'); }
     }

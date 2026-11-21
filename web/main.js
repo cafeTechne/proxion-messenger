@@ -901,7 +901,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             solidSession.events?.on(event, () => _pendingSendsUi.reset());
         }
         function _confirmDmSend(id, evidence) {
-            if (!_dmOutbox.has(id)) { sendStatus.confirm(id); return; }
+            if (!_dmOutbox.has(id)) {
+                if (evidence?.kind === 'fanout' && !evidence.delivered?.some(row => row.to_webid !== selfWebId && row.to_webid !== clientDid)) return;
+                sendStatus.confirm(id); return;
+            }
             _dmOutbox.confirm(id, evidence).catch(err => console.warn('[dm-outbox] confirmation pending:', err));
         }
         // R65: user blocking (the gateway enforces; this is the client feature).
@@ -6295,6 +6298,16 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // it from the peer's pod. Gateway: the account key is the roster entry
         // whose device_id is the account itself; ask once if no roster is cached.
         const _deviceKeyWaiter = createDeviceKeyWaiter();
+        async function _ownDevicesForSend(peerId) {
+            if (transport.mode !== 'web' && isDmPeerWebId(peerId)) return [];
+            if (transport.mode !== 'web' && _peerDeviceKeys[selfWebId] === undefined) {
+                if (socket?.readyState !== WebSocket.OPEN) throw Error('Own device information unavailable');
+                const ready = _deviceKeyWaiter.wait(selfWebId);
+                socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: selfWebId }));
+                if (!await ready) throw Error('Own device information unavailable');
+            }
+            return identity.ownOtherDevices();
+        }
         async function _obtainPeerKey(peerId) {
             if (transport.mode === 'web') {
                 if (isDmPeerWebId(peerId)) await fetchAndCachePeerPub(peerId, peerPodRootFromWebId(peerId));
@@ -6393,8 +6406,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 let _resendPayload = null, _durableDm = false;
                 if (_dmPeer && (_e2ePlainTarget || identity.devicesForPeer(_dmPeer).length >= 2)) {
                     const peerDevs = identity.devicesForPeer(_dmPeer).filter(dev => dev.device_id && dev.pub_b64u);
-                    const ownDevs = (transport.mode !== 'web' && isDmPeerWebId(_dmPeer) ? [] : identity.ownOtherDevices())
-                        .filter(dev => dev.device_id && dev.pub_b64u);
+                    const ownDevs = (await _ownDevicesForSend(_dmPeer)).filter(dev => dev.device_id && dev.pub_b64u);
+                    if (_sendScope !== _outgoingScope()) throw Error('Send context changed');
                     const mode = peerDevs.length >= 2 ? 'fanout' : 'single';
                     const entries = mode === 'fanout' ? peerDevs.map(dev => ({
                         peerId: _dmPeer + '#' + dev.device_id, account: _dmPeer, device: dev.device_id, pub: dev.pub_b64u,

@@ -315,15 +315,10 @@ try {
   // E5 slice 2: A-primary's SENT message self-synced to A-device. Check A-device's
   // local plaintext store (robust to which thread is active).
   step = 'a-device-self-sync';
-  const adGotReply = await ad.evaluate(async (t) => {
-    const db = await new Promise((res) => { const r = indexedDB.open('proxion-dm-history', 1); r.onsuccess = e => res(e.target.result); r.onerror = () => res(null); });
-    if (!db || !db.objectStoreNames.contains('messages')) return false;
-    return await new Promise((res) => {
-      const tx = db.transaction('messages', 'readonly'); const req = tx.objectStore('messages').openCursor(); let found = false;
-      req.onsuccess = (e) => { const c = e.target.result; if (c) { if ((c.value.content || '').includes(t)) found = true; c.continue(); } else res(found); };
-      req.onerror = () => res(false);
-    });
-  }, REPLY).catch(() => false);
+  const adGotReply = await ad.waitForFunction(async text => {
+    const rows = await (await import('./dmhistory.js')).dmHistorySearch(text);
+    return rows.some(row => row.content === text);
+  }, { timeout: 20000, polling: 250 }, REPLY).then(() => true, () => false);
   const adFeedReply = await ad.evaluate((t) => (document.getElementById('message-feed')?.textContent || '').includes(t), REPLY);
   if (!adGotReply && !adFeedReply) {
     fail('A-device did NOT receive A-primary\'s sent message via self-sync (not in feed or local store)');
@@ -352,6 +347,70 @@ try {
   step = 'durable-fanout-outbox';
   await dmOutboxJourney({ sender: b, receiver: ap, openSender: () => openFirstDm(b, 'B'),
     openReceiver: () => openFirstDm(ap, 'A-primary'), label: 'gateway fanout outbox' });
+
+  // Peer acceptance must not discard a lost own-device acknowledgement.
+  step = 'independent-self-sync';
+  await ad.goto('about:blank'); await sleep(500);
+  const mirrorText = 'independent-mirror-' + Date.now();
+  const suppressOwnAck = ownDevice => {
+    const send = WebSocket.prototype.send, wrapped = new WeakSet();
+    WebSocket.prototype.send = function (data) {
+      let frame; try { frame = JSON.parse(data); } catch { /* other frame */ }
+      if (frame?.message_id && ['send_dm', 'local_dm', 'send_dm_fanout'].includes(frame.cmd) && !wrapped.has(this)) {
+        wrapped.add(this); const receive = this.onmessage;
+        this.onmessage = function (event) {
+          let reply; try { reply = JSON.parse(event.data); } catch { /* other frame */ }
+          if (reply?.type === 'send_dm_fanout_ack' && reply.delivered?.some(row => row.to_device_id === ownDevice)) {
+            const delivered = reply.delivered.filter(row => row.to_device_id !== ownDevice);
+            if (!delivered.length) return;
+            return receive?.call(this, new MessageEvent('message', { data: JSON.stringify({ ...reply, delivered }) }));
+          }
+          return receive?.call(this, event);
+        };
+      }
+      return send.call(this, data);
+    };
+  };
+  // The connection captures its paced sender at construction. Install before
+  // reload so the live socket actually uses this failure-injection hook.
+  const ownAckBlocker = await ap.evaluateOnNewDocument(suppressOwnAck, adDid);
+  await ap.reload({ waitUntil: 'networkidle2' }); await online(ap);
+  const observed = [];
+  const wireSession = await ap.createCDPSession(); await wireSession.send('Network.enable');
+  wireSession.on('Network.webSocketFrameSent', event => { try { observed.push(JSON.parse(event.response.payloadData)); } catch { /* other frame */ } });
+  await openFirstDm(ap, 'mirror sender');
+  await ap.focus('#message-input'); await ap.type('#message-input', mirrorText); await ap.keyboard.press('Enter');
+  step = 'independent-self-sync-peer-receive';
+  await b.waitForFunction(text => document.getElementById('message-feed')?.textContent.includes(text), { timeout: 20000, polling: 250 }, mirrorText);
+  step = 'independent-self-sync-pending-mirror';
+  await ap.waitForFunction(async text => (await (await import('./e2e.js')).listDmSendJobs()).some(job => job.record.content === text && job.peerConfirmed && !job.confirmed), { timeout: 20000, polling: 250 }, mirrorText).catch(async error => {
+    console.error('mirror jobs:', await ap.evaluate(async () => (await (await import('./e2e.js')).listDmSendJobs()).map(job => ({ id: job.id, peerConfirmed: job.peerConfirmed, accepted: job.accepted, entries: job.entries, frames: job.frames?.length }))));
+    throw error;
+  });
+  const mirrorJob = await ap.evaluate(async text => (await (await import('./e2e.js')).listDmSendJobs()).find(job => job.record.content === text), mirrorText);
+  const savedMirror = mirrorJob.frames.find(frame => frame.cmd === 'send_dm_fanout').fanout.find(row => row.to_device_id === adDid).payload;
+  const afterPeer = observed.length;
+  step = 'independent-self-sync-reload';
+  await ap.reload({ waitUntil: 'networkidle2' }); await online(ap);
+  await ap.waitForFunction(async id => (await (await import('./e2e.js')).listDmSendJobs()).some(job => job.id === id && job.peerConfirmed), { timeout: 15000, polling: 250 }, mirrorJob.id);
+  if (A.queued(apDid, adDid) !== 1) throw Error('unconfirmed mirror missing from durable gateway queue');
+  step = 'independent-self-sync-gateway-restart';
+  await A.restart(); await online(ap);
+  if (A.queued(apDid, adDid) !== 1) throw Error('lost-ack mirror did not survive gateway restart');
+  step = 'independent-self-sync-recover-ack';
+  await ap.removeScriptToEvaluateOnNewDocument(ownAckBlocker.identifier);
+  await ap.reload({ waitUntil: 'networkidle2' }); await online(ap);
+  await ap.waitForFunction(async id => !(await (await import('./e2e.js')).listDmSendJobs()).some(job => job.id === id), { timeout: 30000, polling: 250 }, mirrorJob.id);
+  const retries = observed.slice(afterPeer).filter(frame => frame.message_id === mirrorJob.id);
+  if (!retries.length || retries.some(frame => frame.cmd !== 'send_dm_fanout' || frame.fanout.some(row => row.to_device_id !== adDid || JSON.stringify(row.payload) !== JSON.stringify(savedMirror)))) throw Error('mirror retry replayed primary or changed ciphertext');
+  await ad.goto(A.url, { waitUntil: 'networkidle2' }); await online(ad); await openFirstDm(ad, 'independent mirror receiver');
+  await ad.waitForFunction(text => document.getElementById('message-feed')?.textContent.includes(text), { timeout: 20000, polling: 250 }, mirrorText);
+  for (const page of [b, ad]) {
+    const count = await page.evaluate(async text => (await (await import('./dmhistory.js')).dmHistorySearch(text)).filter(row => row.content === text).length, mirrorText);
+    if (count !== 1) throw Error('independent mirror recovery duplicated history: ' + count);
+  }
+  await wireSession.detach(); await openFirstDm(ap, 'A-primary after mirror recovery');
+  console.log('  ✓ confirmed peer delivery retains its lost-ack mirror across sender reload and gateway restart; only exact mirror ciphertext retries, one message per device');
 
   // Accepted offline copies must survive loss of ALL gateway process memory.
   for (const route of ['relayed peer', 'local self-sync']) {

@@ -1,6 +1,6 @@
 # Planned rounds 136–140
 
-Status: Rounds 136–138 complete; Rounds 139–140 remain planned.
+Status: Rounds 136–139 complete; Round 140 remains planned.
 Rounds 130–135 remain closed; the limitations recorded in their closeouts are inputs to new work,
 not additions to those completed rounds.
 
@@ -214,8 +214,7 @@ cancellation before its cryptographic safety is demonstrated.
 
 ## Round 139: reliable sender self-sync completion
 
-Status: planned. Depends on durable queue acceptance from Round 136, account
-isolation from 137 and recipient-change policy from 138. Rounds 130–135 stay closed.
+Status: complete. See [Round 139 closeout](ROUND_139_CLOSEOUT.md). Rounds 130–138 remain closed.
 
 ### Problem and result
 
@@ -226,17 +225,17 @@ sender's own messages, without delaying or falsely confirming peer delivery.
 
 ### Bounded work
 
-- [ ] Separate primary recipient acceptance from own-device synchronization
+- [x] Separate primary recipient acceptance from own-device synchronization
   state. An own-device ack never confirms the peer; a confirmed peer send never
   becomes unconfirmed because its mirror is waiting.
-- [ ] Retain exact encrypted mirror payloads until their supported acceptance
+- [x] Retain exact encrypted mirror payloads until their supported acceptance
   boundary is met, including after sender reload and gateway restart. Reuse
   atomic pending-send results and preserve message ids and thread mapping.
-- [ ] Retry unfinished mirror targets independently; do not re-encrypt or replay
+- [x] Retry unfinished mirror targets independently; do not re-encrypt or replay
   a completed primary send merely to catch up an own device.
-- [ ] Apply the reviewed frozen-roster/revocation policy. Do not deliver to a
+- [x] Apply the reviewed frozen-roster/revocation policy. Do not deliver to a
   revoked device or silently send historical plaintext to a newly linked one.
-- [ ] Clean up per-target state only when safe; preserve history-disabled and
+- [x] Clean up per-target state only when safe; preserve history-disabled and
   explicit logout behavior and keep queue/journal capacity bounded.
 
 ### Acceptance and validation
