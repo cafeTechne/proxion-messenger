@@ -31,7 +31,7 @@ vi.mock('./auth.js', () => ({
 vi.mock('./pod.js', () => ({ podPublishIdentityAcl: async () => true }));
 
 import {
-    initE2E, _resetForTesting, myX25519PubB64u, cachePeerPub, ratchetEncrypt, fetchAndCachePeerPub,
+    initE2E, _resetForTesting, myX25519PubB64u, cachePeerPub, ratchetEncrypt, fetchAndCachePeerPub, saveRatchetState, pendingDmReceives,
 } from './e2e.js';
 
 const WEBID_A = 'https://alice.example/profile/card#me';
@@ -239,5 +239,25 @@ describe('peer-key discovery keeps its initiating account', () => {
         _sess.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ version: 1, pub: 'current-key' }) }));
         expect(await fetchAndCachePeerPub('peer', 'https://peer.example/')).toBe(true);
         expect(localStorage.getItem('proxion_e2e_peer_pub_peer::' + WEBID_A)).toBe('current-key');
+    });
+});
+
+
+describe('gateway recovery account namespace', () => {
+    beforeEach(async () => {
+        _resetForTesting(); logout(); _root = null; localStorage.clear(); await clearKeyStore();
+    });
+    it('scans only the active account recovery records, including after logout', async () => {
+        await boot(WEBID_A);
+        const id = 'a'.repeat(64);
+        await saveRatchetState('alice-peer', { rootKey: [1], pendingReceives: { [id]: 'alice-private' },
+            pendingReceiveData: { [id]: { transport: 'gateway', scope: 'alice/device', message: { message_id: 'a' } } } });
+        expect((await pendingDmReceives()).map(row => row.content)).toEqual(['alice-private']);
+        await boot(WEBID_B);
+        expect(await pendingDmReceives()).toEqual([]);
+        await boot(null);
+        expect(await pendingDmReceives()).toEqual([]);
+        await boot(WEBID_A);
+        expect((await pendingDmReceives()).map(row => row.content)).toEqual(['alice-private']);
     });
 });

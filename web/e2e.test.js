@@ -9,6 +9,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { readFileSync } from 'node:fs';
 import { dmHistorySave, dmHistorySetEnabled } from './dmhistory.js';
 import { createWebDm } from './webdm.js';
+import { createGatewayDmReceiver, gatewayDmEnvelope } from './gateway-dm-receive.js';
 import { createDmReceiptStore, dmEnvelopeFingerprint } from './dm-receipts.js';
 
 // ── Mock localStorage ────────────────────────────────────────────────────────
@@ -18,6 +19,8 @@ globalThis.localStorage = {
     setItem:    (k,v) => { _ls[k] = String(v); },
     removeItem: k     => { delete _ls[k]; },
     clear:      ()    => { for (const k in _ls) delete _ls[k]; },
+    key: i => Object.keys(_ls)[i] ?? null,
+    get length() { return Object.keys(_ls).length; },
 };
 
 // ── Mock auth.js (no pod in unit tests) ──────────────────────────────────────
@@ -50,6 +53,7 @@ import {
     ratchetEncrypt,
     ratchetDecrypt,
     finishDmReceive,
+    pendingDmReceives,
     loadRatchetState,
     saveRatchetState,
     advanceChain,
@@ -819,6 +823,39 @@ describe('recoverable pod DM receives', () => {
         expect(deleted).toHaveBeenCalledTimes(1);
         expect(events.at(-1).content).toBe('recover this message');
         expect((await loadRatchetState('recovery-alice#recovery-alice')).pendingReceives).toEqual({});
+    });
+
+    it.each(['message', 'dm_fanout'])('restores a gateway %s after reload without receiving its socket event again', async type => {
+        const db = new IDBFactory(), events = [], history = new Map();
+        let storageWorks = false;
+        const persist = async message => {
+            if (!storageWorks) return false;
+            history.set(message.message_id, message); return true;
+        };
+        const payload = { content: encrypted.ciphertext, nonce: encrypted.nonce, msg_num: encrypted.msgNum,
+            ratchet_pub: encrypted.ratchetPub, pn: encrypted.pn, e2e: true };
+        const event = { type, from_webid: 'recovery-alice', message_id: 'gateway-recovery',
+            ...(type === 'message' ? payload : { payload, to_device_id: 'bob-device' }) };
+        const options = {
+            e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives }, receipts: createDmReceiptStore(db),
+            persistMessage: persist, handleEvent: message => events.push(message), getScope: () => 'gateway-bob-device',
+            toMessage: raw => ({ type: 'message', message_id: raw.message_id, thread_id: 'alice-thread', from_webid: raw.from_webid }),
+        };
+        let receiver = createGatewayDmReceiver(options);
+        expect(await receiver.receive(event)).toBe(false);
+        expect(events).toHaveLength(1);
+        expect(await pendingDmReceives()).toHaveLength(1);
+        receiver.stop(); _resetForTesting(); await initE2E();
+        storageWorks = true;
+        receiver = createGatewayDmReceiver({ ...options, receipts: createDmReceiptStore(db) });
+        await receiver.recover();
+        expect(history.get('gateway-recovery').content).toBe('recover this message');
+        expect(await pendingDmReceives()).toHaveLength(0);
+        expect(events).toHaveLength(2); // restored reader renders its one recovered copy
+        expect(await receiver.receive(event)).toBe(true);
+        expect(events).toHaveLength(2);
+        const fingerprint = await dmEnvelopeFingerprint(gatewayDmEnvelope(event));
+        expect(await options.receipts.has('gateway-bob-device', fingerprint)).toBe(true);
     });
 
     it('resumes after the receipt commits but recovery cleanup is interrupted', async () => {

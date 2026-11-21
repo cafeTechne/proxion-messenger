@@ -183,6 +183,19 @@ try {
     throw new Error('stop');
   }
 
+  step = 'inject-history-failure';
+  await bob.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    window.__historyFailures = 0;
+    IDBObjectStore.prototype.put = function (...args) {
+      if (this.name === 'messages') {
+        window.__historyFailures++;
+        throw new DOMException('gateway history interruption', 'QuotaExceededError');
+      }
+      return put.apply(this, args);
+    };
+  });
+
   step = 'alice-send-dm';
   await sleep(300);
   await alice.focus('#message-input');
@@ -212,6 +225,15 @@ try {
   // the server only holds ciphertext the forward ratchet can't re-decrypt — so
   // without the local plaintext cache (dmhistory.js) it would come back as
   // "[could not decrypt]". It must render as readable plaintext.
+  const recoveryBefore = await bob.evaluate(async text => {
+    const { pendingDmReceives } = await import('./e2e.js');
+    return { failures: window.__historyFailures,
+      pending: (await pendingDmReceives()).filter(row => row.content === text).length };
+  }, MSG);
+  if (!recoveryBefore.failures || recoveryBefore.pending !== 1) {
+    throw Error('gateway receive did not retain encrypted recovery: ' + JSON.stringify(recoveryBefore));
+  }
+
   step = 'reload-bob';
   await bob.reload({ waitUntil: 'load', timeout: 20000 });
   await bob.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
@@ -230,6 +252,13 @@ try {
   }, { timeout: 8000 }).catch(() => fail('Bob could not reopen the DM after reload'));
   if (process.exitCode) throw new Error('stop');
   await sleep(1500); // let server history + local plaintext merge settle
+
+  const pendingAfter = await bob.evaluate(async text => {
+    const { pendingDmReceives } = await import('./e2e.js');
+    return (await pendingDmReceives()).filter(row => row.content === text).length;
+  }, MSG);
+  if (pendingAfter) throw Error('gateway recovery was not cleaned after reload');
+  console.log('  ✓ interrupted gateway history write recovers from encrypted state after reload');
 
   step = 'assert-plaintext-after-reload';
   const feedAfter = await bob.evaluate(() => document.getElementById('message-feed')?.textContent || '');

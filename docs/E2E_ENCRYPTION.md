@@ -872,10 +872,27 @@ History disabled in Settings still skips permanent history; the temporary
 recovery copy is removed after the receipt is saved.
 
 This recovery applies to regular and per-device fanout DMs received through pod
-inboxes, including a gateway's pod bridge. Gateway socket delivery and secondary
-sealed events do not use this recovery journal. Pod state backup remains best
-effort; browser storage removal or loss of this device's state key can still lose
-local history and pending recovery.
+inboxes, including a gateway's pod bridge. Gateway socket text and device fanout
+also record encrypted message metadata in `pendingReceiveData` beside the
+plaintext and ratchet advance. On registration and periodically while the active
+tab owns the connection, `gateway-dm-receive.js` scans this account's local state
+records and restores pending messages without requesting another socket delivery.
+It persists history (unless disabled) and an exact-envelope receipt before
+removing recovery text and metadata. Reconnect replays are suppressed by receipts;
+changed ciphertext is never deduplicated solely by a message id. Recovery scopes
+include the account and receiving device; tab handoff cancels stale work.
+
+The gateway reader retains at most 1,024 live encrypted events while storage is
+unavailable and stops consuming new keys when receipt/recovery capacity is full.
+Invalid ciphertext is removed from that live storage retry queue. Storage errors
+are reported separately from authentication/decryption errors so valid events can
+retry after storage becomes available. Receipts remain bounded as described in
+[INTEROP.md](INTEROP.md).
+
+Secondary sealed events and files do not use gateway text recovery. Events lost
+before any durable receive write, browser storage removal, or loss of this
+device's state key cannot be reconstructed from this journal. Pod state backup
+remains best effort.
 
 Peer keys are cached in localStorage as `proxion_e2e_peer_pub_<peerId>` (account
 scoped). Decrypted messages are cached in local IndexedDB for history.

@@ -659,9 +659,39 @@ export function finishDmReceive(peerId, receiveId, current = () => true) {
         if (state?.pendingReceives?.[receiveId] === undefined) return true;
         const next = { ...state, pendingReceives: { ...state.pendingReceives } };
         delete next.pendingReceives[receiveId];
+        if (state.pendingReceiveData) {
+            next.pendingReceiveData = { ...state.pendingReceiveData };
+            delete next.pendingReceiveData[receiveId];
+        }
         await saveRatchetState(peerId, next, { current });
         return true;
     });
+}
+
+// Local recovery needs message metadata when a gateway will not replay a socket
+// event after reload. The metadata is encrypted in the same state record.
+export async function pendingDmReceives() {
+    if (!_initDone) await initE2E();
+    const context = _stateContext(), webId = _currentWebId();
+    const prefix = 'proxion_e2e_state_', suffix = webId ? '::' + webId : '';
+    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i));
+    const rows = [];
+    for (const key of keys) {
+        if (!context.current()) throw new E2EDecryptError('State context changed');
+        if (!key?.startsWith(prefix) || (suffix ? !key.endsWith(suffix) : key.includes('::'))) continue;
+        const peerId = key.slice(prefix.length, suffix ? -suffix.length : undefined);
+        let state;
+        try { state = await _decState(localStorage.getItem(key)); } catch { continue; }
+        if (!context.current()) throw new E2EDecryptError('State context changed');
+        if (!state?.rootKey) continue;
+        for (const [receiveId, data] of Object.entries(state.pendingReceiveData || {})) {
+            if (/^[a-f0-9]{64}$/.test(receiveId) && data?.transport === 'gateway'
+                    && typeof state.pendingReceives?.[receiveId] === 'string') {
+                rows.push({ peerId, receiveId, content: state.pendingReceives[receiveId], data });
+            }
+        }
+    }
+    return rows;
 }
 
 // ── Internal DH ratchet helpers ───────────────────────────────────────────────
@@ -928,18 +958,23 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
         _capSkippedKeys(state);
     }
 
+    let plain;
     try {
-        const plain = await crypto.subtle.decrypt(
+        plain = await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv: b64uDec(nonceB64u) },
             await _aesKey(msgKey),
             b64uDec(ciphertextB64u));
-        const text = _DEC.decode(plain);
-        if (receiveId) state.pendingReceives = { ...state.pendingReceives, [receiveId]: text };
-        await saveRatchetState(peerId, state, { current });
-        return text;
     } catch {
         throw new E2EDecryptError('AES-GCM decryption failed for msgNum=' + msgNum);
     }
+    const text = _DEC.decode(plain);
+    if (receiveId) {
+        state.pendingReceives = { ...state.pendingReceives, [receiveId]: text };
+        if (opts.receiveData) state.pendingReceiveData = { ...state.pendingReceiveData, [receiveId]: opts.receiveData };
+    }
+    // Storage failure is retryable; do not mislabel it as invalid ciphertext.
+    await saveRatchetState(peerId, state, { current });
+    return text;
 }
 
 // ── Test utility (not for production use) ────────────────────────────────────

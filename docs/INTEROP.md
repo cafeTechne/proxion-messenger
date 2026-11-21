@@ -49,8 +49,14 @@ for recovery; retry or reload uses the saved plaintext without spending another
 key. Recovery is capped at 64 undelivered entries per peer. Only after history
 (or the user's history-disabled preference) and a durable receipt succeed is the
 recovery text removed and the drop acknowledged. This covers regular and fanout
-pod inbox delivery, including the gateway bridge; socket delivery is separate.
-See [encryption state storage](E2E_ENCRYPTION.md#11-state-storage).
+pod inbox delivery, including the gateway bridge. Gateway socket text and device
+fanout additionally retain encrypted message metadata with the ratchet advance,
+so reload can restore an interrupted receive without gateway retransmission.
+Gateway receipt scopes are separate from pod receipt scopes and include account
+and device identity. Exact replays are suppressed, transient storage failures
+retry, and inactive tabs cannot complete old receives. Gateway files and sealed
+secondary events remain separate. See
+[encryption state storage](E2E_ENCRYPTION.md#11-state-storage).
 
 - **Works:** text DMs both ways, message requests for a first DM from a stranger,
   presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.

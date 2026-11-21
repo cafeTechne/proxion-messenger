@@ -1,7 +1,7 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, takeAuthError, reauthIssuer } from './auth.js';
 import {
     initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
-    ratchetEncrypt, ratchetDecrypt, finishDmReceive, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
+    ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
@@ -59,6 +59,7 @@ import { createRoomMedia } from './room-media.js';
 import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attachments.js';
 import { createDmMedia, deliverDmMedia, forwardDmMedia } from './dm-media.js';
 import { createDmReceiptStore } from './dm-receipts.js';
+import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receive.js';
 import { createAssetInventoryUi } from './asset-inventory-ui.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
@@ -548,6 +549,34 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // media.state.isSharing; media's getVoiceState is a deferred getter, so the
         // forward reference to `voice` is only resolved at runtime (no TDZ).
         const _dmReceipts = createDmReceiptStore();
+        const _gatewayReceives = createGatewayDmReceiver({
+            e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives }, receipts: _dmReceipts,
+            getScope: () => JSON.stringify(['gateway', selfWebId || clientDid, clientDid, e2eScopedKey('')]),
+            isActive: () => !!clientDid && tabLock.isLeader() && transport.mode !== 'web',
+            persistMessage: dmHistorySave, handleEvent: message => handleEvent(message), isSealedPlain,
+            toMessage: event => {
+                const p = event.payload || {}, fanout = event.type === 'dm_fanout';
+                if (!fanout) {
+                    const metadata = { ...event };
+                    for (const field of ['content', 'e2e', 'nonce', 'msg_num', 'ratchet_pub', 'pn', 'x25519_pub']) delete metadata[field];
+                    return normalizeRelayThreadId({ ...metadata, timestamp: event.timestamp || new Date().toISOString() });
+                }
+                const selfCopy = fanout && event.from_webid === selfWebId;
+                const threadId = fanout ? (selfCopy
+                    ? (p.thread_id || peerDidToCertId[p.thread_peer] || p.thread_peer)
+                    : (peerDidToCertId[event.from_webid] || event.from_webid)) : event.thread_id;
+                return normalizeRelayThreadId({
+                    type: 'message', message_id: event.message_id, thread_id: threadId,
+                    from_webid: event.from_webid,
+                    from_display_name: selfCopy ? (localStorage.getItem('proxion_display_name') || '') : event.from_display_name,
+                    timestamp: event.timestamp || new Date().toISOString(),
+                    reply_to_id: (fanout ? p.reply_to_id : event.reply_to_id) || null,
+                    source: event.source || (fanout ? 'local_dm' : undefined),
+                    local: event.local, own: event.own,
+                    sender_verified: selfCopy ? undefined : !!event.sender_verified,
+                });
+            },
+        });
         let _roomMedia = null, _dmMedia = null, _podDmEngine = null, _assetInventory = null;
         function _isPodDmView(view) {
             return !!(view && (view.type === 'local_dm' || view.type === 'dm')
@@ -1128,6 +1157,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // its state, hand the unsent commands to the new tab, then reload into
         // the "open in another tab" notice so no timer or watcher keeps running.
         tabLock.onStepDown(async () => {
+            _gatewayReceives.stop();
             const queued = stopConnection();
             await ratchetIdle().catch(() => {});
             await new Promise((r) => setTimeout(r, 0));   // a just-encrypted send queues itself
@@ -1170,7 +1200,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         : signDm(env, _identityPrivKey, clientDid);
                 },
                 verifyDmSig, verifyFanoutSig, verifyDeviceCert,
-                e2e: { cachePeerPub, ratchetDecrypt, finishDmReceive, hasSession: hasRatchetSession },
+                e2e: { cachePeerPub, ratchetDecrypt, finishDmReceive, pendingDmReceives, hasSession: hasRatchetSession },
                 persistMessage: (m) => dmHistorySave({ ...m, thread_id: m.thread_id }),
                 receipts: _dmReceipts,
                 isBlocked: (w) => blocks.isBlocked(w),
@@ -2277,6 +2307,13 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             } else if (event.type === "file_offer") {
                 event = await secondary.openFileOffer(event);
             }
+            if (!fromPod && isGatewayDmReceive(event, selfWebId, clientDid)) {
+                if (event.type === 'dm_fanout' && event.payload.x25519_pub) {
+                    cachePeerPub(event.from_webid + '#' + (event.payload.from_device_id || event.from_webid), event.payload.x25519_pub);
+                }
+                try { return await _gatewayReceives.receive(event); }
+                catch (err) { console.warn('[gateway-dm] receive pending:', err); return false; }
+            }
             // Decrypt E2E messages before rendering. Gateway events only: the
             // sender there is the gateway-authenticated identity. Pod-drop DMs are
             // verified and decrypted in webdm.js, and nothing else read from a pod
@@ -2497,7 +2534,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // reopen — the server keeps only ciphertext, which the forward
                     // ratchet can't re-decrypt. (dmHistorySave guards ciphertext.)
                     if (msg._persistDm && msg.message_id) {
-                        dmHistorySave({ ...msg, thread_id: id });
+                        if (!msg._dmHistoryManaged) dmHistorySave({ ...msg, thread_id: id });
                         // R61: opt-in archive of decrypted DM history to the pod
                         podArchiveDmMessage(id, { ...msg, thread_id: id }).catch(() => {});
                     } else if (msg.message_id && msg.file?.data_b64
@@ -2739,6 +2776,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     console.warn('[Proxion] Auth failed:', event.reason);
                     break;
                 case "registered":
+                    if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;
                     accountSync.setAccount(event.webid);
                     // R85 Track 1: cache the gateway's cert for our signing key so calls
@@ -9206,7 +9244,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // the peer's pod on send, and watches our own drop box to receive.
                     const webDm = createWebDm({
                         pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop, podDmDropExists },
-                        e2e: { cachePeerPub, ratchetDecrypt, finishDmReceive, hasSession: hasRatchetSession },
+                        e2e: { cachePeerPub, ratchetDecrypt, finishDmReceive, pendingDmReceives, hasSession: hasRatchetSession },
                         notify: { watchResource },
                         handleEvent: (ev) => _handleEventAsync(ev, true),
                         getSelfWebId: () => selfWebId,

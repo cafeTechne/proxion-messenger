@@ -206,6 +206,18 @@ try {
   if (process.exitCode) throw new Error('stop');
 
   // ── B sends the DM; BOTH of A's devices must receive + decrypt it ──
+  step = 'inject-fanout-history-failure';
+  await ad.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    window.__fanoutHistoryFailures = 0;
+    IDBObjectStore.prototype.put = function (...args) {
+      if (this.name === 'messages') {
+        window.__fanoutHistoryFailures++;
+        throw new DOMException('fanout history interruption', 'QuotaExceededError');
+      }
+      return put.apply(this, args);
+    };
+  });
   step = 'b-send-dm';
   // Give B's client time to complete the async cross-gateway device-roster
   // fetch (get_peer_device_keys -> gw B -> POST /devices on gw A) that DM-open
@@ -244,6 +256,25 @@ try {
     fail('A-device rendered "[could not decrypt]" garbage');
   }
   if (process.exitCode) throw new Error('stop');
+
+  step = 'recover-device-fanout';
+  const recovery = await ad.evaluate(async text => {
+    const { pendingDmReceives } = await import('./e2e.js');
+    return { failures: window.__fanoutHistoryFailures,
+      pending: (await pendingDmReceives()).filter(row => row.content === text).length };
+  }, MSG);
+  if (!recovery.failures || recovery.pending !== 1) throw Error('fanout encrypted recovery missing: ' + JSON.stringify(recovery));
+  await ad.reload({ waitUntil: 'load', timeout: 20000 });
+  await ad.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
+  await online(ad);
+  await openFirstDm(ad, 'A-device recovery');
+  await ad.waitForFunction(text => document.getElementById('message-feed')?.textContent.includes(text), { timeout: 15000 }, MSG);
+  const remaining = await ad.evaluate(async text => {
+    const { pendingDmReceives } = await import('./e2e.js');
+    return (await pendingDmReceives()).filter(row => row.content === text).length;
+  }, MSG);
+  if (remaining) throw Error('fanout recovery was not cleaned after reload');
+  console.log('  ✓ device fanout history failure recovers after reload without another socket delivery');
 
   // ── E5 slice 2: A-primary SENDS a DM to B; it must self-sync to A-device ──
   // (Self-sync targets our own account on our own gateway, so it works even
