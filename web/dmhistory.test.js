@@ -171,6 +171,14 @@ describe('per-account namespacing (cross-account bleed)', () => {
 });
 
 describe('delivery flag (undelivered sends survive a reload)', () => {
+  it('retains outbox ownership and reports a committed confirmation flag change', async () => {
+    await dmHistorySave({ message_id: 'outbox', thread_id: 'peer', content: 'draft', timestamp: '2026-01-01' }, { delivery: 'pending', outbox: true });
+    expect((await dmHistoryUndelivered())[0].outbox_id).toBe('outbox');
+    expect(await dmHistorySetDelivery('outbox', null)).toBe(true);
+    expect(await dmHistoryUndelivered()).toEqual([]);
+    expect((await dmHistoryLoad('peer'))[0].outbox_id).toBe('outbox');
+  });
+
   it('keeps a pending flag until the send is confirmed', async () => {
     await dmHistorySave({ message_id: 'u1', thread_id: 'peer', content: 'hi', timestamp: '2026-01-01' }, { delivery: 'pending' });
     await dmHistorySave({ message_id: 'u2', thread_id: 'peer', content: 'ok', timestamp: '2026-01-02' });

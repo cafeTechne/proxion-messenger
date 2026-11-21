@@ -58,6 +58,18 @@ retry, and inactive tabs cannot complete old receives. Gateway files and sealed
 secondary events remain separate. See
 [encryption state storage](E2E_ENCRYPTION.md#11-state-storage).
 
+New encrypted text sends use a per-device encrypted outbox in both builds.
+It freezes the message id and recipient plan before encryption and records each
+exact ciphertext with its ratchet advance. Only persisted prepared frames leave
+the client; retries/reloads use those same frames and pod envelope metadata.
+A matching own echo/drop result or complete recipient-device acknowledgement
+settles the send. Self-sync acknowledgements alone do not. Gateway fanout now
+queues failed socket writes, refuses full queues without evicting accepted
+entries, and only deduplicates inbound relay ids after acceptance. An unaccepted
+relay is retryable. Gateway acknowledgement means gateway/queue acceptance,
+not recipient reading; its existing local offline-device queue remains in memory.
+See [outgoing text storage](E2E_ENCRYPTION.md#111-durable-outgoing-text).
+
 - **Works:** text DMs both ways, message requests for a first DM from a stranger,
   presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.
 - **Calls:** 1:1 voice and video both ways. Call signaling (offer, answer, ICE,

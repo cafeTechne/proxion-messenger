@@ -707,6 +707,7 @@
   "confirm.removeContact": "Remove this contact? Your conversation is hidden and the connection is revoked.",
   "contact.removed": "Contact removed.",
   "contact.removeUnavailable": "Could not remove this contact.",
+  "send.unconfirmed": "Delivery not yet confirmed",
   "send.notDelivered": "Not delivered",
   "send.retry": "Retry",
   "send.waitingForConnection": "Waiting for connection",

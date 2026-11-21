@@ -1,3 +1,4 @@
+import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 // Cross-mode DM smoke: Proxion desktop (a gateway with a pod) and the Proxion
 // browser build messaging each other through their pods.
 //
@@ -267,6 +268,10 @@ try {
   step = 'receive-recovery';
   await dmReceiveRecoveryJourney({ sender: pageB, receiver: pageA, send,
     openReceiver: () => openThread(pageA, bob.webId), label: 'desktop recovery' });
+
+  step = 'durable-text-outbox';
+  await dmOutboxJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId),
+    openReceiver: () => openThread(pageB, alice.webId), label: 'bridge text outbox' });
 
   // Exercise the shared encrypted asset storage protocol in both directions.
   step = 'encrypted-assets';

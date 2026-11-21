@@ -187,3 +187,28 @@ async def test_offline_push_respects_mute(gateway, noauth_env, monkeypatch):
     await _send_fanout(gateway, ws_s, "m-mute-1", recipient, recipient, "X")
     assert not sends, "muted sender must not trigger offline push"
     assert (recipient, recipient) in gateway._fanout_queue, "but the envelope still queues"
+
+
+@pytest.mark.asyncio
+async def test_full_relay_queue_refuses_without_spending_replay_id(gateway):
+    from proxion_messenger_core.relay import sign_relay_message
+    from datetime import datetime, timezone
+    import secrets
+
+    sender = Ed25519PrivateKey.generate()
+    from_did, recipient, device = _did(sender), "did:key:zOfflineAccount", "did:key:zDev"
+    for index in range(100):
+        assert gateway._queue_fanout_envelope(str(index), from_did, recipient, device, {"content": str(index)})
+    content = json.dumps({"message_id": "retry-after-cap", "to_device_id": device, "payload": {"content": "C"}})
+    transport_id, timestamp, nonce = "retry-after-cap:dev", datetime.now(timezone.utc).isoformat(), secrets.token_hex(8)
+    signature = sign_relay_message(sender, from_did, recipient, transport_id, content, timestamp, nonce, message_scope="dm-fanout")
+    data = {"content_type": "dm_fanout", "from_webid": from_did, "to_webid": recipient, "message_id": transport_id,
+        "content": content, "timestamp": timestamp, "relay_nonce": nonce, "signature": signature, "message_scope": "dm-fanout"}
+    status, _ = await gateway._handle_relay_post(json.dumps(data).encode())
+    assert status.startswith("503")
+    assert not gateway._store.has_seen_relay_id(f"{from_did}:{transport_id}")
+    gateway._fanout_queue[(recipient, device)].pop(0)
+    status, _ = await gateway._handle_relay_post(json.dumps(data).encode())
+    assert status.startswith("200")
+    assert gateway._store.has_seen_relay_id(f"{from_did}:{transport_id}")
+    assert len(gateway._fanout_queue[(recipient, device)]) == 100

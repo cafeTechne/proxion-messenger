@@ -42,7 +42,7 @@ export function envelopeFromDmPayload(payload, selfWebId, displayName = '') {
     return {
         v: 1,
         from_webid: selfWebId,
-        from_display_name: displayName || '',
+        from_display_name: payload.from_display_name ?? displayName ?? '',
         message_id: payload.message_id,
         content: payload.content,                 // ciphertext when e2e
         e2e: !!payload.e2e,
@@ -52,7 +52,7 @@ export function envelopeFromDmPayload(payload, selfWebId, displayName = '') {
         ratchet_pub: payload.ratchet_pub || null,
         x25519_pub: payload.x25519_pub || null,
         reply_to_id: payload.reply_to_id || null,
-        timestamp: new Date().toISOString(),
+        timestamp: payload.timestamp || new Date().toISOString(),
     };
 }
 
@@ -188,6 +188,8 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
     async function dropDm(payload) {
+        const generation = _generation, accountScope = scope();
+        const current = () => generation === _generation && accountScope === scope();
         const to = payload.target_webid || payload.to_webid;
         if (!to) return false;
         const root = peerPodRootFromWebId(to);
@@ -196,6 +198,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // R107: sign the envelope so the recipient can confirm it really came from
         // this WebID's owner (best effort — an unsigned drop still delivers).
         if (signEnvelope) { try { const _s = await signEnvelope(env); if (_s) Object.assign(env, _s); } catch { /* deliver unsigned */ } }
+        if (!current()) return false;
         return pod.podDropDm(root, env);
     }
 
@@ -203,16 +206,20 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     // our own other devices). Each entry goes to that WebID's pod inbox, tagged
     // with to_device_id so the right device claims it (devices share a pod inbox).
     async function dropFanout(cmd) {
+        const generation = _generation, accountScope = scope();
+        const current = () => generation === _generation && accountScope === scope();
         const entries = cmd && cmd.fanout;
         if (!Array.isArray(entries)) return false;
-        // Delivery is only real when a copy reaches one of the RECIPIENT's devices.
-        // The fanout also carries self-sync copies to our own other devices; those
+        // Every intended recipient device must accept its copy. The fanout also
+        // carries best-effort self-sync copies to our own other devices; those
         // land in our own inbox and must not be counted as delivery, or a DM that
         // reached none of the peer's devices would falsely clear its pending state.
         const self = getSelfWebId();
-        let anyRecipientOk = false;
+        let recipients = 0, accepted = 0;
         for (const e of entries) {
+            if (!current()) return false;
             if (!e || !e.to_webid) continue;
+            if (e.to_webid !== self) recipients++;
             const root = peerPodRootFromWebId(e.to_webid);
             if (!root) continue;
             const envelope = {
@@ -222,10 +229,12 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             // R107: sign each fanout copy (bound to its to_device_id) so the peer's
             // device can verify it, same as a single-send DM.
             if (signEnvelope) { try { const _s = await signEnvelope(envelope); if (_s) Object.assign(envelope, _s); } catch { /* deliver unsigned */ } }
+            if (!current()) return false;
             const ok = await pod.podDropDm(root, envelope);
-            if (ok && e.to_webid !== self) anyRecipientOk = true;
+            if (!current()) return false;
+            if (e.to_webid !== self && ok) accepted++;
         }
-        return anyRecipientOk;
+        return recipients > 0 && accepted === recipients;
     }
 
     async function _senderStatus(env) {

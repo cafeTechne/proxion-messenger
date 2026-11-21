@@ -897,6 +897,51 @@ remains best effort.
 Peer keys are cached in localStorage as `proxion_e2e_peer_pub_<peerId>` (account
 scoped). Decrypted messages are cached in local IndexedDB for history.
 
+### 11.1 Durable outgoing text
+
+New encrypted text sends, including per-device fanout, use `dm-outbox.js`.
+Before encryption, the client saves an encrypted send intent under
+`proxion_e2e_send_job_<messageId>` (account-scoped). The intent freezes the
+recipient/device plan, route, message id, timestamp and plaintext draft. Failure
+of this first commit preserves the composer and does not spend a ratchet key.
+
+`ratchetEncrypt` with `sendId` works on a copied state and atomically saves the
+resulting ciphertext/nonce/header in `pendingSends` with the ratchet advance.
+Reusing that id returns the saved result without advancing again. A failed
+local state write leaves the live sender retryable. Pending sends are capped at
+64 per peer; the local outbox is capped at 128 jobs.
+
+Only after every planned entry is prepared and the exact wire frames are saved
+does the outbox persist the local history record and transmit. A crash during
+preparation reconstructs the same frames from per-peer pending results. A reload
+or Retry of a prepared job sends those frames directly, including a stable pod
+envelope timestamp and display name so signature/fingerprint identity survives
+clock or profile changes. Online sends use this ledger too; the connection's
+existing offline queue remains a separate transport buffer.
+
+Sending/queuing is not confirmation. A matching own echo or gateway history row,
+a successful pod drop, or a fanout acknowledgement covering every intended
+recipient device permits confirmation. Self-sync-only acknowledgements do not
+confirm a primary send. The confirmed marker is saved before cleanup; an
+interrupted cleanup retries without transmitting again. Cleanup clears the
+history delivery flag and per-peer pending ciphertext before removing the job.
+Unconfirmed jobs remain pending, with Retry available. Tab/account changes stop
+stale work. Explicit sign-out removes local jobs and session caches.
+
+History disabled still skips permanent history, while the pending encrypted
+intent temporarily retains the draft until confirmation. These semantics apply
+to newly queued encrypted text; old history-only pending rows lack their original
+ciphertext and retain their legacy retry path. Files, sealed secondary messages
+and plaintext opt-in sends do not use this text outbox.
+
+Gateway acknowledgement proves acceptance by the gateway/relay or its retry
+queue, not recipient reading. The existing local offline-device fanout queue is
+process-local; making that queue survive gateway restart is outside this local
+outbox change. Sender self-sync mirrors retain their existing best-effort
+semantics and do not override recipient confirmation. Clearing browser storage
+or losing the device state key can lose pending jobs. A frozen recipient plan is
+not automatically retargeted when devices change.
+
 ## 12. Interoperability notes
 
 An independent client that wants to exchange DMs with Proxion over the gateway-free
@@ -1002,6 +1047,10 @@ sn = 24594 99591 04903 81211 44774 95312   (same for either argument order)
 (One continuous byte string, wrapped for width.)
 
 ## 14. Changelog
+
+- Unreleased: encrypted outgoing text uses durable frozen intents and per-peer
+  pending ciphertext with ratchet advancement, then retries prepared frames
+  verbatim until confirmation (11.1).
 
 - Unreleased: pod DM receives commit encrypted recovery text with the ratchet
   advance and retry history/receipt persistence before inbox acknowledgement (11).

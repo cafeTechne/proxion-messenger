@@ -1,7 +1,7 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, takeAuthError, reauthIssuer } from './auth.js';
 import {
     initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
-    ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
+    ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
@@ -60,6 +60,7 @@ import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attac
 import { createDmMedia, deliverDmMedia, forwardDmMedia } from './dm-media.js';
 import { createDmReceiptStore } from './dm-receipts.js';
 import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receive.js';
+import { createDmOutbox } from './dm-outbox.js';
 import { createAssetInventoryUi } from './asset-inventory-ui.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
@@ -621,7 +622,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // browser build, where this device's cache is the only record of it.
             decorateMessage: (el, m) => sendStatus.applyTo(el, {
                 message_id: m.message_id,
-                delivery: (transport.mode === 'web' && m.from_webid === selfWebId) ? m.delivery : undefined,
+                delivery: (m.from_webid === selfWebId && (transport.mode === 'web' || m.outbox_id)) ? m.delivery : undefined,
             }),
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
@@ -830,6 +831,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // from this session's sends and the cached records a reload restores.
         const _undeliveredDms = new Map();
         const sendStatus = createSendStatus({
+            isUncertain: id => _dmOutbox.has(id),
             isOnline: () => (_podHealth ? _podHealth.state() === 'ok'
                 : !!socket && socket.readyState === WebSocket.OPEN),
             onRetry: () => (_podHealth ? _podHealth.probe() : probeConnection()),
@@ -841,6 +843,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 dmHistorySetDelivery(id, st).catch(() => {});
             },
             resendFor: (id) => {
+                if (_dmOutbox.has(id)) return () => _dmOutbox.send(id);
                 const rec = _undeliveredDms.get(id);
                 return rec ? () => _resendStoredDm(rec) : null;
             },
@@ -848,6 +851,27 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             podNoteText: () => t(transport.mode === 'web' ? 'send.notSent' : 'send.notSavedToPod'),
             onPodRetry: () => flushPodQueue(),
         });
+        const _outgoingScope = () => JSON.stringify(['outgoing', selfWebId || clientDid, clientDid, e2eScopedKey('')]);
+        const _dmOutbox = createDmOutbox({
+            e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob },
+            getScope: _outgoingScope, isActive: () => !!clientDid && tabLock.isLeader(),
+            send: frame => socketSendOrQueue(frame),
+            canSend: job => transport.mode === 'web' ? !!solidSession.info.isLoggedIn
+                : job.route.cmd === 'local_dm' && isDmPeerWebId(job.route.target_webid)
+                    ? !!crossMode?.isReady() : !!socket && socket.readyState === WebSocket.OPEN,
+            persistMessage: record => dmHistorySave(record, { delivery: 'pending', outbox: true }),
+            clearDelivery: id => dmHistorySetDelivery(id, null),
+            onPending: job => {
+                _undeliveredDms.set(job.id, { ...job.record, outbox_id: job.id });
+                sendStatus.track(job.id, () => _dmOutbox.send(job.id));
+                renderMessage({ ...job.record, local: true }, { live: false });
+            },
+            onConfirmed: id => { _undeliveredDms.delete(id); sendStatus.confirm(id, { known: true }); },
+        });
+        function _confirmDmSend(id, evidence) {
+            if (!_dmOutbox.has(id)) { sendStatus.confirm(id); return; }
+            _dmOutbox.confirm(id, evidence).catch(err => console.warn('[dm-outbox] confirmation pending:', err));
+        }
         // R65: user blocking (the gateway enforces; this is the client feature).
         const blocks = createBlocks({
             getSocket: () => socket, showToast,
@@ -1158,6 +1182,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // the "open in another tab" notice so no timer or watcher keeps running.
         tabLock.onStepDown(async () => {
             _gatewayReceives.stop();
+            _dmOutbox.stop();
             const queued = stopConnection();
             await ratchetIdle().catch(() => {});
             await new Promise((r) => setTimeout(r, 0));   // a just-encrypted send queues itself
@@ -2354,7 +2379,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     const known = event.message_id && messageMap[event.message_id];
                     event.content = (known && !known.e2e)
                         ? known.content
-                        : ((await _cachedDmPlaintext(event.thread_id, event.message_id)) ?? UNDECRYPTABLE);
+                        : (_dmOutbox.record(event.message_id)?.content ?? (await _cachedDmPlaintext(event.thread_id, event.message_id)) ?? UNDECRYPTABLE);
                     event.e2e = false;
                 }
             }
@@ -2503,7 +2528,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // cache, which also holds undelivered sends, so it proves nothing there.
         function _confirmFromHistory(msgs) {
             if (transport.mode === 'web' || !Array.isArray(msgs)) return;
-            for (const m of msgs) if (m && m.message_id) sendStatus.confirm(m.message_id);
+            for (const m of msgs) if (m && m.message_id) _confirmDmSend(m.message_id, { kind: 'history', from: m.from_webid });
         }
 
         function handleEvent(event) {
@@ -2518,7 +2543,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // no content (the payload was ciphertext), so it only confirms
                     // the optimistic plaintext copy and must not replace it.
                     if (event._podEcho) {
-                        if (event.message_id) sendStatus.confirm(event.message_id);
+                        if (event.message_id) _confirmDmSend(event.message_id, { kind: 'pod', from: event.from_webid });
                         break;
                     }
                     const msg = normalizeRelayThreadId(event);
@@ -2547,7 +2572,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // If this is the server echo of an optimistically-rendered message,
                     // mark it confirmed (clear the pending state). renderMessage below
                     // then dedups by message_id, so no duplicate is appended.
-                    if (msg.message_id) sendStatus.confirm(msg.message_id);   // R66
+                    if (msg.message_id) _confirmDmSend(msg.message_id, { kind: 'echo', from: msg.from_webid });
 
                     // D4: the echo carries the gateway's server-clock timestamp. Stamp
                     // it as the pod order hint (px:seq) on OUR OWN room message, so this
@@ -2776,6 +2801,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     console.warn('[Proxion] Auth failed:', event.reason);
                     break;
                 case "registered":
+                    _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;
                     accountSync.setAccount(event.webid);
@@ -4033,7 +4059,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     break;
                 case "send_dm_fanout_ack":
                     // Fanout has no self-echo; confirm the optimistic send on ack.
-                    sendStatus.confirm(event.message_id);   // R66
+                    _confirmDmSend(event.message_id, { kind: 'fanout', delivered: event.delivered });
                     break;
                 case "logout_all_complete":
                     showToast(tn('session.loggedOutOthers', event.revoked_count || 0));
@@ -6077,10 +6103,11 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             return false;
         }
 
-        // Browser build: send a cached, undelivered DM again under its own id
-        // (after a reload, or when the pod or session comes back). Encrypted the
-        // same way as a fresh send; never plaintext to a keyed peer.
+        // New sends retry their encrypted outbox verbatim. Only legacy browser
+        // cache rows predating the outbox use the older reconstruction path;
+        // their original ciphertext was never saved and cannot be recovered.
         async function _resendStoredDm(rec) {
+            if (rec?.outbox_id) return _dmOutbox.send(rec.outbox_id);
             const peer = rec && rec.thread_id;
             if (!peer || !isDmPeerWebId(peer) || typeof rec.content !== 'string') return;
             try {
@@ -6107,6 +6134,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // delivered are tracked again and, with the pod reachable, resent.
         async function _restoreUndeliveredDms() {
             for (const rec of await dmHistoryUndelivered()) {
+                if (rec.outbox_id) continue; // restored by the encrypted outbox, never re-encrypted
                 // A cached bubble can already have a visual sendStatus entry with
                 // no retry closure. Only a restored durable record proves retry
                 // registration happened; do not let render order suppress it.
@@ -6119,6 +6147,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         // Browser build: the pod or the session works again. Send what waited.
         function _webResume() {
+            _dmOutbox.restore({ force: true }).catch(() => {});
             flushPodQueue();
             sendStatus.retryUndelivered();
             if (solidSession.info.isLoggedIn) window.proxionWebJoin?.resume().catch(() => {});
@@ -6273,6 +6302,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         async function _sendComposed(content) {
             if (content) {
+                const _sendView = { ...activeView }, _sendActor = selfWebId, _sendDevice = clientDid;
+                const _sendScope = _outgoingScope(), _sendReply = replyingTo ? { ...replyingTo } : null;
                 let payload;
                 let _e2ePlainTarget = null; // peer to ratchet-encrypt for, ONLY if the plain path actually sends
                 const clientMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -6283,21 +6314,21 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 // carries it as pod_ts and later edit/delete/seq address the SAME day
                 // file (the server echo's clock can fall on a different UTC day).
                 const _clientTs = new Date().toISOString();
-                if (activeView.type === "local_dm") {
-                    const peerWebid = activeView.peerWebid || activeView.id;
+                if (_sendView.type === "local_dm") {
+                    const peerWebid = _sendView.peerWebid || _sendView.id;
                     let sendContent = content;
                     // Learn the peer's key now if we don't have it, so the FIRST
                     // message encrypts too; with no key and no opt-in, don't send.
-                    await _requireDmKey(peerWebid, peerWebid || activeView.id);
+                    await _requireDmKey(peerWebid, peerWebid || _sendView.id);
                     payload = {
                         cmd: "local_dm",
                         target_webid: peerWebid,
                         content: sendContent,
-                        thread_id: activeView.id,
+                        thread_id: _sendView.id,
                         message_id: clientMsgId,
                     };
                     // Track new DM threads in pod index so they survive restarts
-                    _podUpdateDmIndex(activeView.id, true).catch(() => {});
+                    _podUpdateDmIndex(_sendView.id, true).catch(() => {});
                     // E2E encryption is DEFERRED until after the fanout decision
                     // (below): running ratchetEncrypt for a payload that fanout then
                     // discards still persists a fresh sender session on the PLAIN
@@ -6308,57 +6339,55 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     const myPub = myX25519PubB64u();
                     if (myPub) payload.x25519_pub = myPub;
                 } else {
-                    const cmd = activeView.type === "dm" ? "send_dm" : "send_room";
+                    const cmd = _sendView.type === "dm" ? "send_dm" : "send_room";
                     // Rooms are not E2E by design (POD_DATA_MODEL.md); only DMs need a key.
-                    if (activeView.type === "dm") await _requireDmKey(activeView.peerWebid, activeView.peerWebid || activeView.id);
+                    if (_sendView.type === "dm") await _requireDmKey(_sendView.peerWebid, _sendView.peerWebid || _sendView.id);
                     payload = { cmd: cmd, content: content, message_id: clientMsgId };
-                    if (activeView.type === "dm") {
-                        payload.cert_id = activeView.id;
-                        const peerWebid = activeView.peerWebid;
+                    if (_sendView.type === "dm") {
+                        payload.cert_id = _sendView.id;
+                        const peerWebid = _sendView.peerWebid;
                         // Deferred for the same reason as local_dm above.
                         if (peerWebid && isE2EEnabled(peerWebid)) _e2ePlainTarget = peerWebid;
                         const myPub = myX25519PubB64u();
                         if (myPub) payload.x25519_pub = myPub;
                     } else {
-                        payload.room_id = activeView.id;
+                        payload.room_id = _sendView.id;
                     }
                 }
 
-                if (replyingTo) {
-                    payload.reply_to_id = replyingTo.id;
-                    cancelReply();
+                if (_sendScope !== _outgoingScope()) throw Error('Send context changed');
+                if (_sendReply) {
+                    payload.reply_to_id = _sendReply.id;
+                    if (replyingTo?.id === _sendReply.id) cancelReply();
                 }
                 // Multi-device: if the DM peer has >1 linked device, fan the message
                 // out to each device (separate ratchet per peer-device) instead of a
                 // single send. Single-device peers are unaffected (normal path).
-                const _dmPeer = (activeView.type === "dm" || activeView.type === "local_dm")
-                    ? (activeView.peerWebid || activeView.peerDid || activeView.id) : null;
-                let _sentViaFanout = false;
-                let _resendPayload = null;   // R66: exact bytes to retry on send failure
-                if (_dmPeer) {
-                    const _fanoutResult = await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id, activeView.id);
-                    _sentViaFanout = !!_fanoutResult;
-                    if (_fanoutResult && typeof _fanoutResult === 'object') _resendPayload = _fanoutResult;
-                }
-                if (!_sentViaFanout) {
-                    // Deferred plain-path E2E: only mutate the plain-pid ratchet when
-                    // this payload actually goes out (see note above). For an
-                    // E2E-capable peer we encrypt or do NOT send — never plaintext to
-                    // the untrusted pod — and the retry re-encrypts on each attempt.
-                    if (_e2ePlainTarget) {
-                        const _encryptedSend = async () => {
-                            let enc;
-                            try { enc = await ratchetEncrypt(_e2ePlainTarget, content); }
-                            catch (err) { console.warn('[e2e] encrypt failed; not sending plaintext to a keyed peer:', err); return; }
-                            socketSendOrQueue({ ...payload, content: enc.ciphertext, e2e: true,
-                                nonce: enc.nonce, msg_num: enc.msgNum, pn: enc.pn, ratchet_pub: enc.ratchetPub });
-                        };
-                        await _encryptedSend();
-                        _resendPayload = _encryptedSend;   // R66 (a function: re-encrypts)
-                    } else {
-                        socketSendOrQueue(payload);
-                        _resendPayload = payload;   // R66
-                    }
+                const _dmPeer = (_sendView.type === "dm" || _sendView.type === "local_dm")
+                    ? (_sendView.peerWebid || _sendView.peerDid || _sendView.id) : null;
+                let _resendPayload = null, _durableDm = false;
+                if (_dmPeer && (_e2ePlainTarget || identity.devicesForPeer(_dmPeer).length >= 2)) {
+                    const peerDevs = identity.devicesForPeer(_dmPeer).filter(dev => dev.device_id && dev.pub_b64u);
+                    const ownDevs = (transport.mode !== 'web' && isDmPeerWebId(_dmPeer) ? [] : identity.ownOtherDevices())
+                        .filter(dev => dev.device_id && dev.pub_b64u);
+                    const mode = peerDevs.length >= 2 ? 'fanout' : 'single';
+                    const entries = mode === 'fanout' ? peerDevs.map(dev => ({
+                        peerId: _dmPeer + '#' + dev.device_id, account: _dmPeer, device: dev.device_id, pub: dev.pub_b64u,
+                    })) : [{ peerId: _e2ePlainTarget, account: _dmPeer, primary: true }];
+                    for (const dev of ownDevs) entries.push({ peerId: _sendActor + '#' + dev.device_id,
+                        account: _sendActor, device: dev.device_id, pub: dev.pub_b64u });
+                    await _dmOutbox.queue({ id: clientMsgId, peer: _dmPeer, actor: _sendActor, device: _sendDevice,
+                        pub: myX25519PubB64u(), mode, entries, route: payload,
+                        record: { message_id: clientMsgId, thread_id: _sendView.id, from_webid: _sendActor,
+                            from_display_name: localStorage.getItem('proxion_display_name') || '',
+                            content, timestamp: _clientTs, reply_to_id: payload.reply_to_id || null } });
+                    _durableDm = true;
+                    _resendPayload = () => _dmOutbox.send(clientMsgId);
+                } else {
+                    // Unencrypted opt-in DMs and rooms keep their existing path.
+                    if (_dmPeer) await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id, _sendView.id);
+                    socketSendOrQueue(payload);
+                    _resendPayload = payload;
                 }
 
                 // Optimistic render: show the message instantly instead of waiting for
@@ -6368,14 +6397,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 // dedups regardless, and it's marked .msg-pending until the echo confirms.
                 renderMessage({
                     message_id: clientMsgId,
-                    thread_id: activeView.id,
+                    thread_id: _sendView.id,
                     from_webid: selfWebId,
                     from_display_name: localStorage.getItem('proxion_display_name') || '',
                     content: content,
                     timestamp: _clientTs,
                     // Stable pod day-file key for a room message, preserved across the
                     // server echo so edit/delete/seq patch the file it was written to.
-                    pod_ts: activeView.type === 'local_room' ? _clientTs : undefined,
+                    pod_ts: _sendView.type === 'local_room' ? _clientTs : undefined,
                     reply_to_id: payload.reply_to_id || null,
                     local: true,
                 }, { live: true });
@@ -6385,9 +6414,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
                 // Cache the sent DM's plaintext locally so it survives reopen — for
                 // E2E DMs the server only stores ciphertext we can't re-decrypt.
-                if (activeView.type === 'dm' || activeView.type === 'local_dm') {
+                if (!_durableDm && (_sendView.type === 'dm' || _sendView.type === 'local_dm')) {
                     const _dmRecord = {
-                        message_id: clientMsgId, thread_id: activeView.id, from_webid: selfWebId,
+                        message_id: clientMsgId, thread_id: _sendView.id, from_webid: selfWebId,
                         from_display_name: localStorage.getItem('proxion_display_name') || '',
                         content: content, timestamp: new Date().toISOString(),
                         reply_to_id: payload.reply_to_id || null,
@@ -6398,14 +6427,16 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     if (_webDm) _undeliveredDms.set(clientMsgId, _dmRecord);
                     dmHistorySave(_dmRecord, _webDm ? { delivery: 'pending' } : {});
                     // R61: opt-in archive of the sent DM's plaintext to the pod
-                    podArchiveDmMessage(activeView.id, _dmRecord).catch(() => {});
+                    podArchiveDmMessage(_sendView.id, _dmRecord).catch(() => {});
                 }
+
+                if (_durableDm) await _dmOutbox.send(clientMsgId);
 
                 // A pod session that lapsed (boundWebId stays set until sign-out)
                 // still goes through here: the write fails and is queued, so the
                 // message goes out after signing in again instead of vanishing.
-                if (activeView?.type === 'local_room' && (solidSession.info.isLoggedIn || boundWebId())) {
-                    const _roomId = activeView.id;
+                if (_sendView?.type === 'local_room' && (solidSession.info.isLoggedIn || boundWebId())) {
+                    const _roomId = _sendView.id;
                     const _podMsg = {
                         content: content,
                         from_webid: selfWebId,

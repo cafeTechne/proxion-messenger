@@ -1,3 +1,4 @@
+import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 // Two-party web DM E2E. Two real signed-in browser contexts (Alice, Bob) on a
 // live CSS pod, no gateway: DMs travel as E2E envelopes dropped into the
 // recipient's pod inbox. Checks the flows a unit test cannot cross:
@@ -221,6 +222,10 @@ try {
   step = 'receive-recovery';
   await dmReceiveRecoveryJourney({ sender: pageA, receiver: pageB, send,
     openReceiver: () => openThread(pageB, alice.webId), label: 'browser recovery' });
+
+  step = 'durable-text-outbox';
+  await dmOutboxJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId),
+    openReceiver: () => openThread(pageB, alice.webId), label: 'browser text outbox' });
 
   step = 'dm-media-ui';
   await dmMediaJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId), openReceiver: () => openThread(pageB, alice.webId), label: 'browser-dm' });

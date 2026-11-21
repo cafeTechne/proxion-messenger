@@ -172,13 +172,13 @@ export async function solidLogout() {
     // Unsent messages queued while offline hold plaintext room content.
     try { await _clearStore(sendQueueDb, _SEND_QUEUE_STORE); } catch { /* ignore */ }
     // Clear the per-peer E2E session caches (ratchet state, cached peer keys) and
-    // the "verified" badges so a logged-out shared device does not retain the
+    // pending encrypted drafts and "verified" badges so a logged-out device does not retain the
     // previous user's cached sessions or trust markers. The non-extractable
     // identity key is intentionally NOT cleared here: it must survive the same
     // user's re-login. (Per-account isolation of the identity key across a switch
     // WITHOUT a logout is a separate change that needs a live multi-account test.)
     try {
-        const _e2ePrefixes = ['proxion_e2e_state_', 'proxion_e2e_peer_pub_', 'proxion_e2e_verified_', 'proxion_verified_',
+        const _e2ePrefixes = ['proxion_e2e_send_job_', 'proxion_e2e_state_', 'proxion_e2e_peer_pub_', 'proxion_e2e_verified_', 'proxion_verified_',
             'proxion_e2e_react_tokens'];
         for (let i = localStorage.length - 1; i >= 0; i--) {
             const k = localStorage.key(i);

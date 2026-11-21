@@ -6,13 +6,13 @@ These rounds are bounded reliability work. Rounds 130–132 stay closed.
 | --- | --- | --- |
 | 133 | Complete | Account-bound asynchronous ratchet storage and pod backup jobs. See [closeout](ROUND_133_CLOSEOUT.md). |
 | 134 | Complete | Gateway socket encrypted text and device fanout receive recovery, including interrupted history, reload and replay. See [closeout](ROUND_134_CLOSEOUT.md). |
-| 135 | Planned | Durable encrypted text sending and stable-payload retries. |
+| 135 | Complete | Durable encrypted text sending and stable-payload retries. See [closeout](ROUND_135_CLOSEOUT.md). |
 
 ## Round 135 acceptance criteria
 
-Audit the existing ordering in `web/main.js`, `web/e2e.js`, `web/connection.js`
+The completed round audited the existing ordering in `web/main.js`, `web/e2e.js`, `web/connection.js`
 and `web/sendqueue.js`, plus the pod send path, before choosing storage changes.
-Keep this round limited to outgoing encrypted text DMs and device fanout.
+The round stayed limited to outgoing encrypted text DMs and device fanout.
 
 - Encryption and outbox persistence must not strand a draft after interrupted
   storage or leave the next retry with incompatible ratchet state.

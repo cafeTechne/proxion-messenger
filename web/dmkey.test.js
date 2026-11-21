@@ -101,7 +101,7 @@ describe('main.js send path', () => {
     const body = src.slice(src.indexOf('async function _sendComposed('), src.indexOf('// Optimistic render: show the message instantly'));
     it('gates both DM branches on _requireDmKey before building the payload', () => {
         expect(body).toMatch(/await _requireDmKey\(peerWebid, [^)]*\);\s*payload = \{\s*cmd: "local_dm"/);
-        expect(body).toMatch(/if \(activeView\.type === "dm"\) await _requireDmKey\(/);
+        expect(body).toMatch(/if \(_sendView\.type === "dm"\) await _requireDmKey\(/);
     });
     it('no longer documents a plaintext fallback for the first message', () => {
         expect(body).not.toMatch(/fall back to plaintext because isE2EEnabled/);

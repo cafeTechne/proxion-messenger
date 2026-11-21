@@ -15,6 +15,15 @@ describe('peerPodRootFromWebId', () => {
 });
 
 describe('envelopeFromDmPayload', () => {
+    it('keeps a durable retry envelope identical after the clock and profile name change', () => {
+        const payload = { message_id: 'durable', content: 'CT', nonce: 'N', e2e: true,
+            timestamp: '2026-01-01T00:00:00.000Z', from_display_name: 'Original name' };
+        const first = envelopeFromDmPayload(payload, 'https://me', 'Old profile');
+        const retry = envelopeFromDmPayload(payload, 'https://me', 'New profile');
+        expect(retry).toEqual(first); expect(retry.timestamp).toBe(payload.timestamp);
+        expect(retry.from_display_name).toBe('Original name');
+    });
+
     it('carries the ciphertext and ratchet fields, tagged with the sender', () => {
         const env = envelopeFromDmPayload({
             message_id: 'm1', content: 'CT', e2e: true, nonce: 'N', msg_num: 3, pn: 1,
@@ -101,6 +110,31 @@ describe('createWebDm sender verification', () => {
 });
 
 describe('createWebDm.dropFanout', () => {
+    it('does not count an invalid recipient root as accepted', async () => {
+        const { dm } = harness();
+        expect(await dm.dropFanout({ message_id: 'invalid-root', fanout: [
+            { to_webid: 'https://bob.example/profile/card#me', to_device_id: 'b1', payload: {} },
+            { to_webid: 'not-a-webid', to_device_id: 'b2', payload: {} },
+        ] })).toBe(false);
+    });
+
+    it('does not confirm a partial recipient fanout', async () => {
+        const { dm, pod } = harness();
+        pod.podDropDm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+        expect(await dm.dropFanout({ message_id: 'partial', fanout: [
+            { to_webid: 'https://bob.example/profile/card#me', to_device_id: 'b1', payload: {} },
+            { to_webid: 'https://bob.example/profile/card#me', to_device_id: 'b2', payload: {} },
+        ] })).toBe(false);
+    });
+    it('stops a send if its account changes while the envelope is signed', async () => {
+        let actor = 'https://alice.example/profile/card#me';
+        const pod = { podDropDm: vi.fn(async () => true) };
+        const dm = createWebDm({ pod, e2e: {}, getSelfWebId: () => actor, handleEvent: vi.fn(),
+            signEnvelope: async () => { actor = 'https://other.example/profile/card#me'; return {}; } });
+        expect(await dm.dropDm({ target_webid: 'https://bob.example/profile/card#me', message_id: 'm', content: 'CT' })).toBe(false);
+        expect(pod.podDropDm).not.toHaveBeenCalled();
+    });
+
     it('drops one envelope per recipient/own device to their pods', async () => {
         const { dm, dropped } = harness();
         const ok = await dm.dropFanout({

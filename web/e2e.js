@@ -694,6 +694,53 @@ export async function pendingDmReceives() {
     return rows;
 }
 
+export function finishDmSend(peerId, sendId, current = () => true) {
+    return _serialize(peerId, async () => {
+        if (!current()) return false;
+        const state = await loadRatchetState(peerId);
+        if (!current()) return false;
+        if (!state?.pendingSends?.[sendId]) return true;
+        const next = { ...state, pendingSends: { ...state.pendingSends } };
+        delete next.pendingSends[sendId];
+        await saveRatchetState(peerId, next, { current });
+        return true;
+    });
+}
+
+const _SEND_JOB_PREFIX = 'proxion_e2e_send_job_';
+function _sendJobKey(id) {
+    if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw Error('Invalid send job id');
+    return e2eScopedKey(_SEND_JOB_PREFIX + id);
+}
+export async function saveDmSendJob(job, current = () => true) {
+    if (!_initDone) await initE2E();
+    if (!_stateEncKey) throw Error('Encrypted send storage unavailable');
+    const context = _stateContext(), key = _sendJobKey(job.id);
+    const enc = await _encState({ job });
+    if (!current() || !context.current() || key !== _sendJobKey(job.id)) throw Error('Send context changed');
+    localStorage.setItem(key, enc);
+}
+export async function listDmSendJobs() {
+    if (!_initDone) await initE2E();
+    const context = _stateContext(), webId = _currentWebId(), suffix = webId ? '::' + webId : '';
+    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i));
+    const jobs = [];
+    for (const key of keys) {
+        if (!context.current()) throw Error('Send context changed');
+        if (!key?.startsWith(_SEND_JOB_PREFIX) || (suffix ? !key.endsWith(suffix) : key.includes('::'))) continue;
+        let row;
+        try { row = await _decState(localStorage.getItem(key)); } catch { continue; }
+        if (!context.current()) throw Error('Send context changed');
+        if (row?.job && key === _sendJobKey(row.job.id)) jobs.push(row.job);
+    }
+    return jobs;
+}
+export function removeDmSendJob(id, current = () => true) {
+    if (!current()) return false;
+    localStorage.removeItem(_sendJobKey(id));
+    return true;
+}
+
 // ── Internal DH ratchet helpers ───────────────────────────────────────────────
 
 const ZERO_ROOT = new Uint8Array(32);
@@ -840,17 +887,25 @@ async function _dhRatchetSend(state) {
 
 // ── ratchetEncrypt ────────────────────────────────────────────────────────────
 
-export function ratchetEncrypt(peerId, plaintext) {
-    return _serialize(peerId, () => _ratchetEncryptImpl(peerId, plaintext));
+export function ratchetEncrypt(peerId, plaintext, opts = {}) {
+    return _serialize(peerId, () => _ratchetEncryptImpl(peerId, plaintext, opts));
 }
-async function _ratchetEncryptImpl(peerId, plaintext) {
+async function _ratchetEncryptImpl(peerId, plaintext, opts = {}) {
     if (!_initDone) await initE2E();
     if (!e2eSupported) throw new Error('E2E not supported in this browser');
 
+    const current = opts.current || (() => true), sendId = opts.sendId;
+    if (sendId !== undefined && (typeof sendId !== 'string' || !/^[a-f0-9]{64}$/.test(sendId))) throw Error('Invalid send id');
+    if (!current()) throw Error('Send context changed');
     let state = await loadRatchetState(peerId);
+    if (!current()) throw Error('Send context changed');
+    if (sendId && state?.pendingSends?.[sendId]) return { ...state.pendingSends[sendId] };
+    if (sendId && Object.keys(state?.pendingSends || {}).length >= 64) throw Error('Pending send recovery is full');
+    // A failed commit must not advance the live sender session either.
+    if (state) state = JSON.parse(JSON.stringify(state));
 
     if (!state) {
-        const peerPubB64u = _peerPub(peerId);
+        const peerPubB64u = opts.peerPub || _peerPub(peerId);
         if (!peerPubB64u) throw new Error('No E2E pubkey cached for peer: ' + peerId);
         state = await _initSenderState(peerPubB64u);
     } else if (state.pendingDhRatchet) {
@@ -871,8 +926,10 @@ async function _ratchetEncryptImpl(peerId, plaintext) {
         await _aesKey(msgKey),
         _ENC.encode(plaintext)));
 
-    await saveRatchetState(peerId, state);
-    return { ciphertext: b64uEnc(ct), nonce: b64uEnc(nonce), msgNum, pn, ratchetPub };
+    const result = { ciphertext: b64uEnc(ct), nonce: b64uEnc(nonce), msgNum, pn, ratchetPub };
+    if (sendId) state.pendingSends = { ...state.pendingSends, [sendId]: result };
+    await saveRatchetState(peerId, state, { current });
+    return result;
 }
 
 // ── ratchetDecrypt ────────────────────────────────────────────────────────────

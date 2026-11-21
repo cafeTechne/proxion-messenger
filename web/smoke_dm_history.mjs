@@ -1,3 +1,4 @@
+import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 // E2E DM history smoke — proves DMs stay readable after reload/reopen.
 //
 // DMs are E2E (forward Double Ratchet), so the server holds only ciphertext the
@@ -361,6 +362,13 @@ try {
   if (!blip) fail('the DM sent during a blip is missing from Alice\'s feed');
   else if (blip.failed || blip.pending) fail(`a delivered DM sent during a blip shows ${blip.failed ? 'Not delivered' : 'pending'}`);
   if (process.exitCode) throw new Error('stop');
+
+  step = 'durable-text-outbox';
+  const reopen = async page => {
+    await page.waitForFunction(() => document.querySelector('#dm-list li.dm-item'), { timeout: 20000 });
+    await page.evaluate(() => document.querySelector('#dm-list li.dm-item').click());
+  };
+  await dmOutboxJourney({ sender: alice, receiver: bob, openSender: () => reopen(alice), openReceiver: () => reopen(bob), label: 'gateway text outbox' });
 
   step = 'done';
   if (pageErrors.length) fail(`uncaught page errors: ${pageErrors.join(' | ')}`);

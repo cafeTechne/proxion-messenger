@@ -158,6 +158,7 @@ export async function dmHistorySave(msg, opts = {}) {
                 ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
                 ...(msg.file ? { file: fileForRecord(msg.file) } : {}),
                 ...(opts.delivery ? { delivery: opts.delivery } : {}),
+                ...(opts.outbox ? { outbox_id: msg.message_id } : {}),
             });
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
@@ -264,7 +265,7 @@ export async function dmHistorySetDelivery(messageId, delivery) {
     if (!messageId) return;
     try {
         const db = await _open();
-        await new Promise((resolve) => {
+        return await new Promise((resolve) => {
             const tx = db.transaction(STORE, 'readwrite');
             const os = tx.objectStore(STORE);
             const req = os.get(messageId);
@@ -274,10 +275,10 @@ export async function dmHistorySetDelivery(messageId, delivery) {
                 if (delivery) rec.delivery = delivery; else delete rec.delivery;
                 os.put(rec);
             };
-            tx.oncomplete = resolve;
-            tx.onerror = resolve;
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = tx.onabort = () => resolve(false);
         });
-    } catch (_) { /* best-effort */ }
+    } catch (_) { return false; }
 }
 
 // Cached DMs still flagged undelivered, oldest first.

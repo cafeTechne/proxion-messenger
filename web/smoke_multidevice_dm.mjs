@@ -1,3 +1,4 @@
+import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 // Cross-account, multi-device DM smoke (R52 E6) — the "never green-verified"
 // case from memory/multidevice-status.md.
 //
@@ -335,6 +336,10 @@ try {
       ? `A-primary: DM shows "[could not decrypt]" after reload — plaintext not persisted`
       : `A-primary: DM "${MSG}" missing from history after reload`);
   }
+
+  step = 'durable-fanout-outbox';
+  await dmOutboxJourney({ sender: b, receiver: ap, openSender: () => openFirstDm(b, 'B'),
+    openReceiver: () => openFirstDm(ap, 'A-primary'), label: 'gateway fanout outbox' });
 
   // ── Revoke A-device from Settings > Linked devices: it must be signed out,
   // not just dropped from the list (it used to stay connected and reappear).

@@ -183,7 +183,7 @@ export function createPodSocket({ getSelfWebId, getSessionId = getSelfWebId, han
                 }
                 case 'send_dm_fanout': {
                     // Multi-device: one per-device envelope per recipient/own
-                    // device. Echo only if at least one copy was dropped.
+                    // device. Echo only after all intended recipient copies were dropped.
                     if (!dm?.dropFanout) { fail(cmd, true); break; }
                     if (await dm.dropFanout(cmd)) _echoDm({ message_id: cmd.message_id });
                     else fail(cmd);

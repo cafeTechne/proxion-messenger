@@ -67,6 +67,23 @@ describe('createSendStatus', () => {
         expect(els['msg-m1'].classList.contains('msg-pending')).toBe(false);
     });
 
+    it('keeps an uncertain durable send visibly pending after its confirmation timeout', () => {
+        const ss = createSendStatus({ isUncertain: () => true });
+        els['msg-durable'] = mkMsgEl(); ss.track('durable', vi.fn());
+        vi.advanceTimersByTime(18000);
+        expect(els['msg-durable'].classList.contains('msg-pending')).toBe(true);
+        expect(els['msg-durable'].classList.contains('msg-failed')).toBe(false);
+        expect(els['msg-durable'].querySelector('.msg-fail-note')).not.toBeNull();
+    });
+
+    it('does not resurrect a pending flag after a known durable confirmation', () => {
+        const ss = createSendStatus(); ss.confirm('restored', { known: true });
+        const el = mkMsgEl(); el.classList.remove('msg-pending');
+        ss.applyTo(el, { message_id: 'restored', delivery: 'pending' });
+        expect(el.classList.contains('msg-failed')).toBe(false);
+        expect(el.classList.contains('msg-pending')).toBe(false);
+    });
+
     it('confirm is a no-op for an unknown id and never throws', () => {
         const ss = createSendStatus();
         expect(() => ss.confirm('nope')).not.toThrow();

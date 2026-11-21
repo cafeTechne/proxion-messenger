@@ -31,7 +31,7 @@ vi.mock('./auth.js', () => ({
 vi.mock('./pod.js', () => ({ podPublishIdentityAcl: async () => true }));
 
 import {
-    initE2E, _resetForTesting, myX25519PubB64u, cachePeerPub, ratchetEncrypt, fetchAndCachePeerPub, saveRatchetState, pendingDmReceives,
+    initE2E, _resetForTesting, myX25519PubB64u, cachePeerPub, ratchetEncrypt, fetchAndCachePeerPub, saveRatchetState, pendingDmReceives, saveDmSendJob, listDmSendJobs,
 } from './e2e.js';
 
 const WEBID_A = 'https://alice.example/profile/card#me';
@@ -247,6 +247,15 @@ describe('gateway recovery account namespace', () => {
     beforeEach(async () => {
         _resetForTesting(); logout(); _root = null; localStorage.clear(); await clearKeyStore();
     });
+    it('keeps encrypted outgoing drafts scoped to their initiating account', async () => {
+        await boot(WEBID_A);
+        await saveDmSendJob({ id: 'alice-send', scope: 'alice/device', record: { content: 'alice-private-draft' } });
+        expect((await listDmSendJobs()).map(job => job.id)).toEqual(['alice-send']);
+        await boot(WEBID_B); expect(await listDmSendJobs()).toEqual([]);
+        await boot(null); expect(await listDmSendJobs()).toEqual([]);
+        await boot(WEBID_A); expect((await listDmSendJobs())[0].record.content).toBe('alice-private-draft');
+    });
+
     it('scans only the active account recovery records, including after logout', async () => {
         await boot(WEBID_A);
         const id = 'a'.repeat(64);

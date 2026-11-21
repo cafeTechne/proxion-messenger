@@ -1125,32 +1125,31 @@ class DmHandlerMixin:
                 "to_device_id": to_device_id,
                 "payload": entry.get("payload"),
             })
+            accepted = False
             for ws in dev_sockets:
                 try:
                     await ws.send(event)
+                    accepted = True
                     if self._store:
                         self._store.mark_dm_delivered(message_id, to_webid, to_device_id)
                 except Exception as exc:
                     logger.warning("dm_fanout relay failed to %s/%s: %s", to_webid, to_device_id, exc)
-            # Device has no live socket:
-            #  - account is fully remote (no local sessions) -> relay the
-            #    envelope to their gateway (device-addressed E2E ciphertext);
-            #  - local device OFFLINE -> queue for redelivery on register, and
-            #    web-push the account once IF no device at all is online (was:
-            #    silently dropped — fanout has no server history to recover from).
-            if not dev_sockets:
+            # A stale socket is offline too. Acknowledge only delivery or
+            # acceptance into a retry queue, never a failed send alone.
+            if not accepted:
                 account_sockets = self._sockets_for(to_webid) or []
                 if not account_sockets and self._resolve_peer_gateway(to_webid):
-                    await self._relay_dm_fanout_entry(message_id, to_webid, to_device_id,
-                                                      entry.get("payload"))
+                    accepted = await self._relay_dm_fanout_entry(message_id, to_webid, to_device_id,
+                                                                 entry.get("payload"))
                 else:
-                    self._queue_fanout_envelope(message_id, from_webid, to_webid,
-                                                to_device_id, entry.get("payload"))
-                    if not account_sockets and to_webid not in _pushed_accounts:
+                    accepted = self._queue_fanout_envelope(message_id, from_webid, to_webid,
+                                                           to_device_id, entry.get("payload"))
+                    if accepted and not account_sockets and to_webid not in _pushed_accounts:
                         _pushed_accounts.add(to_webid)
                         await self._push_offline_dm(to_webid, from_webid,
                                                     self._name_for(websocket, from_webid))
-            delivered.append({"to_webid": to_webid, "to_device_id": to_device_id})
+            if accepted:
+                delivered.append({"to_webid": to_webid, "to_device_id": to_device_id})
 
         await websocket.send(json.dumps({
             "type": "send_dm_fanout_ack",
@@ -1172,19 +1171,25 @@ class DmHandlerMixin:
         return out
 
     def _queue_fanout_envelope(self, message_id: str, from_webid: str,
-                               to_webid: str, to_device_id: str, payload) -> None:
-        """Hold a fanout envelope for an OFFLINE device until it re-registers
-        (drained in _gateway_auth, mirroring _relay_queue). Capped like the
-        relay queue so an attacker can't balloon memory."""
+                               to_webid: str, to_device_id: str, payload) -> bool:
+        """Hold an offline-device envelope without evicting accepted entries.
+
+        This existing queue is process-local. False applies sender backpressure;
+        exact retries share a slot instead of exhausting the queue.
+        """
         if payload is None:
-            return
+            return False
         key = (to_webid, to_device_id)
         if key not in self._fanout_queue and len(self._fanout_queue) >= 500:
-            return
+            return False
         q = self._fanout_queue.setdefault(key, [])
+        row = {"message_id": message_id, "from_webid": from_webid, "payload": payload}
+        if row in q:
+            return True
         if len(q) >= 100:
-            q.pop(0)  # drop-oldest
-        q.append({"message_id": message_id, "from_webid": from_webid, "payload": payload})
+            return False
+        q.append(row)
+        return True
 
     def _spawn_push_fanout(self, subs, payload: dict, vpk: str, vsub: str) -> None:
         """Start a web-push fan-out without waiting for it.
@@ -1263,7 +1268,7 @@ class DmHandlerMixin:
         )
 
     async def _relay_dm_fanout_entry(self, message_id: str, to_webid: str,
-                                     to_device_id: str, payload) -> None:
+                                     to_device_id: str, payload) -> bool:
         """Relay one per-device E2E fanout envelope to a remote peer's gateway.
 
         The envelope content is already device-addressed ciphertext. Signed with
@@ -1276,7 +1281,7 @@ class DmHandlerMixin:
         """
         peer_gw = self._resolve_peer_gateway(to_webid)
         if not peer_gw or payload is None:
-            return
+            return False
         try:
             from .relay import sign_relay_message, post_relay
             from .didkey import pub_key_to_did
@@ -1332,10 +1337,13 @@ class DmHandlerMixin:
             delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)
             if not delivered and self._store:
                 self._store.enqueue_relay(transport_id, to_webid, http_base, _queued)
-            elif delivered:
+                return True
+            if delivered:
                 self._note_peer_contact(to_webid, http_base)
+            return bool(delivered)
         except Exception as exc:
             logger.warning("dm_fanout cross-gateway relay failed: %s", exc)
+            return False
 
     async def _handle_dm_fanout_relay(self, data: dict) -> tuple:
         """Inbound relayed per-device DM fanout envelope from a peer gateway.
@@ -1373,7 +1381,6 @@ class DmHandlerMixin:
             _key = f"{from_webid}:{transport_id}"
             if self._store.has_seen_relay_id(_key, ttl_seconds=_ID_TTL):
                 return "200 OK", '{"status":"duplicate"}'
-            self._store.record_relay_id(_key)
         try:
             inner = json.loads(content)
             message_id = str(inner.get("message_id") or "")
@@ -1398,19 +1405,23 @@ class DmHandlerMixin:
             "payload": payload,
         })
         dev_sockets = self._device_sockets(to_webid, to_device_id)
+        accepted = False
         for ws in dev_sockets:
             try:
                 await ws.send(event)
+                accepted = True
             except Exception:
                 pass
         # Addressed device offline: queue for redelivery on register + push the
         # account if nothing at all is online. (Was: zero sends and a 200 back —
         # the sending gateway marked it delivered and the message was lost.)
-        if not dev_sockets:
-            self._queue_fanout_envelope(message_id, from_webid, to_webid,
-                                        to_device_id, payload)
+        if not accepted:
+            if not self._queue_fanout_envelope(message_id, from_webid, to_webid, to_device_id, payload):
+                return "503 Service Unavailable", '{"error":"fanout queue full"}'
             if not (self._sockets_for(to_webid) or []):
                 await self._push_offline_dm(to_webid, from_webid)
+        if self._store:
+            self._store.record_relay_id(_key)
         return "200 OK", '{"status":"received"}'
 
     async def _handle_dm_decrypt_failed(self, websocket, data: dict) -> None:

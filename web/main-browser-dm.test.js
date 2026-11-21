@@ -49,13 +49,14 @@ describe('DM entry from a room member', () => {
 it('resumes room requests and room watches when the browser session recovers', () => {
     const body = source.slice(source.indexOf('function _webResume('));
     const fn = body.slice(0, /^        }\r?$/m.exec(body).index + 9);
-    const deps = { flushPodQueue: vi.fn(), sendStatus: { retryUndelivered: vi.fn() },
+    const deps = { _dmOutbox: { restore: vi.fn(async () => {}) }, flushPodQueue: vi.fn(), sendStatus: { retryUndelivered: vi.fn() },
         solidSession: { info: { isLoggedIn: true } }, window: { proxionWebJoin: { resume: vi.fn(async () => {}) } },
         _browserFriends: { resume: vi.fn(async () => {}) },
         _remoteRooms: { joined: { container: 'https://bob.example/room/' } }, roomCreatorOf: new Set(['owned']),
         _trackRoomSync: vi.fn(), webRoomAccess: { track: vi.fn(), checkAll: vi.fn(async () => {}) } };
     const resume = new Function(...Object.keys(deps), `${fn}; return _webResume;`)(...Object.values(deps));
     resume();
+    expect(deps._dmOutbox.restore).toHaveBeenCalledWith({ force: true });
     expect(deps.window.proxionWebJoin.resume).toHaveBeenCalledOnce();
     expect(deps._browserFriends.resume).toHaveBeenCalledOnce();
     expect(deps._trackRoomSync.mock.calls).toEqual([['joined'], ['owned']]);

@@ -43,7 +43,7 @@ export function seenByText(readers, selfWebId) {
 //
 // The state lives here, not only on the bubble: switching threads or reloading
 // redraws the feed, and applyTo() paints each redrawn bubble from it.
-export function createSendStatus({ isOnline, onRetry, onState, resendFor, podNoteText, onPodRetry } = {}) {
+export function createSendStatus({ isUncertain = () => false, isOnline, onRetry, onState, resendFor, podNoteText, onPodRetry } = {}) {
     const pending = new Map();      // msgId -> { timer, resend, waiting, failed }
     const podUnsaved = new Map();   // msgId -> pod write to retry (null: replay the queue)
     const settled = new Set();      // confirmed ids, so a stale stored flag is not repainted
@@ -100,7 +100,8 @@ export function createSendStatus({ isOnline, onRetry, onState, resendFor, podNot
     }
 
     // Success — the echo or fanout ack arrived.
-    function confirm(msgId) {
+    function confirm(msgId, { known = false } = {}) {
+        if (known) settled.add(msgId);
         const rec = pending.get(msgId);
         if (rec) { clearTimeout(rec.timer); pending.delete(msgId); settled.add(msgId); _state(msgId, null); }
         const el = _el(msgId);
@@ -112,13 +113,16 @@ export function createSendStatus({ isOnline, onRetry, onState, resendFor, podNot
 
     function _paintFailed(el, msgId) {
         if (!el) return;
-        el.classList.remove('msg-pending');
-        el.classList.add('msg-failed');
+        if (isUncertain(msgId)) {
+            el.classList.add('msg-pending'); el.classList.remove('msg-failed');
+        } else {
+            el.classList.remove('msg-pending'); el.classList.add('msg-failed');
+        }
         if (el.querySelector('.msg-fail-note')) return;
         const note = document.createElement('span');
         note.className = 'msg-fail-note';
         const label = document.createElement('span');
-        label.textContent = t('send.notDelivered');
+        label.textContent = isUncertain(msgId) ? t('send.unconfirmed') : t('send.notDelivered');
         const retry = document.createElement('button');
         retry.type = 'button';
         retry.className = 'msg-retry-btn';

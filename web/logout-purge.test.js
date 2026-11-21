@@ -30,10 +30,20 @@ function memLocalStorage() {
         getItem: (k) => (k in s ? s[k] : null),
         setItem: (k, v) => { s[k] = String(v); },
         removeItem: (k) => { delete s[k]; },
+        key: i => Object.keys(s)[i] ?? null,
+        get length() { return Object.keys(s).length; },
     };
 }
 
 describe('solidLogout purges pod-derived state', () => {
+    it('removes pending encrypted send jobs on explicit sign-out', async () => {
+        localStorage.setItem('proxion_e2e_send_job_pending', 'encrypted draft');
+        localStorage.setItem('proxion_e2e_send_job_pending::https://alice.example/#me', 'encrypted account draft');
+        await solidLogout();
+        expect(localStorage.getItem('proxion_e2e_send_job_pending')).toBeNull();
+        expect(localStorage.getItem('proxion_e2e_send_job_pending::https://alice.example/#me')).toBeNull();
+    });
+
     let deleted;
     beforeEach(() => {
         globalThis.localStorage = memLocalStorage();

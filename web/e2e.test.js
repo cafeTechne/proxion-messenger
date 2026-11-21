@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { dmHistorySave, dmHistorySetEnabled } from './dmhistory.js';
 import { createWebDm } from './webdm.js';
 import { createGatewayDmReceiver, gatewayDmEnvelope } from './gateway-dm-receive.js';
+import { createDmOutbox } from './dm-outbox.js';
 import { createDmReceiptStore, dmEnvelopeFingerprint } from './dm-receipts.js';
 
 // ── Mock localStorage ────────────────────────────────────────────────────────
@@ -54,6 +55,7 @@ import {
     ratchetDecrypt,
     finishDmReceive,
     pendingDmReceives,
+    finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob,
     loadRatchetState,
     saveRatchetState,
     advanceChain,
@@ -870,5 +872,92 @@ describe('recoverable pod DM receives', () => {
         expect(events).toHaveLength(0); expect(persist).not.toHaveBeenCalled();
         expect(deleted).toHaveBeenCalledTimes(1);
         expect((await loadRatchetState('recovery-alice')).pendingReceives).toEqual({});
+    });
+});
+
+
+describe('atomic encrypted sender outbox', () => {
+    let bob;
+    beforeEach(async () => {
+        _e2eSession = { info: { isLoggedIn: false } }; _e2eRoot = null;
+        localStorage.clear(); _resetForTesting(); await initE2E();
+        bob = await makeX25519Pair(); cachePeerPub('atomic-bob', bob.pubB64u);
+    });
+    const input = () => ({ id: 'atomic-send', actor: 'alice', device: 'alice-device', peer: 'bob-account',
+        pub: myX25519PubB64u(), mode: 'single', entries: [{ peerId: 'atomic-bob', account: 'bob-account', primary: true }],
+        route: { cmd: 'local_dm', target_webid: 'bob-account' },
+        record: { message_id: 'atomic-send', thread_id: 'bob-thread', from_webid: 'alice', content: 'durable hello',
+            from_display_name: 'Alice', timestamp: '2026-01-01T00:00:00.000Z' } });
+    function harness() {
+        const frames = [];
+        const options = { e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob },
+            getScope: () => 'alice-device', send: async frame => { frames.push(frame); },
+            persistMessage: async () => true, clearDelivery: async () => true, onError: vi.fn() };
+        return { frames, options, engine: () => createDmOutbox(options) };
+    }
+    it('does not spend a key when the first intent commit fails', async () => {
+        const h = harness(), engine = h.engine(), original = localStorage.setItem;
+        const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+            if (key.startsWith('proxion_e2e_send_job_')) throw Error('intent quota');
+            return original(key, value);
+        });
+        try { await expect(engine.queue(input())).rejects.toThrow('intent quota'); } finally { spy.mockRestore(); }
+        expect(await loadRatchetState('atomic-bob')).toBeNull(); expect(h.frames).toHaveLength(0);
+    });
+    it('recovers exact ciphertext when prepared-job persistence fails after ratchet advancement', async () => {
+        const h = harness(), engine = h.engine(); await engine.queue(input());
+        const original = localStorage.setItem;
+        const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+            if (key.startsWith('proxion_e2e_send_job_')) throw Error('prepared quota');
+            return original(key, value);
+        });
+        expect(await engine.send('atomic-send')).toBe(false); spy.mockRestore();
+        expect(h.frames).toHaveLength(0);
+        const spent = await loadRatchetState('atomic-bob');
+        const [exact] = Object.values(spent.pendingSends);
+        expect(spent.sendMsgNum).toBe(1); expect((await listDmSendJobs())[0].frames).toBeUndefined();
+        expect(localStorage.getItem('proxion_e2e_send_job_atomic-send')).not.toContain('durable hello');
+        _resetForTesting(); await initE2E();
+        await h.engine().restore({ force: true });
+        expect(h.frames[0]).toMatchObject({ content: exact.ciphertext, nonce: exact.nonce, msg_num: exact.msgNum });
+        expect((await loadRatchetState('atomic-bob')).sendMsgNum).toBe(1);
+        await swapIdentity(bob.privJwk, bob.pubB64u);
+        expect(await ratchetDecrypt('atomic-alice', h.frames[0].content, h.frames[0].nonce,
+            h.frames[0].msg_num, h.frames[0].ratchet_pub, h.frames[0].pn)).toBe('durable hello');
+    });
+    it('rolls back the live sender on a failed state commit and retries the same message number', async () => {
+        await ratchetEncrypt('atomic-bob', 'earlier message');
+        const h = harness(), engine = h.engine(); await engine.queue(input());
+        const original = localStorage.setItem;
+        const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+            if (key === 'proxion_e2e_state_atomic-bob') throw Error('state quota');
+            return original(key, value);
+        });
+        expect(await engine.send('atomic-send')).toBe(false); spy.mockRestore();
+        expect((await loadRatchetState('atomic-bob')).sendMsgNum).toBe(1);
+        await engine.send('atomic-send');
+        expect(h.frames[0].msg_num).toBe(1); expect((await loadRatchetState('atomic-bob')).sendMsgNum).toBe(2);
+    });
+    it('recovers a partly prepared device fanout without advancing the first device twice', async () => {
+        const h = harness(), engine = h.engine(), job = input(); job.mode = 'fanout';
+        job.entries = [ { peerId: 'bob-device-1', account: 'bob-account', device: 'b1', pub: bob.pubB64u },
+            { peerId: 'bob-device-2', account: 'bob-account', device: 'b2', pub: (await makeX25519Pair()).pubB64u } ];
+        await engine.queue(job);
+        const original = localStorage.setItem;
+        const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+            if (key === 'proxion_e2e_state_bob-device-2') throw Error('second device quota');
+            return original(key, value);
+        });
+        expect(await engine.send('atomic-send')).toBe(false); spy.mockRestore(); expect(h.frames).toHaveLength(0);
+        const [firstCipher] = Object.values((await loadRatchetState('bob-device-1')).pendingSends);
+        _resetForTesting(); await initE2E();
+        const restored = h.engine(); await restored.restore({ force: true });
+        expect(h.frames[0].fanout[0].payload.content).toBe(firstCipher.ciphertext);
+        expect((await loadRatchetState('bob-device-1')).sendMsgNum).toBe(1);
+        expect((await loadRatchetState('bob-device-2')).sendMsgNum).toBe(1);
+        await restored.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'bob-account', to_device_id: 'b1' },
+            { to_webid: 'bob-account', to_device_id: 'b2' }] });
+        expect(await listDmSendJobs()).toEqual([]);
+        expect((await loadRatchetState('bob-device-1')).pendingSends).toEqual({});
     });
 });
