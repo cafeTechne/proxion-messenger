@@ -1,0 +1,260 @@
+# Planned rounds 141–145
+
+Status: planned after the audited completion of Rounds 136–140. Earlier rounds
+remain closed; retained limitations become new bounded work, not additions to
+closed rounds. This tracked file is authoritative; ignored root-level plan
+files are local IDE copies.
+
+Work from observed failure boundaries, preserve encryption and storage limits,
+and leave a reviewable implementation/validation record for each round. A plan
+may narrow after an audit, but exclusions and unsupported cases must stay
+explicit. New crypto/control protocols need a concrete safety and compatibility
+review before activation. Local commits are separate from pushing/deployment.
+
+| Round | Focus | Depends on |
+| --- | --- | --- |
+| 141 | Bind bridge text sends to their originating pod account | 140 |
+| 142 | Durable native gateway inline DM media | 140–141 |
+| 143 | Resumable encrypted gateway chunk transfers | 142 |
+| 144 | Safe retirement of blocked prepared sends | 139–143 |
+| 145 | Device fanout acknowledgement after durable receive commit | 136, 139, 142–144 |
+
+
+---
+
+## Round 141: Bind bridge text sends to their originating pod account
+
+Status: planned. Depends on 140.
+
+### Problem and result
+
+A gateway device keeps its local DID while the gateway’s connected pod WebID
+changes. Media intents now record and enforce that actor, but older text intents
+only record the local DID. A pending text envelope must never be signed/published
+under a replacement pod account merely because it uses the same browser/device.
+
+### Bounded work
+
+- [ ] Capture the bridge WebID when freezing new WebID text intents. Retain it
+  across disconnect/reload without putting transient session epochs in persisted
+  job scopes. Device-only gateway conversations retain their existing identity.
+- [ ] Check actor and bridge generation before preparation, dispatch, confirmation
+  and recovery. Switching away and back cancels old work; reconnecting the same
+  account resumes the original ciphertext.
+- [ ] Define conservative treatment of pre-141 prepared bridge jobs that lack
+  actor evidence. Do not infer ownership from the active pod or silently rewrite
+  an already transmitted envelope. Keep unsupported legacy recovery visible.
+- [ ] Make pending status distinguish original-account reauthentication from a
+  changed recipient. Do not present account mismatch as delivery failure when
+  acceptance was already saved.
+- [ ] Add deterministic account-switch and live bridge recovery coverage.
+
+### Acceptance and validation
+
+New intents for pod A pause while B is connected, including a rapid A→B→A
+switch during preparation or drop. A restored job sends its original payload
+only through A; local DID-only DMs still work. Legacy ambiguous jobs cannot
+silently acquire B as their sender. Run outbox/main/bridge tests, lint/i18n and
+a live desktop-to-browser exact-retry journey with credential replacement.
+
+### Likely touchpoints
+
+`web/main.js`, `web/dm-outbox.js`, `web/crossmode.js`, pending status and bridge smokes.
+
+### Exclusions
+
+No migration of local gateway identity keys, cross-device key distribution,
+new cryptography or automatic reauthoring of old prepared messages.
+
+
+---
+
+## Round 142: Durable native gateway inline DM media
+
+Status: planned. Depends on 140–141.
+
+### Problem and result
+
+Native gateway inline files/voice use secondary sealed envelopes and live
+send_file frames, rather than the pod-asset adapter closed in Round 140.
+A reload can lose the prepared file/header or delivery evidence. Preserve the
+existing supported inline route without copying file bytes into localStorage.
+
+### Bounded work
+
+- [ ] Audit native inline file, GIF and voice routes, sealed metadata, gateway
+  message ids/deduplication and real delivery/echo semantics before editing.
+- [ ] Persist a bounded account/device-scoped IndexedDB draft containing original
+  or prepared encrypted bytes. Freeze logical id, destination and sealed header;
+  keep only small references in outgoing metadata.
+- [ ] Journal secondary file-header ratchet preparation with the existing atomic
+  send journal. Retries must reuse the header/file ciphertext and never silently
+  rotate recipients, keys or ids.
+- [ ] Honor stable client ids and exact-payload deduplication at applicable
+  gateway boundaries. Refuse conflicting retries and false confirmation.
+- [ ] Keep the draft until supported acceptance/history completion is durable.
+  Apply block/revocation, account/tab isolation, capacity and explicit reset rules.
+- [ ] Expose honest pending/retry status and gate unsupported legacy recovery.
+
+### Acceptance and validation
+
+Reload after sealing, before/after durable preparation, during transmission
+and after a lost acknowledgement. Each supported inline file/voice note arrives
+once with exact bytes, its original envelope and stable message id. Quota failure
+keeps the source and spends no uncommitted key. Test native gateway browser
+journeys with files, voice, blocking and reconnect plus focused crypto/server
+checks; distinguish gateway acceptance from durable recipient storage.
+
+### Likely touchpoints
+
+`web/e2e-secondary.js`, native attachment/voice send paths, IndexedDB drafts, gateway media/id handling and native media smokes.
+
+### Exclusions
+
+No increase to file/frame size limits, room-file redesign, new codecs or
+chunk-transfer resume (Round 143). Do not silently reroute native files to pods.
+
+
+---
+
+## Round 143: Resumable encrypted gateway chunk transfers
+
+Status: planned. Depends on 142.
+
+### Problem and result
+
+The existing file_offer/file_chunk/file_complete route buffers live transfer
+state in memory. Navigation or a disconnect can discard either side’s progress,
+and replaying a sealed header can spend a ratchet key twice. Add explicit,
+bounded recovery to this separate transfer protocol.
+
+### Bounded work
+
+- [ ] Inventory sender/receiver states, timeout/decline behavior, authorization,
+  chunk and file limits and current file_received semantics.
+- [ ] Persist encrypted sender bytes, immutable transfer id/header and bounded
+  receiver chunk progress in IndexedDB before relevant acknowledgements.
+- [ ] Negotiate recovery capability and resume only authenticated peer/transfer
+  identities. Define missing-chunk queries, deduplication/conflict rules and
+  interrupted finalization without unbounded retransmission or buffering.
+- [ ] Journal receive-header consumption and local history commit so complete/
+  acknowledgement replay does not decrypt a spent header or lose the only file.
+- [ ] Apply account/tab, block/revocation, cancellation, retention and capacity
+  rules. Legacy peers keep explicitly documented active-transfer behavior.
+- [ ] Provide accessible progress, reconnect/resume and failure controls.
+
+### Acceptance and validation
+
+Pause and restart both sender and receiver at offer, middle chunk, complete,
+history commit and final acknowledgement. Restore exact bytes once without
+re-sealing the header, leaking plaintext or accepting a foreign/conflicting
+transfer. Test full stores, duplicate/out-of-order chunks, declined/revoked
+peers, legacy negotiation and real cross-gateway reload/reconnect journeys.
+
+### Likely touchpoints
+
+`web/filetransfer.js`, secondary header recovery, draft/history stores, gateway file relay and transfer smoke helpers.
+
+### Exclusions
+
+No larger file caps, full history backfill, new storage service or generic
+replacement of every gateway queue. Capability negotiation must preserve older
+clients and cannot weaken sender authentication or encryption.
+
+
+---
+
+## Round 144: Safe retirement of blocked prepared sends
+
+Status: planned. Depends on 139–143.
+
+### Problem and result
+
+Rounds 138–140 intentionally keep prepared sends when recipients or devices
+change, because deleting spent-key intents can exceed the receiver’s skip bound.
+Establish which retirement actions can be proved safe and make blocked queues
+manageable without claiming recall or resetting trust implicitly.
+
+### Bounded work
+
+- [ ] Enumerate blocked prepared/partially accepted text and media states,
+  including revoked devices, changed keys and legacy unknown sends.
+- [ ] Write a concrete safety model for any proposed retirement: peer/chain
+  identity, accepted message positions, replay/order rules, crash boundaries and
+  compatibility. Keep MAX_SKIP and key non-reuse invariant.
+- [ ] Implement only retirement that existing authenticated durable evidence
+  proves safe. A new ratchet-reset/control protocol requires a separate reviewed
+  design and explicit compatibility gate; do not improvise it inside a button.
+- [ ] Retain unsafe cases with actionable original-account/device recovery or
+  explicit destructive local-reset wording. Never relabel deletion as recall.
+- [ ] Test subsequent decryptability, repeated retirement, partial target
+  acceptance, quota recovery, stale account actions and media asset ownership.
+- [ ] Document remaining blocked cases and any separately required protocol
+  review rather than marking an unsafe action available.
+
+### Acceptance and validation
+
+For every enabled action, later messages decrypt within existing bounds,
+keys are never reused, confirmed peer delivery stays confirmed and potentially
+delivered assets are retained. Adversarial/replay/crash tests support the safety
+argument. Cases without sufficient evidence remain gated with an honest UX.
+A design-only result must explicitly distinguish itself from shipped reset or
+prepared cancellation.
+
+### Likely touchpoints
+
+Outbox receipts and frozen target policy, crypto state, device lifecycle, pending controls and explicit reset UX.
+
+### Exclusions
+
+No message recall, larger skip buffers, unilateral trust reset, automatic
+recipient retargeting or unreviewed cryptographic protocol deployment.
+
+
+---
+
+## Round 145: Device fanout acknowledgement after durable receive commit
+
+Status: planned. Depends on 136, 139, 142–144.
+
+### Problem and result
+
+Round 136 persists offline fanout but removes a queued row after a successful
+socket write. A crash between that write and the recipient’s durable receive
+journal can still lose accepted delivery. Close this specific gap using an
+explicit client commit acknowledgement and bounded server replay.
+
+### Bounded work
+
+- [ ] Specify a versioned acknowledgement bound to authenticated recipient
+  account/device and the exact sender/message/envelope identity; document the
+  distinction between gateway acceptance, durable receive commit and reading.
+- [ ] Retain durable fanout until a supported client confirms its receive journal/
+  history boundary. Define bounded leases/retries and restart recovery; preserve
+  opaque ciphertext and reject conflicting identities or foreign acks.
+- [ ] Make client receipt/journal recovery send an idempotent acknowledgement
+  after commit, including duplicate envelopes, history-disabled behavior and
+  interrupted local cleanup. Never acknowledge before the recovery copy exists.
+- [ ] Apply block, account deletion and device revocation to pending/leased rows;
+  bound retained bytes/targets and fail admission rather than evict accepted work.
+- [ ] Negotiate legacy behavior explicitly and report its weaker boundary rather
+  than treating a socket write as a durable client receipt.
+- [ ] Update schema/protocol metadata, migrations, tests and real multi-device
+  crash/restart journeys around write-before-commit and commit-before-ack.
+
+### Acceptance and validation
+
+Kill the gateway and recipient on both sides of the receive commit, lose and
+replay acknowledgements, and reload the sender. One readable message survives
+with original ciphertext, no foreign device can drain/ack it, and full or failed
+storage creates no false acceptance. Run backend migrations/authorization/
+capacity checks and live paired-device cross-gateway fault journeys.
+
+### Likely touchpoints
+
+Durable device fanout store/drain, authenticated gateway protocol, client receive receipts/journals and restart smokes.
+
+### Exclusions
+
+No read receipts, guarantee for permanently lost/revoked devices, plaintext
+server archive or blanket redesign of room/ordinary-DM delivery protocols.

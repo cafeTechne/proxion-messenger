@@ -43,3 +43,12 @@ Rounds 136–140 address the retained limits in this order:
 See [the five bounded plans](PLANNED_ROUNDS_136_140.md) for dependencies,
 acceptance tests, likely code areas and explicit exclusions. Rounds 136–140 are
 complete within their audited boundaries; see closeouts for retained limits. Earlier completed-round scope is unchanged.
+
+
+## Follow-up rounds 141–145
+
+The next plans address bridge text actor binding, native gateway inline media,
+resumable chunk transfers, evidence-based prepared-send retirement and durable
+recipient-commit acknowledgements. See [the bounded plans](PLANNED_ROUNDS_141_145.md).
+No completed round is reopened. New cryptographic/control protocol activation
+requires its own safety and compatibility checkpoint.
