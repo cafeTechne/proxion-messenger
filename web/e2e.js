@@ -761,6 +761,13 @@ export async function pendingDmReceives() {
     return rows;
 }
 
+// Cancellation is safe only before any target has spent a send key. This
+// serialized read also recognizes preparation interrupted before job.frames.
+export function hasPendingDmSend(peerId, sendId) {
+    return _serialize(peerId, async () => !!(await loadRatchetState(peerId))?.pendingSends?.[sendId]);
+}
+export function cachedPeerPub(peerId) { return _peerPub(peerId); }
+
 export function finishDmSend(peerId, sendId, current = () => true) {
     return _serialize(peerId, async context => {
         const callerCurrent = current;

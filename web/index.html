@@ -679,6 +679,7 @@
           <nav class="settings-nav" aria-label="Settings sections" data-i18n-attr="aria-label:settings.nav.label">
             <button type="button" class="settings-nav-item" data-settings-target="settings-sec-profile" data-i18n="section.profile">Profile</button>
             <button type="button" class="settings-nav-item" data-settings-target="settings-sec-privacy" data-i18n="section.privacy">Privacy</button>
+            <button type="button" class="settings-nav-item" data-settings-target="settings-sec-pending" data-i18n="outbox.title">Pending direct messages</button>
             <button type="button" class="settings-nav-item" data-settings-target="settings-sec-pod" data-i18n="section.podSync">Pod &amp; sync</button>
             <button type="button" class="settings-nav-item" data-settings-target="settings-sec-backup" data-i18n="section.backupRecovery">Backup &amp; recovery</button>
             <button type="button" class="settings-nav-item" data-settings-target="settings-sec-devices" data-i18n="section.devicesSessions">Devices &amp; sessions</button>
@@ -743,6 +744,13 @@
               </label>
             </section>
 
+            <section id="settings-sec-pending" class="settings-section" aria-labelledby="settings-h-pending" tabindex="-1">
+              <h4 id="settings-h-pending" class="section-label" data-i18n="outbox.title">Pending direct messages</h4>
+              <p class="settings-hint" data-i18n="outbox.hint">Review this device's saved sends. Stopping an unsent message does not recall a delivered message.</p>
+              <div class="settings-actions"><button type="button" id="dm-outbox-refresh" class="btn btn--slate" data-i18n="outbox.refresh">Refresh pending messages</button></div>
+              <p id="dm-outbox-status" class="settings-hint" role="status" aria-live="polite"></p>
+              <ul id="dm-outbox-rows" class="settings-readout"></ul>
+            </section>
             <section id="settings-sec-pod" class="settings-section" aria-labelledby="settings-h-pod" tabindex="-1">
               <h4 id="settings-h-pod" class="section-label" data-i18n="section.podSync">Pod &amp; sync</h4>
               <h5 class="settings-subhead" data-i18n="section.solidPod">Solid pod</h5>

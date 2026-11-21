@@ -1,6 +1,6 @@
 # Planned rounds 136–140
 
-Status: Rounds 136–137 complete; Rounds 138–140 remain planned.
+Status: Rounds 136–138 complete; Rounds 139–140 remain planned.
 Rounds 130–135 remain closed; the limitations recorded in their closeouts are inputs to new work,
 not additions to those completed rounds.
 
@@ -151,8 +151,7 @@ existing identities rather than changing how keys are distributed.
 
 ## Round 138: pending-send visibility and safe user controls
 
-Status: planned. Depends on Round 137's stable account context. Rounds 130–135
-remain closed.
+Status: complete. See [Round 138 closeout](ROUND_138_CLOSEOUT.md). Rounds 130–137 remain closed.
 
 ### Problem and result
 
@@ -163,23 +162,23 @@ misrepresenting cancellation as recall.
 
 ### Bounded work
 
-- [ ] Present pending text sends for the current account/device, with destination,
+- [x] Present pending text sends for the current account/device, with destination,
   age and an understandable state: waiting for connection/storage, awaiting
   confirmation, confirmed with cleanup pending, or requiring user attention.
   Keep crypto/storage implementation details out of normal product wording.
-- [ ] Retry existing prepared payloads verbatim; prevent concurrent retries from
+- [x] Retry existing prepared payloads verbatim; prevent concurrent retries from
   duplicating jobs. Surface queue/storage limits while keeping unsaved composer
   text and already persisted jobs intact.
-- [ ] Detect stale/revoked recipient device plans. Explain the condition and
+- [x] Detect stale/revoked recipient device plans. Explain the condition and
   require a deliberate new send when recipients must change; never mutate an
   already prepared send to include new devices silently.
-- [ ] Allow removal of an intent that has not spent a ratchet key. Before offering
+- [x] Allow removal of an intent that has not spent a ratchet key. Before offering
   cancellation of a prepared send, prove that stopping retries cannot break
   later decryption: never roll back ratchets, reuse keys or enlarge skip bounds.
-- [ ] Define safe treatment of legacy history-only pending rows that have no
+- [x] Define safe treatment of legacy history-only pending rows that have no
   saved ciphertext. Do not label a reconstructed encryption as an exact retry;
   a fresh send must have a fresh id and disclose possible prior delivery.
-- [ ] Include keyboard access, translated status wording and account-safe list
+- [x] Include keyboard access, translated status wording and account-safe list
   cleanup. Explicit logout/reset retain their documented destructive meaning.
 
 ### Safety checkpoint and acceptance

@@ -68,23 +68,23 @@ export function createSendStatus({ isUncertain = () => false, isOnline, onRetry,
         (el.querySelector('.msg-content') || el).appendChild(note);
     }
 
-    function _arm(msgId, resend) {
+    function _arm(msgId, resend, automatic = true) {
         if (isOnline && !isOnline()) {
-            pending.set(msgId, { timer: null, resend, waiting: true, failed: false });
+            pending.set(msgId, { timer: null, resend, automatic, waiting: true, failed: false });
             _paintWaiting(_el(msgId));
             return;
         }
         const timer = setTimeout(() => _fail(msgId), CONFIRM_TIMEOUT_MS);
-        pending.set(msgId, { timer, resend, waiting: false, failed: false });
+        pending.set(msgId, { timer, resend, automatic, waiting: false, failed: false });
     }
 
     // Register an optimistic send. `resend` re-sends the original bytes.
-    function track(msgId, resend) {
+    function track(msgId, resend, { automatic = true } = {}) {
         if (!msgId) return;
         const prior = pending.get(msgId);
         if (prior) clearTimeout(prior.timer);
         settled.delete(msgId);
-        _arm(msgId, resend);
+        _arm(msgId, resend, automatic);
         _state(msgId, 'pending');
     }
 
@@ -194,7 +194,7 @@ export function createSendStatus({ isUncertain = () => false, isOnline, onRetry,
         if (resend) {
             try { resend(); } catch (_) { /* stays pending; timeout re-fails */ }
         }
-        _arm(msgId, resend);   // with nothing to resend it simply fails again on the timer
+        _arm(msgId, resend, pending.get(msgId)?.automatic !== false);   // with nothing to resend it simply fails again on the timer
     }
 
     // Connectivity is back: resend every send that failed or is still waiting.
@@ -202,7 +202,7 @@ export function createSendStatus({ isUncertain = () => false, isOnline, onRetry,
     function retryUndelivered() {
         let n = 0;
         for (const [msgId, rec] of [...pending]) {
-            if (!rec.failed && !rec.waiting) continue;
+            if (rec.automatic === false || (!rec.failed && !rec.waiting)) continue;
             _resend(msgId);
             n++;
         }
@@ -284,8 +284,12 @@ export function createSendStatus({ isUncertain = () => false, isOnline, onRetry,
         if (podUnsaved.has(msgId)) _paintPodNote(el, msgId);
     }
 
+    function forget(msgId) {
+        clearTimeout(pending.get(msgId)?.timer); pending.delete(msgId); podUnsaved.delete(msgId);
+    }
+
     return {
-        track, confirm, fail, retryLater, trackPodWrite, resumeWaiting,
+        track, confirm, forget, fail, retryLater, trackPodWrite, resumeWaiting,
         applyTo, retryUndelivered, isUndelivered, markPodUnsaved, podSaved,
     };
 }

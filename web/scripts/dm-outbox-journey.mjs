@@ -30,6 +30,18 @@ export async function dmOutboxJourney({ sender, receiver, openSender, openReceiv
             const input = document.getElementById('message-input'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true }));
         });
     }
+    async function reviewPending(id, { retry = false } = {}) {
+        await sender.evaluate(() => document.getElementById('settings-btn').click());
+        await sender.evaluate(() => document.querySelector('[data-settings-target="settings-sec-pending"]').click());
+        await sender.waitForFunction(id => document.querySelector(`[data-outbox-id="${id}"]`), { timeout: 10000 }, id);
+        const cancellable = await sender.evaluate(id => document.querySelector(`[data-outbox-id="${id}"]`).closest('li').querySelector('[data-outbox-action="cancel"]') !== null, id);
+        if (cancellable) throw Error('prepared pending send incorrectly offers cancellation');
+        if (retry) {
+            await sender.focus(`[data-outbox-id="${id}"][data-outbox-action="retry"]`);
+            await sender.keyboard.press('Enter');
+        }
+        await sender.evaluate(() => document.getElementById('settings-cancel-btn').click());
+    }
     const wire = [];
     const collect = value => {
         if (!value || typeof value !== 'object') return;
@@ -76,6 +88,7 @@ export async function dmOutboxJourney({ sender, receiver, openSender, openReceiv
         return { id: job.id, frames: !!job.frames, entries, timestamp: job.record.timestamp };
     }, text);
     id = before.id;
+    await reviewPending(id);
     if (before.frames || before.entries.some(entry => !entry)) throw Error('outbox interruption missed the atomic recovery window');
     if (await receiver.evaluate(text => document.getElementById('message-feed').textContent.includes(text), text)) throw Error('a frame left before prepared outbox persistence');
     // Hold restored jobs until acknowledgement loss is installed on the new page.
@@ -116,6 +129,7 @@ export async function dmOutboxJourney({ sender, receiver, openSender, openReceiv
             }
             window.__releaseOutboxWrites = true;
         }, id);
+        await reviewPending(id, { retry: true });
         for (let attempt = 0; attempt < 50; attempt++) {
             await receiver.evaluate(() => window.proxionWebDm?.drainOnce() || window.proxionCrossMode?.drainOnce());
             if (await receiver.evaluate(text => document.getElementById('message-feed').textContent.includes(text), text)) break;
@@ -146,5 +160,5 @@ export async function dmOutboxJourney({ sender, receiver, openSender, openReceiv
         if (payload.timestamp && payload.timestamp !== before.timestamp) throw Error('retry changed the signed pod envelope timestamp');
     }
     sender.off('request', requestListener); await cdp.detach();
-    console.log(`  ✓ ${label}: prepared-write crash and lost acknowledgement survive reload with identical ciphertext and one received message`);
+    console.log(`  ✓ ${label}: pending review and keyboard retry survive a prepared-write crash and lost acknowledgement with identical ciphertext and one received message`);
 }

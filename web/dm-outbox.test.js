@@ -18,6 +18,7 @@ function harness() {
             if (!cipher.has(key)) cipher.set(key, { ciphertext: peer + '-ct', nonce: peer + '-nonce', msgNum: 0, pn: 0, ratchetPub: peer + '-ratchet' });
             return clone(cipher.get(key));
         }),
+        hasPendingDmSend: vi.fn(async (peer, id) => cipher.has(peer + id)),
         finishDmSend: vi.fn(async (peer, id, current) => { if (!current()) return false; cipher.delete(peer + id); return true; }),
     };
     const options = { e2e, getScope: () => scope, isActive: () => active,
@@ -159,4 +160,52 @@ it('abandons an old session generation even when the account/device scope is unc
     expect(h.disk.get(input.id).frames).toBeUndefined();
     expect(await engine.send(input.id)).toBe(true);
     expect(h.frames).toHaveLength(1);
+});
+
+describe('safe pending-send controls', () => {
+    it('keeps offline intents unencrypted and lets the user stop them', async () => {
+        const h = harness(); h.options.canSend = () => false; h.options.onCancelled = vi.fn();
+        const engine = h.engine(); await engine.queue(input);
+        expect(await engine.send(input.id)).toBe(false);
+        expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled();
+        expect(await engine.inspect()).toMatchObject([{ id: input.id, state: 'waiting', canCancel: true }]);
+        expect(await engine.cancel(input.id)).toBe(true); expect(h.options.onCancelled).toHaveBeenCalledWith(input.id);
+        expect(h.disk.size).toBe(0); expect(await engine.inspect()).toEqual([]);
+    });
+    it('refuses cancellation after interrupted preparation spent a key, without frames on disk', async () => {
+        const h = harness(), engine = h.engine(); await engine.queue(input);
+        h.e2e.saveDmSendJob.mockRejectedValueOnce(Error('prepare commit failed'));
+        expect(await engine.send(input.id)).toBe(false);
+        expect(h.disk.get(input.id).frames).toBeUndefined();
+        expect((await engine.inspect())[0].canCancel).toBe(false);
+        expect(await engine.cancel(input.id)).toBe(false); expect(h.disk.size).toBe(1);
+        await engine.send(input.id); expect(h.frames[0].msg_num).toBe(0);
+    });
+    it('refuses to retarget a frozen device plan and retains prepared sends for exact retry', async () => {
+        const h = harness(); let plan = 'ready'; h.options.planStatus = () => plan;
+        const engine = h.engine(); await engine.queue(input); await engine.send(input.id);
+        const frame = clone(h.frames[0]); plan = 'changed';
+        expect((await engine.inspect())[0]).toMatchObject({ state: 'attention', canCancel: false });
+        expect(await engine.cancel(input.id)).toBe(false); expect(await engine.send(input.id)).toBe(false);
+        expect(h.frames).toHaveLength(1); plan = 'ready'; await engine.send(input.id);
+        expect(h.frames[1]).toEqual(frame); expect(h.e2e.ratchetEncrypt).toHaveBeenCalledTimes(1);
+    });
+    it('serializes concurrent intent creation against the queue capacity', async () => {
+        const h = harness(), engine = h.engine();
+        for (let i = 0; i < 127; i++) h.disk.set('old' + i, { scope: 'alice/device', id: 'old' + i });
+        const second = clone(input); second.id = 'message-2'; second.record.message_id = second.id;
+        const results = await Promise.allSettled([engine.queue(input), engine.queue(second)]);
+        expect(results.map(row => row.status)).toEqual(['fulfilled', 'rejected']); expect(h.disk.size).toBe(128);
+    });
+    it('waits for active preparation before deciding whether cancellation is safe', async () => {
+        const h = harness(), engine = h.engine(); await engine.queue(input);
+        let release, started;
+        const waiting = new Promise(resolve => { release = resolve; });
+        const entered = new Promise(resolve => { started = resolve; });
+        const encrypt = h.e2e.ratchetEncrypt.getMockImplementation();
+        h.e2e.ratchetEncrypt.mockImplementationOnce(async (...args) => { started(); await waiting; return encrypt(...args); });
+        const sending = engine.send(input.id); await entered;
+        const cancelling = engine.cancel(input.id); release(); await sending;
+        expect(await cancelling).toBe(false); expect(h.disk.size).toBe(1);
+    });
 });

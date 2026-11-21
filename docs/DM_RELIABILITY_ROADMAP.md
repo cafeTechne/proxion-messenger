@@ -36,10 +36,10 @@ Rounds 136–140 address the retained limits in this order:
 | --- | --- |
 | 136 | Complete: accepted offline-device queues persist across restart. See [closeout](ROUND_136_CLOSEOUT.md). |
 | 137 | Complete: account/session isolation. See [closeout](ROUND_137_CLOSEOUT.md). |
-| 138 | Expose pending sends and provide safe retry, discard and recipient-change handling. |
+| 138 | Complete: pending-send review and safe controls. See [closeout](ROUND_138_CLOSEOUT.md). |
 | 139 | Track and recover sender self-sync independently of primary delivery. |
 | 140 | Extend stable encrypted outbox delivery to existing DM media flows. |
 
 See [the five bounded plans](PLANNED_ROUNDS_136_140.md) for dependencies,
-acceptance tests, likely code areas and explicit exclusions. Rounds 136–137 are
-complete; 138–140 remain planned. Earlier completed-round scope is unchanged.
+acceptance tests, likely code areas and explicit exclusions. Rounds 136–138 are
+complete; 139–140 remain planned. Earlier completed-round scope is unchanged.

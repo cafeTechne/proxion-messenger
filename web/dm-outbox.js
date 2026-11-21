@@ -3,8 +3,9 @@ import { dmEnvelopeFingerprint } from './dm-receipts.js';
 // A frozen send plan precedes every ratchet advance. Per-peer pendingSends then
 // bridge a crash between encryption and saving the fully prepared wire frames.
 export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActive = () => true, send,
-    persistMessage, clearDelivery, canSend = () => true, onPending = () => {}, onConfirmed = () => {},
+    persistMessage, clearDelivery, canSend = () => true, planStatus = () => 'ready', onCancelled = () => {}, onPending = () => {}, onConfirmed = () => {},
     onError = err => console.warn('[dm-outbox] pending:', err), now = Date.now }) {
+    const failures = new Set();
     const jobs = new Map(), queues = new Map(), notified = new Set(), settled = new Set(), attempts = new Map();
     let generation = 0, timer = null, restoring = null;
     const context = () => {
@@ -55,7 +56,19 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         if (settled.size > 512) settled.delete(settled.values().next().value);
         return true;
     }
-    async function queue(input) {
+    const intentQueues = new Map();
+    function queue(input) {
+        const ctx = context();
+        const key = JSON.stringify([ctx.scope, generation, getGeneration()]);
+        const run = (intentQueues.get(key) || Promise.resolve()).catch(() => {}).then(() => {
+            if (!ctx.current()) throw Error('Send context changed');
+            return queueIntent(input);
+        });
+        intentQueues.set(key, run);
+        run.finally(() => { if (intentQueues.get(key) === run) intentQueues.delete(key); }).catch(() => {});
+        return run;
+    }
+    async function queueIntent(input) {
         const ctx = context();
         if (!ctx.current()) throw Error('Send context changed');
         const existing = (await e2e.listDmSendJobs()).filter(job => job.scope === ctx.scope);
@@ -81,6 +94,8 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             if (job.confirmed) return cleanup(job, ctx);
             if (!force && attempts.has(id) && now() - attempts.get(id) < 18000) return false;
             try {
+                if (!canSend(job) || planStatus(job) !== 'ready') return false;
+                failures.delete(id);
                 let ready = job;
                 if (!job.frames) {
                     const encrypted = [];
@@ -100,7 +115,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                     await send(JSON.parse(JSON.stringify(frame)));
                 }
                 return true; // transmitted/queued is still not delivery confirmation
-            } catch (err) { onError(err); return false; }
+            } catch (err) { if (ctx.current()) failures.add(id); onError(err); return false; }
         });
     }
     function validEvidence(job, evidence) {
@@ -121,6 +136,51 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 await cleanup(confirmed, ctx);
                 return true;
             } catch (err) { onError(err); return false; }
+        });
+    }
+    async function inspect() {
+        const ctx = context();
+        if (!ctx.current()) return [];
+        const snapshots = await e2e.listDmSendJobs();
+        if (!ctx.current()) return [];
+        const rows = [];
+        for (const snapshot of snapshots) {
+            if (snapshot.scope !== ctx.scope || settled.has(snapshot.id)) continue;
+            const live = jobs.get(snapshot.id);
+            const stage = job => job.confirmed ? 2 : job.frames ? 1 : 0;
+            const job = live && stage(live) >= stage(snapshot) ? live : snapshot;
+            jobs.set(job.id, job);
+            let canCancel = !job.frames && !job.confirmed && !!e2e.hasPendingDmSend;
+            if (canCancel) for (const entry of job.entries) {
+                if (await e2e.hasPendingDmSend(entry.peerId, job.sendId)) { canCancel = false; break; }
+            }
+            if (!ctx.current()) return [];
+            if (settled.has(job.id)) continue;
+            // A live prepare/confirmation can overtake the scan's read awaits.
+            const latest = jobs.get(job.id) || job;
+            if (latest.frames || latest.confirmed) canCancel = false;
+            const plan = planStatus(latest);
+            const state = latest.confirmed ? 'cleanup' : plan === 'changed' ? 'attention'
+                : failures.has(job.id) ? 'storage' : !canSend(latest) || plan !== 'ready' ? 'waiting'
+                    : latest.frames ? 'confirmation' : 'waiting';
+            rows.push({ id: latest.id, peer: latest.peer, timestamp: latest.record.timestamp, state, canCancel });
+        }
+        return rows;
+    }
+    function cancel(id) {
+        const ctx = context();
+        return serialized(id, async () => {
+            if (!ctx.current()) return false;
+            const job = jobs.get(id) || (await e2e.listDmSendJobs()).find(row => row.id === id && row.scope === ctx.scope);
+            if (!ctx.current() || !job || job.frames || job.confirmed || !e2e.hasPendingDmSend) return false;
+            for (const entry of job.entries) {
+                if (!ctx.current() || await e2e.hasPendingDmSend(entry.peerId, job.sendId)) return false;
+            }
+            if (!ctx.current() || await e2e.removeDmSendJob(id, ctx.current) === false || !ctx.current()) return false;
+            settled.add(id); if (settled.size > 512) settled.delete(settled.values().next().value);
+            jobs.delete(id); notified.delete(id); attempts.delete(id); failures.delete(id);
+            onCancelled(id);
+            return true;
         });
     }
     function restore({ force = false } = {}) {
@@ -148,13 +208,13 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         return run;
     }
     return {
-        queue, send: transmit, confirm, restore,
+        queue, send: transmit, confirm, restore, inspect, cancel,
         has: id => jobs.has(id) && jobs.get(id).scope === getScope(),
         record: id => jobs.get(id)?.scope === getScope() ? jobs.get(id).record : null,
         start() {
             if (!timer) timer = setInterval(() => restore().catch(onError), 5000);
             return restore({ force: true }).catch(onError);
         },
-        stop() { generation++; if (timer) clearInterval(timer); timer = null; jobs.clear(); notified.clear(); settled.clear(); attempts.clear(); restoring = null; },
+        stop() { generation++; if (timer) clearInterval(timer); timer = null; jobs.clear(); intentQueues.clear(); failures.clear(); notified.clear(); settled.clear(); attempts.clear(); restoring = null; },
     };
 }

@@ -359,3 +359,14 @@ describe('state across a redraw', () => {
         expect(onPodRetry).toHaveBeenCalledWith('p8');
     });
 });
+
+it('requires a manual gesture for legacy history-only resend review, including after reconnect', () => {
+    const ss = createSendStatus({ isOnline: () => false }), review = vi.fn();
+    els['msg-legacy'] = mkMsgEl(); ss.track('legacy', review, { automatic: false });
+    expect(ss.retryUndelivered()).toBe(0); ss.resumeWaiting(); vi.advanceTimersByTime(18000);
+    expect(ss.retryUndelivered()).toBe(0); expect(review).not.toHaveBeenCalled();
+    const note = els['msg-legacy']._children.find(child => child.className === 'msg-fail-note');
+    note._kids.find(child => child.className === 'msg-retry-btn')._on(); expect(review).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(18000); expect(ss.retryUndelivered()).toBe(0);
+    ss.forget('legacy'); expect(ss.isUndelivered('legacy')).toBe(false);
+});

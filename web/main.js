@@ -1,7 +1,7 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, authContext, takeAuthError, reauthIssuer } from './auth.js';
 import {
     initE2E, setE2EActivityCheck, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
-    ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
+    ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend, cachedPeerPub, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
@@ -61,6 +61,7 @@ import { createDmMedia, deliverDmMedia, forwardDmMedia } from './dm-media.js';
 import { createDmReceiptStore } from './dm-receipts.js';
 import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receive.js';
 import { createDmOutbox } from './dm-outbox.js';
+import { createDmOutboxUi } from './dm-outbox-ui.js';
 import { createAssetInventoryUi } from './asset-inventory-ui.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
@@ -854,12 +855,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         });
         const _outgoingScope = () => JSON.stringify(['outgoing', selfWebId || clientDid, clientDid, e2eScopedKey('')]);
         const _dmOutbox = createDmOutbox({
-            e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob },
+            e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
             getScope: _outgoingScope, getGeneration: () => authContext().epoch, isActive: () => !!clientDid && tabLock.isLeader(),
             send: frame => socketSendOrQueue(frame),
-            canSend: job => transport.mode === 'web' ? !!solidSession.info.isLoggedIn
+            canSend: job => transport.mode === 'web' ? !!solidSession.info.isLoggedIn && navigator.onLine !== false
                 : job.route.cmd === 'local_dm' && isDmPeerWebId(job.route.target_webid)
                     ? !!crossMode?.isReady() : !!socket && socket.readyState === WebSocket.OPEN,
+            planStatus: job => _frozenDmPlanStatus(job),
+            onCancelled: id => { _undeliveredDms.delete(id); sendStatus.forget(id); deleteForMeLocal(id); },
             persistMessage: record => dmHistorySave(record, { delivery: 'pending', outbox: true }),
             clearDelivery: id => dmHistorySetDelivery(id, null),
             onPending: job => {
@@ -869,6 +872,34 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             },
             onConfirmed: id => { _undeliveredDms.delete(id); sendStatus.confirm(id, { known: true }); },
         });
+        const _rosterRequested = new Map();
+        function _frozenDmPlanStatus(job) {
+            for (const entry of job.entries) {
+                if (entry.primary) {
+                    const pub = cachedPeerPub(entry.peerId);
+                    if (entry.pub && pub && entry.pub !== pub) return 'changed';
+                } else {
+                    const roster = _peerDeviceKeys[entry.account];
+                    if (socket?.readyState === WebSocket.OPEN && Date.now() - (_rosterRequested.get(entry.account) || 0) > 5000) {
+                        _rosterRequested.set(entry.account, Date.now());
+                        socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: entry.account }));
+                    }
+                    if (!roster) return 'waiting';
+                    if (!roster.some(device => device.device_id === entry.device && device.pub_b64u === entry.pub)) return 'changed';
+                }
+            }
+            return 'ready';
+        }
+        const _pendingSendsUi = createDmOutboxUi({ outbox: _dmOutbox,
+            getScope: () => JSON.stringify([_outgoingScope(), authContext().epoch]),
+            isActive: () => tabLock.isLeader() && (!boundWebId() || authContext().authenticated),
+            getName: id => resolvePeerName(id) || id,
+            getLegacy: () => [..._undeliveredDms.values()].filter(record => !record.outbox_id && record.from_webid === selfWebId),
+            reviewLegacy: id => _resendStoredDm(_undeliveredDms.get(id)),
+        });
+        for (const event of ['login', 'logout', 'sessionExpired', 'sessionRestore']) {
+            solidSession.events?.on(event, () => _pendingSendsUi.reset());
+        }
         function _confirmDmSend(id, evidence) {
             if (!_dmOutbox.has(id)) { sendStatus.confirm(id); return; }
             _dmOutbox.confirm(id, evidence).catch(err => console.warn('[dm-outbox] confirmation pending:', err));
@@ -1183,6 +1214,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // its state, hand the unsent commands to the new tab, then reload into
         // the "open in another tab" notice so no timer or watcher keeps running.
         tabLock.onStepDown(async () => {
+            _pendingSendsUi.reset();
             _gatewayReceives.stop();
             _dmOutbox.stop();
             const queued = stopConnection();
@@ -1868,6 +1900,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             } catch (_) {}
             document.getElementById("settings-modal").style.display = "flex";
             _assetInventory?.reset(); _assetInventory?.sync();
+            _pendingSendsUi.refresh();
             // G1: always open with Advanced collapsed (openSettingsToPod re-expands it).
             document.getElementById("settings-advanced").style.display = "none";
             document.getElementById("settings-advanced-toggle").setAttribute("aria-expanded", "false");
@@ -6105,31 +6138,18 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             return false;
         }
 
-        // New sends retry their encrypted outbox verbatim. Only legacy browser
-        // cache rows predating the outbox use the older reconstruction path;
-        // their original ciphertext was never saved and cannot be recovered.
+        // A legacy history row has no saved ciphertext. Review it manually in
+        // the composer; pressing Send creates a fresh id and a new frozen plan.
         async function _resendStoredDm(rec) {
             if (rec?.outbox_id) return _dmOutbox.send(rec.outbox_id);
-            const peer = rec && rec.thread_id;
-            if (!peer || !isDmPeerWebId(peer) || typeof rec.content !== 'string') return;
-            try {
-                if (identity.devicesForPeer(peer).length >= 2
-                    && await _tryDmFanout(peer, rec.content, rec.message_id, rec.reply_to_id, rec.thread_id)) return;
-                const payload = { cmd: 'local_dm', target_webid: peer, content: rec.content,
-                    thread_id: rec.thread_id, message_id: rec.message_id };
-                if (rec.reply_to_id) payload.reply_to_id = rec.reply_to_id;
-                const myPub = myX25519PubB64u();
-                if (myPub) payload.x25519_pub = myPub;
-                if (isE2EEnabled(peer)) {
-                    const enc = await ratchetEncrypt(peer, rec.content);
-                    socketSendOrQueue({ ...payload, content: enc.ciphertext, e2e: true,
-                        nonce: enc.nonce, msg_num: enc.msgNum, pn: enc.pn, ratchet_pub: enc.ratchetPub });
-                } else if (isPlaintextOptedIn(peer)) {
-                    socketSendOrQueue(payload);
-                }
-            } catch (err) {
-                console.warn('[dm] resend failed:', err);
-            }
+            if (!rec || typeof rec.content !== 'string') return;
+            const scope = _outgoingScope(), epoch = authContext().epoch;
+            showConfirm(t('outbox.legacyConfirm'), () => {
+                if (scope !== _outgoingScope() || epoch !== authContext().epoch) return;
+                const input = document.getElementById('message-input');
+                if (!input || input.value || activeView?.id !== rec.thread_id) { showToast(t('outbox.openOriginal')); return; }
+                input.value = rec.content; input.dispatchEvent(new Event('input')); input.focus();
+            });
         }
 
         // Browser build, after a reload: our DMs the last session never saw
@@ -6142,8 +6162,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 // registration happened; do not let render order suppress it.
                 if (rec.from_webid !== selfWebId || _undeliveredDms.has(rec.message_id)) continue;
                 _undeliveredDms.set(rec.message_id, rec);
-                sendStatus.track(rec.message_id, () => _resendStoredDm(rec));
-                if (_podHealth && _podHealth.state() === 'ok') _resendStoredDm(rec);
+                sendStatus.track(rec.message_id, () => _resendStoredDm(rec), { automatic: false });
             }
         }
 
@@ -6228,7 +6247,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             const input = document.getElementById("message-input");
             const content = input.value.trim();
             if (!socket || !activeView || !content) return;
-            const draft = input.value;
+            const draft = input.value, composeScope = _outgoingScope();
             _sendInFlight = true;
             // First send is the moment replies start to matter: ask then, inside
             // the user's gesture, not on load.
@@ -6242,9 +6261,13 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             try {
                 await _sendComposed(content);
             } catch (err) {
+                if (composeScope !== _outgoingScope()) return;
                 if (!input.value) input.value = draft;
                 if (err instanceof DmKeyMissingError) _explainMissingKey(err);
-                else console.warn('[send] failed:', err);
+                else {
+                    console.warn('[send] failed:', err);
+                    if (activeView?.type === 'dm' || activeView?.type === 'local_dm') showToast(t('outbox.saveFailed'), 'error');
+                }
             } finally {
                 _sendInFlight = false;
             }
@@ -6375,7 +6398,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     const mode = peerDevs.length >= 2 ? 'fanout' : 'single';
                     const entries = mode === 'fanout' ? peerDevs.map(dev => ({
                         peerId: _dmPeer + '#' + dev.device_id, account: _dmPeer, device: dev.device_id, pub: dev.pub_b64u,
-                    })) : [{ peerId: _e2ePlainTarget, account: _dmPeer, primary: true }];
+                    })) : [{ peerId: _e2ePlainTarget, account: _dmPeer, primary: true, pub: cachedPeerPub(_e2ePlainTarget) }];
                     for (const dev of ownDevs) entries.push({ peerId: _sendActor + '#' + dev.device_id,
                         account: _sendActor, device: dev.device_id, pub: dev.pub_b64u });
                     await _dmOutbox.queue({ id: clientMsgId, peer: _dmPeer, actor: _sendActor, device: _sendDevice,
@@ -8402,6 +8425,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // Disconnect from the CSS/Solid pod without touching the local identity key or
             // room/message history. The user's DID, display name, and all rooms are preserved.
             async function _signOutOfPod() {
+                _pendingSendsUi.reset();
                 _assetInventory?.reset();
                 // Browser build: there is no gateway holding pod credentials. End
                 // the Solid session, forget this account here, and reload to the
