@@ -64,14 +64,12 @@ async def test_relay_queue_survives_a_failed_drain(gw):
 @pytest.mark.asyncio
 async def test_fanout_queue_survives_a_failed_drain(gw):
     key = (DID, DID)
-    gw._fanout_queue[key] = [
-        {"message_id": f"f{i}", "from_webid": "did:key:zPeer", "payload": {"e2e": True}}
-        for i in range(2)
-    ]
+    for i in range(2):
+        assert gw._queue_fanout_envelope(f"f{i}", "did:key:zPeer", *key, {"e2e": True})
     await _register(gw, _ws(fail_types=("dm_fanout",)))
-    assert [e["message_id"] for e in gw._fanout_queue.get(key, [])] == ["f0", "f1"]
+    assert [e["message_id"] for e in gw._store.pending_device_fanout(*key)] == ["f0", "f1"]
 
     good = _ws()
     await _register(gw, good)
     assert [e["message_id"] for e in good.sent if e.get("type") == "dm_fanout"] == ["f0", "f1"]
-    assert not gw._fanout_queue.get(key)
+    assert not gw._store.pending_device_fanout(*key)

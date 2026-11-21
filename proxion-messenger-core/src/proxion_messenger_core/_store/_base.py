@@ -254,7 +254,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 65
+    _SCHEMA_VERSION = 66
     _integrity_ok: bool = True
     _migration_error: str = ""
     def _init_db(self) -> None:
@@ -1649,6 +1649,21 @@ class _StoreBase(object):
                     via         TEXT NOT NULL DEFAULT '',
                     added_at    REAL NOT NULL
                 )""",
+            ],
+            # 66: accepted offline device fanout must survive gateway restart.
+            [
+                """CREATE TABLE pending_device_fanout (
+                    queue_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_webid TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    to_webid TEXT NOT NULL,
+                    to_device_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    byte_count INTEGER NOT NULL,
+                    created_at REAL NOT NULL,
+                    UNIQUE(from_webid, message_id, to_webid, to_device_id)
+                )""",
+                "CREATE INDEX pending_device_fanout_recipient ON pending_device_fanout(to_webid, to_device_id, queue_id)",
             ],
         ]
 

@@ -1,6 +1,6 @@
 # Planned rounds 136–140
 
-Status: planning only. Implementation has not started. Rounds 130–135 remain
+Status: Round 136 complete; Rounds 137–140 remain planned. Rounds 130–135 remain
 closed; the limitations recorded in their closeouts are inputs to new work,
 not additions to those completed rounds.
 
@@ -33,7 +33,7 @@ with the repository's existing ignored planning-file convention.
 
 ## Round 136: durable gateway offline-device queues
 
-Status: planned. Depends on completed Round 135. Rounds 130–135 remain closed.
+Status: complete. See [Round 136 closeout](ROUND_136_CLOSEOUT.md). Rounds 130–135 remain closed.
 
 ### Problem and result
 
@@ -44,21 +44,21 @@ queue before acknowledging acceptance and resume delivery after restart.
 
 ### Bounded work
 
-- [ ] Add versioned durable storage for local and relayed device-addressed fanout
+- [x] Add versioned durable storage for local and relayed device-addressed fanout
   envelopes, keyed by authenticated sender, logical message id and recipient
   account/device. Keep payloads opaque ciphertext and scope reads/deletes to the
   owning recipient/device.
-- [ ] Commit queue acceptance before including a target in `delivered` or
+- [x] Commit queue acceptance before including a target in `delivered` or
   returning relay success. Storage failure/full capacity must preserve sender
   retries; never evict an accepted pending entry to admit another.
-- [ ] Resume bounded, ordered draining on device registration and gateway
+- [x] Resume bounded, ordered draining on device registration and gateway
   restart. Define the lease/retry/removal boundary explicitly; reclaim interrupted
   drains without changing ciphertext or suppressing an unaccepted relay retry.
-- [ ] Deduplicate exact queued retries. Define handling of the same identity/id
+- [x] Deduplicate exact queued retries. Define handling of the same identity/id
   with different payloads; do not silently replace accepted ciphertext.
-- [ ] Apply existing block, revocation, account deletion, retention and capacity
+- [x] Apply existing block, revocation, account deletion, retention and capacity
   rules to stored queues, including cleanup and authorization on delivery.
-- [ ] Document acknowledgement as gateway/queue acceptance. A successful socket
+- [x] Document acknowledgement as gateway/queue acceptance. A successful socket
   write is not a read receipt or proof of durable client storage.
 
 ### Acceptance and validation

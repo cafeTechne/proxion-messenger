@@ -410,6 +410,7 @@ class DeviceStoreMixin(object):
             if device_id.startswith('did:key:'):
                 self.mark_revoked(f'device:{device_id}', device_id)
                 self.delete_device_e2e_key(owner_webid, device_id)
+            conn.execute("DELETE FROM pending_device_fanout WHERE to_webid=? AND to_device_id=?", (owner_webid, device_id))
             conn.execute("DELETE FROM device_registrations WHERE device_id=? AND owner_webid=?", (device_id, owner_webid))
         return True
 

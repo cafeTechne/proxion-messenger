@@ -86,7 +86,7 @@ async def test_offline_account_envelope_queued_pushed_and_drained(gateway, noaut
     await _register(gateway, ws_s, _did(sender))
     await _send_fanout(gateway, ws_s, "m-off-1", recipient, recipient, "CIPHER")
 
-    assert (recipient, recipient) in gateway._fanout_queue, "envelope must be queued for the offline device"
+    assert gateway._store.pending_device_fanout(recipient, recipient), "envelope must be queued for the offline device"
     assert sends, "the offline account must be web-pushed"
 
     # Recipient's device comes back — the queued envelope is delivered.
@@ -95,7 +95,7 @@ async def test_offline_account_envelope_queued_pushed_and_drained(gateway, noaut
     evs = _events(ws_r, "dm_fanout")
     assert evs and evs[0]["message_id"] == "m-off-1"
     assert evs[0]["payload"]["content"] == "CIPHER"
-    assert (recipient, recipient) not in gateway._fanout_queue, "queue must be drained"
+    assert not gateway._store.pending_device_fanout(recipient, recipient), "queue must be drained"
 
 
 @pytest.mark.asyncio
@@ -132,7 +132,7 @@ async def test_offline_sibling_device_queued_while_primary_online(gateway, noaut
 
     prim = _events(ws_primary, "dm_fanout")
     assert {e["to_device_id"] for e in prim} == {account_did}, "primary gets only its envelope"
-    assert (account_did, device_did) in gateway._fanout_queue, "offline device's envelope must be queued"
+    assert gateway._store.pending_device_fanout(account_did, device_did), "offline device's envelope must be queued"
     assert not sends, "no push while a device of the account is online"
 
     ws_dev = _mock_ws()
@@ -165,7 +165,7 @@ async def test_relayed_fanout_to_offline_device_queued(gateway, monkeypatch):
         "relay_nonce": nonce, "signature": sig, "message_scope": "dm-fanout",
     }).encode())
     assert status.startswith("200")
-    assert (to_webid, "did:key:zDev") in gateway._fanout_queue
+    assert gateway._store.pending_device_fanout(to_webid, "did:key:zDev")
 
 
 @pytest.mark.asyncio
@@ -186,7 +186,7 @@ async def test_offline_push_respects_mute(gateway, noauth_env, monkeypatch):
     await _register(gateway, ws_s, sender_did)
     await _send_fanout(gateway, ws_s, "m-mute-1", recipient, recipient, "X")
     assert not sends, "muted sender must not trigger offline push"
-    assert (recipient, recipient) in gateway._fanout_queue, "but the envelope still queues"
+    assert gateway._store.pending_device_fanout(recipient, recipient), "but the envelope still queues"
 
 
 @pytest.mark.asyncio
@@ -207,8 +207,132 @@ async def test_full_relay_queue_refuses_without_spending_replay_id(gateway):
     status, _ = await gateway._handle_relay_post(json.dumps(data).encode())
     assert status.startswith("503")
     assert not gateway._store.has_seen_relay_id(f"{from_did}:{transport_id}")
-    gateway._fanout_queue[(recipient, device)].pop(0)
+    gateway._store.remove_device_fanout(recipient, device, gateway._store.pending_device_fanout(recipient, device)[0]["queue_id"])
     status, _ = await gateway._handle_relay_post(json.dumps(data).encode())
     assert status.startswith("200")
     assert gateway._store.has_seen_relay_id(f"{from_did}:{transport_id}")
-    assert len(gateway._fanout_queue[(recipient, device)]) == 100
+    assert len(gateway._store.pending_device_fanout(recipient, device)) == 100
+
+
+def _restart(gateway):
+    """Reopen the same database with the same gateway identity; no RAM queue."""
+    gateway._store.close()
+    return ProxionGateway(agent=gateway.agent, dm_clients={}, room_memberships={}, config=gateway.config)
+
+
+@pytest.mark.asyncio
+async def test_acknowledged_offline_message_survives_gateway_restart(gateway, noauth_env):
+    sender, recipient = _did(Ed25519PrivateKey.generate()), _did(Ed25519PrivateKey.generate())
+    ws_s = _mock_ws()
+    await _register(gateway, ws_s, sender)
+    await _send_fanout(gateway, ws_s, "durable", recipient, recipient, "EXACT-CIPHER")
+    assert _events(ws_s, "send_dm_fanout_ack")[-1]["delivered"]
+    reopened = _restart(gateway)
+    try:
+        ws_r = _mock_ws()
+        await _register(reopened, ws_r, recipient)
+        assert _events(ws_r, "dm_fanout")[0]["payload"]["content"] == "EXACT-CIPHER"
+        assert reopened._store.pending_device_fanout(recipient, recipient) == []
+    finally:
+        reopened._store.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_acceptance_failure_never_acknowledges(gateway, noauth_env):
+    ws_s = _mock_ws()
+    await _register(gateway, ws_s, _did(Ed25519PrivateKey.generate()))
+    with gateway._store._conn() as conn:
+        conn.execute("CREATE TRIGGER queue_failure BEFORE INSERT ON pending_device_fanout BEGIN SELECT RAISE(ABORT,'disk full'); END")
+    recipient = _did(Ed25519PrivateKey.generate())
+    await _send_fanout(gateway, ws_s, "uncommitted", recipient, recipient, "CIPHER")
+    assert _events(ws_s, "send_dm_fanout_ack")[-1]["delivered"] == []
+    assert gateway._store.pending_device_fanout(recipient, recipient) == []
+
+
+@pytest.mark.asyncio
+async def test_crash_after_commit_before_ack_is_exactly_retryable(gateway, noauth_env):
+    sender, recipient = _did(Ed25519PrivateKey.generate()), _did(Ed25519PrivateKey.generate())
+    ws = _mock_ws()
+    await _register(gateway, ws, sender)
+    ws.send.side_effect = ConnectionError("lost ack")
+    data = {"message_id": "lost-ack", "fanout": [{"to_webid": recipient,
+        "to_device_id": recipient, "payload": {"content": "CIPHER"}}]}
+    with pytest.raises(ConnectionError):
+        await gateway._handle_send_dm_fanout(ws, data)
+    reopened = _restart(gateway)
+    try:
+        ws_retry = _mock_ws()
+        await _register(reopened, ws_retry, sender)
+        await reopened._handle_send_dm_fanout(ws_retry, data)
+        assert len(reopened._store.pending_device_fanout(recipient, recipient)) == 1
+        assert _events(ws_retry, "send_dm_fanout_ack")[-1]["delivered"]
+    finally:
+        reopened._store.close()
+
+
+@pytest.mark.asyncio
+async def test_crash_after_socket_write_replays_same_envelope_until_removal(gateway, noauth_env, monkeypatch):
+    recipient = _did(Ed25519PrivateKey.generate())
+    assert gateway._queue_fanout_envelope("write-before-remove", "sender", recipient, recipient, {"content": "CIPHER"})
+    monkeypatch.setattr(gateway._store, "remove_device_fanout", lambda *args: (_ for _ in ()).throw(OSError("crash")))
+    first = _mock_ws()
+    await _register(gateway, first, recipient)
+    assert len(gateway._store.pending_device_fanout(recipient, recipient)) == 1
+    first_envelope = _events(first, "dm_fanout")[0]
+    reopened = _restart(gateway)
+    try:
+        second = _mock_ws()
+        await _register(reopened, second, recipient)
+        assert _events(second, "dm_fanout")[0] == first_envelope
+        assert reopened._store.pending_device_fanout(recipient, recipient) == []
+    finally:
+        reopened._store.close()
+
+
+@pytest.mark.asyncio
+async def test_account_cleanup_during_queue_read_does_not_deliver_stale_rows(gateway, noauth_env, monkeypatch):
+    recipient = _did(Ed25519PrivateKey.generate())
+    assert gateway._queue_fanout_envelope("deleted", "sender", recipient, recipient, {"content": "CIPHER"})
+    read = gateway._store.pending_device_fanout
+
+    def read_then_delete(owner, device):
+        rows = read(owner, device)
+        gateway._store.delete_account_data("sender")
+        return rows
+
+    monkeypatch.setattr(gateway._store, "pending_device_fanout", read_then_delete)
+    receiver = _mock_ws()
+    await _register(gateway, receiver, recipient)
+    assert _events(receiver, "dm_fanout") == []
+
+
+def test_no_persistent_store_cannot_acknowledge_offline_acceptance(gateway):
+    original = gateway._store
+    try:
+        gateway._store = None
+        assert not gateway._queue_fanout_envelope("m", "s", "o", "d", {"content": "C"})
+    finally:
+        gateway._store = original
+
+
+@pytest.mark.asyncio
+async def test_gateway_alias_queue_drains_only_under_recorded_device_owner(gateway, noauth_env):
+    owner, device = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+    owner_id, device_id = _did(owner), _did(device)
+    cert = issue_device_cert(owner, device_id)
+    assert gateway._store.register_device(device_id, owner_id, "pub", "attestation")
+    assert gateway._queue_fanout_envelope("aliased", "sender", gateway._own_gateway_did(), device_id, {"content": "CIPHER"})
+    assert gateway._store.pending_device_fanout(gateway._own_gateway_did(), device_id) == []
+    assert gateway._store.pending_device_fanout(owner_id, device_id)
+    stranger = _mock_ws()
+    await _register(gateway, stranger, _did(Ed25519PrivateKey.generate()))
+    assert _events(stranger, "dm_fanout") == []
+    receiver = _mock_ws()
+    await _register(gateway, receiver, device_id, cert=cert)
+    assert _events(receiver, "dm_fanout")[0]["message_id"] == "aliased"
+    assert gateway._store.pending_device_fanout(owner_id, device_id) == []
+
+
+def test_unknown_gateway_alias_owner_is_not_accepted(gateway, monkeypatch):
+    monkeypatch.setattr(gateway._store, "get_relationship_owner", lambda _: None)
+    assert not gateway._queue_fanout_envelope("unknown", "sender", gateway._own_gateway_did(), "unknown-device", {"content": "C"})

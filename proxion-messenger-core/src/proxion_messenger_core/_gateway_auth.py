@@ -393,29 +393,33 @@ class AuthHandlerMixin:
             # offline (fanout has no server history — without this drain those
             # DMs were lost). The primary's device id is the account did.
             _dev_id = self._session_device_did.get(websocket) or identity
-            _fq = self._fanout_queue.pop((identity, _dev_id), [])
-            for _fi, _env in enumerate(_fq):
+            try:
+                _fq = self._store.pending_device_fanout(identity, _dev_id) if self._store else []
+            except Exception as exc:
+                logger.warning("durable fanout read failed: %s", exc)
+                _fq = []
+            for _env in _fq:
                 try:
-                    _wire = json.dumps({
-                        "type": "dm_fanout",
-                        "message_id": _env["message_id"],
-                        "from_webid": _env["from_webid"],
-                        "to_device_id": _dev_id,
+                    if self._is_blocked_for(identity, _env["from_webid"]):
+                        self._store.remove_device_fanout(identity, _dev_id, _env["queue_id"])
+                        continue
+                    if self._store.is_cert_revoked(f"device:{_dev_id}") or self._client_webids.get(websocket) != identity:
+                        break
+                    if not self._store.has_device_fanout(identity, _dev_id, _env["queue_id"]):
+                        continue  # removed by account/policy cleanup or another completed drain
+                    await websocket.send(json.dumps({
+                        "type": "dm_fanout", "message_id": _env["message_id"],
+                        "from_webid": _env["from_webid"], "to_device_id": _dev_id,
                         "payload": _env["payload"],
-                    })
-                except Exception:
-                    continue  # malformed entry: drop it
-                try:
-                    await websocket.send(_wire)
-                except Exception:
-                    self._fanout_queue[(identity, _dev_id)] = (
-                        _fq[_fi:] + self._fanout_queue.get((identity, _dev_id), []))
+                    }))
+                    # Peek, send, remove: a crash before removal replays exact
+                    # ciphertext. A successful socket write is the existing
+                    # acceptance boundary, not a client commit/read receipt.
+                    self._store.remove_device_fanout(identity, _dev_id, _env["queue_id"])
+                    self._store.mark_dm_delivered(_env["message_id"], identity, _dev_id)
+                except Exception as exc:
+                    logger.warning("durable fanout drain retained for retry: %s", exc)
                     break
-                if self._store:
-                    try:
-                        self._store.mark_dm_delivered(_env["message_id"], identity, _dev_id)
-                    except Exception:
-                        pass
             if gateway_url:
                 self._peer_gateway_urls[identity] = gateway_url
 

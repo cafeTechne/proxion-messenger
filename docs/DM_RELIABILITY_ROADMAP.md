@@ -1,4 +1,4 @@
-# DM reliability rounds 133–135
+# DM reliability roadmap: rounds 133–140
 
 These rounds are bounded reliability work. Rounds 130–132 stay closed.
 
@@ -28,18 +28,18 @@ database rewrite belongs to Round 135. Secondary sealed events and media sending
 remain separate unless an existing text-send dependency requires a narrow fix.
 
 
-## Next five rounds: planned only
+## Follow-up rounds 136–140
 
 Rounds 136–140 address the retained limits in this order:
 
 | Round | Scope |
 | --- | --- |
-| 136 | Persist accepted gateway offline-device queues across restart. |
+| 136 | Complete: accepted offline-device queues persist across restart. See [closeout](ROUND_136_CLOSEOUT.md). |
 | 137 | Bind the complete E2E identity/cache/queue lifecycle to its account/device. |
 | 138 | Expose pending sends and provide safe retry, discard and recipient-change handling. |
 | 139 | Track and recover sender self-sync independently of primary delivery. |
 | 140 | Extend stable encrypted outbox delivery to existing DM media flows. |
 
 See [the five bounded plans](PLANNED_ROUNDS_136_140.md) for dependencies,
-acceptance tests, likely code areas and explicit exclusions. None of these
-rounds has started; completed-round scope remains unchanged.
+acceptance tests, likely code areas and explicit exclusions. Round 136 is
+complete; 137–140 remain planned. Earlier completed-round scope is unchanged.

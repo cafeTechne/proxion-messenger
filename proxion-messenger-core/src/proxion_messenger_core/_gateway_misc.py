@@ -923,8 +923,6 @@ class MiscHandlerMixin:
         self._user_presence.pop(webid, None)
         self._relay_queue.pop(webid, None)
         self._did_pod_webids.pop(webid, None)
-        for key in [k for k in self._fanout_queue if k[0] == webid]:
-            self._fanout_queue.pop(key, None)
         try:
             self._store.save_security_event("account_deleted", "info", webid=webid,
                                             details=f"rows={sum(counts.values())}")

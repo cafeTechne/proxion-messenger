@@ -67,8 +67,21 @@ settles the send. Self-sync acknowledgements alone do not. Gateway fanout now
 queues failed socket writes, refuses full queues without evicting accepted
 entries, and only deduplicates inbound relay ids after acceptance. An unaccepted
 relay is retryable. Gateway acknowledgement means gateway/queue acceptance,
-not recipient reading; its existing local offline-device queue remains in memory.
-See [outgoing text storage](E2E_ENCRYPTION.md#111-durable-outgoing-text).
+not recipient reading. Schema 66 commits offline-device fanout to SQLite before
+acknowledgement, for local and relayed envelopes alike. Reads/removal are scoped
+to the registered account and device; gateway-DID aliases resolve through stored
+ownership rather than a broadcast fallback. Failed writes/removals retain rows;
+restart resumes registration draining. A write completed before removal may
+replay exact ciphertext, which existing client receipts suppress.
+
+The queue allows at most 100 entries per account/device, 500 distinct targets and
+32 MiB of logical payload/routing bytes. Exact retries reuse a slot; conflicting
+payloads cannot replace an accepted queued entry. Capacity/storage failures
+remain retryable. No automatic time expiry or drop-oldest eviction removes an
+accepted entry; delivery, explicit block/revocation or account deletion removes
+it. Offline acceptance requires a file-backed store. Socket-write success remains
+the acceptance boundary, not a durable-client/read acknowledgement.
+See [Round 136](ROUND_136_CLOSEOUT.md) and [outgoing text storage](E2E_ENCRYPTION.md#111-durable-outgoing-text).
 
 - **Works:** text DMs both ways, message requests for a first DM from a stranger,
   presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.

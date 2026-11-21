@@ -193,6 +193,8 @@ class SecurityStoreMixin(object):
                 "INSERT OR REPLACE INTO revocations (cert_id, peer_did, revoked_at) VALUES (?,?,?)",
                 (cert_id, peer_did, time.time()),
             )
+            if cert_id.startswith("device:"):
+                conn.execute("DELETE FROM pending_device_fanout WHERE to_device_id=?", (cert_id[len("device:"):],))
     def contact_revocation_cert_ids(self, peer_did: str) -> list:
         """The cert_ids of peer_did's contact revocations (never "device:" rows),
         i.e. the pod tombstones a re-add has to remove."""
@@ -870,6 +872,8 @@ class SecurityStoreMixin(object):
             return {}
         counts: dict = {}
         with self._conn() as conn:
+            counts["pending_device_fanout"] = conn.execute(
+                "DELETE FROM pending_device_fanout WHERE to_webid=? OR from_webid=?", (webid, webid)).rowcount
             threads = [r[0] for r in conn.execute(
                 "SELECT thread_id FROM dm_threads WHERE owner_webid = ?", (webid,)).fetchall()]
             for i in range(0, len(threads), 500):

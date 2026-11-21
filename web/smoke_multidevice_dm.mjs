@@ -22,7 +22,7 @@ import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 // Exit 0 = the four assertions above held. A non-zero exit with a specific step
 // tells us exactly which layer (pairing / federation / degradation / history) broke.
 import { existsSync, mkdtempSync, rmSync } from 'fs';
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import { createServer, connect } from 'net';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
@@ -73,19 +73,31 @@ async function startGateway(name) {
     PROXION_ALLOW_INSECURE_FEDERATION: '1',
     PROXION_LOG_LEVEL: process.env.PROXION_LOG_LEVEL || 'INFO',
   };
-  const p = spawn('python', ['scripts/run_test_gateway.py'], { cwd: REPO, env });
-  procs.push(p);
-  let log = '';
-  p._log = () => log;
-  p.stdout.on('data', d => log += d); p.stderr.on('data', d => log += d);
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline && !/PROXION_GATEWAY_READY/.test(log)) {
-    if (p.exitCode !== null) throw new Error(`${name} gateway exited:\n${log.slice(-600)}`);
-    await sleep(300);
-  }
-  if (!/PROXION_GATEWAY_READY/.test(log)) throw new Error(`${name} not ready:\n${log.slice(-600)}`);
-  await waitForPort(httpPort, 15000);
-  return { url: `http://127.0.0.1:${httpPort}/`, httpPort, wsPort };
+  let p;
+  const launch = async () => {
+    p = spawn('python', ['scripts/run_test_gateway.py'], { cwd: REPO, env });
+    procs.push(p);
+    let log = '';
+    p._log = () => log;
+    p.stdout.on('data', d => log += d); p.stderr.on('data', d => log += d);
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline && !/PROXION_GATEWAY_READY/.test(log)) {
+      if (p.exitCode !== null) throw new Error(`${name} gateway exited:\n${log.slice(-600)}`);
+      await sleep(300);
+    }
+    if (!/PROXION_GATEWAY_READY/.test(log)) throw new Error(`${name} not ready:\n${log.slice(-600)}`);
+    await waitForPort(httpPort, 15000);
+  };
+  await launch();
+  return { url: `http://127.0.0.1:${httpPort}/`, httpPort, wsPort,
+    queued: (owner, device) => Number(execFileSync('python', ['-c',
+      'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("SELECT COUNT(*) FROM pending_device_fanout WHERE to_webid=? AND to_device_id=?",sys.argv[2:]).fetchone()[0])',
+      join(dataDir, 'proxion.db'), owner, device], { encoding: 'utf8' }).trim()),
+    restart: async () => {
+      const exited = new Promise(resolve => p.once('exit', resolve));
+      p.kill('SIGKILL'); await exited; await launch();
+    },
+  };
 }
 
 const online = (page) => page.waitForFunction(
@@ -340,6 +352,33 @@ try {
   step = 'durable-fanout-outbox';
   await dmOutboxJourney({ sender: b, receiver: ap, openSender: () => openFirstDm(b, 'B'),
     openReceiver: () => openFirstDm(ap, 'A-primary'), label: 'gateway fanout outbox' });
+
+  // Accepted offline copies must survive loss of ALL gateway process memory.
+  for (const route of ['relayed peer', 'local self-sync']) {
+    step = 'durable-offline-' + route;
+    await ad.goto('about:blank'); await sleep(500);
+    const sender = route === 'relayed peer' ? b : ap;
+    const receiver = route === 'relayed peer' ? ap : b;
+    const text = 'offline-restart-' + route + '-' + Date.now();
+    await openFirstDm(sender, route + ' sender');
+    await sleep(1800); // let the existing device-roster lookup finish after reconnect
+    await sender.focus('#message-input'); await sender.type('#message-input', text); await sender.keyboard.press('Enter');
+    await receiver.waitForFunction(text => document.getElementById('message-feed')?.textContent.includes(text), { timeout: 20000 }, text);
+    for (let attempt = 0; attempt < 50 && A.queued(apDid, adDid) !== 1; attempt++) await sleep(100);
+    if (A.queued(apDid, adDid) !== 1) throw Error(route + ': accepted offline copy was not committed');
+    await A.restart();
+    await online(ap);
+    await ad.goto(A.url, { waitUntil: 'networkidle2' });
+    await ad.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
+    await online(ad); await openFirstDm(ad, route + ' recovered device');
+    await ad.waitForFunction(text => document.getElementById('message-feed')?.textContent.includes(text), { timeout: 20000 }, text);
+    if (A.queued(apDid, adDid) !== 0) throw Error(route + ': delivered row was not removed');
+    await ad.reload({ waitUntil: 'networkidle2' }); await online(ad); await openFirstDm(ad, route + ' history');
+    const count = await ad.evaluate(async text => (await (await import('./dmhistory.js')).dmHistorySearch(text)).filter(row => row.content === text).length, text);
+    if (count !== 1) throw Error(route + ': recovery did not retain one exact plaintext message');
+    console.log(`  ✓ ${route}: accepted offline fanout survives SIGKILL/restart and restores one readable device message`);
+    await openFirstDm(ap, 'A-primary after restart');
+  }
 
   // ── Revoke A-device from Settings > Linked devices: it must be signed out,
   // not just dropped from the list (it used to stay connected and reappear).

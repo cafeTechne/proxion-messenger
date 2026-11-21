@@ -1172,24 +1172,27 @@ class DmHandlerMixin:
 
     def _queue_fanout_envelope(self, message_id: str, from_webid: str,
                                to_webid: str, to_device_id: str, payload) -> bool:
-        """Hold an offline-device envelope without evicting accepted entries.
-
-        This existing queue is process-local. False applies sender backpressure;
-        exact retries share a slot instead of exhausting the queue.
-        """
-        if payload is None:
+        """Acknowledge offline acceptance only after the ciphertext is committed."""
+        if not self._store or str(self._store.db_path) == ":memory:":
             return False
-        key = (to_webid, to_device_id)
-        if key not in self._fanout_queue and len(self._fanout_queue) >= 500:
+        try:
+            owner = to_webid
+            if to_webid == self._own_gateway_did():
+                # Peers address the gateway alias, but registrations drain under
+                # the actual local account. Resolve from stored ownership, never
+                # by broadcasting a durable queue to arbitrary connected clients.
+                registered = self._store.get_device(to_device_id)
+                owner = registered.get("owner_webid") if registered else None
+                if not owner and to_device_id in getattr(self, "_owner_account_dids", ()):
+                    owner = to_device_id
+                if not owner:
+                    owner = self._store.get_relationship_owner(self._canonical_block_id(from_webid))
+                if not owner:
+                    return False
+            return self._store.enqueue_device_fanout(message_id, from_webid, owner, to_device_id, payload)
+        except Exception as exc:
+            logger.warning("durable fanout acceptance failed: %s", exc)
             return False
-        q = self._fanout_queue.setdefault(key, [])
-        row = {"message_id": message_id, "from_webid": from_webid, "payload": payload}
-        if row in q:
-            return True
-        if len(q) >= 100:
-            return False
-        q.append(row)
-        return True
 
     def _spawn_push_fanout(self, subs, payload: dict, vpk: str, vsub: str) -> None:
         """Start a web-push fan-out without waiting for it.

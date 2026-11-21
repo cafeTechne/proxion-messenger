@@ -45,6 +45,69 @@ def _rows_fit_pair(rows, a: str, b: str) -> bool:
 
 
 class DmStoreMixin(object):
+    # Accepted entries are never evicted for capacity. No automatic TTL: deletion
+    # requires delivery acceptance or an explicit block/revocation/account purge.
+    MAX_FANOUT_BYTES = 32 * 1024 * 1024
+
+    def enqueue_device_fanout(self, message_id: str, sender: str, owner: str,
+                              device: str, payload: dict) -> bool:
+        if (not all(isinstance(value, str) and 0 < len(value) <= 2048
+                    for value in (message_id, sender, owner, device))
+                or len(message_id) > 128 or not isinstance(payload, dict)):
+            return False
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        payload_bytes = len(encoded.encode("utf-8"))
+        if payload_bytes > 131072:
+            return False
+        size = payload_bytes + sum(len(value.encode("utf-8")) for value in (message_id, sender, owner, device))
+        with self._conn() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM blocks WHERE owner_webid=? AND blocked_webid=?", (owner, sender)).fetchone():
+                return False
+            if conn.execute("SELECT 1 FROM revocations WHERE cert_id=?", (f"device:{device}",)).fetchone():
+                return False
+            existing = conn.execute(
+                "SELECT payload_json FROM pending_device_fanout WHERE from_webid=? AND message_id=? AND to_webid=? AND to_device_id=?",
+                (sender, message_id, owner, device)).fetchone()
+            if existing:
+                return existing[0] == encoded  # id collision never replaces accepted ciphertext
+            count = conn.execute("SELECT COUNT(*) FROM pending_device_fanout WHERE to_webid=? AND to_device_id=?", (owner, device)).fetchone()[0]
+            if count >= 100:
+                return False
+            if not count:
+                targets = conn.execute("SELECT COUNT(*) FROM (SELECT 1 FROM pending_device_fanout GROUP BY to_webid,to_device_id)").fetchone()[0]
+                if targets >= 500:
+                    return False
+            total = conn.execute("SELECT COALESCE(SUM(byte_count),0) FROM pending_device_fanout").fetchone()[0]
+            if total + size > self.MAX_FANOUT_BYTES:
+                return False
+            conn.execute(
+                "INSERT INTO pending_device_fanout(from_webid,message_id,to_webid,to_device_id,payload_json,byte_count,created_at) VALUES(?,?,?,?,?,?,?)",
+                (sender, message_id, owner, device, encoded, size, time.time()))
+        return True  # the outer connection context committed before acceptance
+
+    def pending_device_fanout(self, owner: str, device: str, limit: int = 100) -> list[dict]:
+        if not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("invalid fanout read limit")
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT queue_id,message_id,from_webid,payload_json FROM pending_device_fanout WHERE to_webid=? AND to_device_id=? ORDER BY queue_id LIMIT ?",
+                (owner, device, limit)).fetchall()
+        return [{"queue_id": row["queue_id"], "message_id": row["message_id"],
+                 "from_webid": row["from_webid"], "payload": json.loads(row["payload_json"])} for row in rows]
+
+    def has_device_fanout(self, owner: str, device: str, queue_id: int) -> bool:
+        with self._conn() as conn:
+            return conn.execute("SELECT 1 FROM pending_device_fanout WHERE queue_id=? AND to_webid=? AND to_device_id=?",
+                                (queue_id, owner, device)).fetchone() is not None
+
+    def remove_device_fanout(self, owner: str, device: str, queue_id: int) -> bool:
+        with self._conn() as conn:
+            return conn.execute("DELETE FROM pending_device_fanout WHERE queue_id=? AND to_webid=? AND to_device_id=?",
+                                (queue_id, owner, device)).rowcount == 1
+
+
     def save_dm_thread(
         self,
         thread_id: str,
@@ -158,6 +221,7 @@ class DmStoreMixin(object):
                     "INSERT OR REPLACE INTO blocks (owner_webid, blocked_webid, created_at) VALUES (?,?,?)",
                     (owner_webid, blocked_webid, int(time.time())),
                 )
+                conn.execute("DELETE FROM pending_device_fanout WHERE to_webid=? AND from_webid=?", (owner_webid, blocked_webid))
             else:
                 conn.execute(
                     "DELETE FROM blocks WHERE owner_webid = ? AND blocked_webid = ?",

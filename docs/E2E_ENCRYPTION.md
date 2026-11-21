@@ -935,9 +935,13 @@ ciphertext and retain their legacy retry path. Files, sealed secondary messages
 and plaintext opt-in sends do not use this text outbox.
 
 Gateway acknowledgement proves acceptance by the gateway/relay or its retry
-queue, not recipient reading. The existing local offline-device fanout queue is
-process-local; making that queue survive gateway restart is outside this local
-outbox change. Sender self-sync mirrors retain their existing best-effort
+queue, not recipient reading. Offline device fanout is now committed to the
+gateway's SQLite store before queue acceptance (schema 66), including relayed
+copies. Registrations read a bounded recipient/device batch and remove a row only
+after a successful socket write; interruption before removal can replay the same
+ciphertext. A successful write is still not proof of a client commit or read.
+See [Round 136](ROUND_136_CLOSEOUT.md) for limits and cleanup policy.
+Sender self-sync mirrors retain their existing best-effort
 semantics and do not override recipient confirmation. Clearing browser storage
 or losing the device state key can lose pending jobs. A frozen recipient plan is
 not automatically retargeted when devices change.

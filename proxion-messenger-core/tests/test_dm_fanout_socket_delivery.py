@@ -229,7 +229,7 @@ async def test_failed_device_socket_queues_before_acknowledging(gateway, noauth_
     sender.send.reset_mock()
     await gateway.process_command(sender, {"cmd": "send_dm_fanout", "message_id": "stale-send",
         "fanout": [{"to_webid": target_did, "to_device_id": target_did, "payload": {"content": "C"}}]})
-    assert gateway._fanout_queue[(target_did, target_did)][0]["message_id"] == "stale-send"
+    assert gateway._store.pending_device_fanout(target_did, target_did)[0]["message_id"] == "stale-send"
     assert len(_events(sender, "send_dm_fanout_ack")[-1]["delivered"]) == 1
 
 
@@ -240,14 +240,14 @@ async def test_full_device_queue_applies_backpressure_without_evicting(gateway, 
     recipient = "did:key:zOffline"
     for index in range(100):
         assert gateway._queue_fanout_envelope(str(index), "sender", recipient, recipient, {"content": str(index)})
-    before = list(gateway._fanout_queue[(recipient, recipient)])
+    before = list(gateway._store.pending_device_fanout(recipient, recipient))
     sender.send.reset_mock()
     await gateway.process_command(sender, {"cmd": "send_dm_fanout", "message_id": "over-cap",
         "fanout": [{"to_webid": recipient, "to_device_id": recipient, "payload": {"content": "C"}}]})
     assert _events(sender, "send_dm_fanout_ack")[-1]["delivered"] == []
-    assert gateway._fanout_queue[(recipient, recipient)] == before
+    assert gateway._store.pending_device_fanout(recipient, recipient) == before
     assert gateway._queue_fanout_envelope("0", "sender", recipient, recipient, {"content": "0"})
-    assert len(gateway._fanout_queue[(recipient, recipient)]) == 100
+    assert len(gateway._store.pending_device_fanout(recipient, recipient)) == 100
 
 
 @pytest.mark.asyncio
