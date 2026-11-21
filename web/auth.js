@@ -1,4 +1,5 @@
 import solidAuthn from './solid-authn.bundle.js';
+import { createAuthContextTracker } from './auth-context.js';
 import { detectMode } from './transport.js';
 import { isPrivatePodHost } from './ssrf.js';
 import { podQueueClear } from './podqueue.js';
@@ -66,11 +67,21 @@ const _isPrivateIp = isPrivatePodHost;
 // that expires on its own (a failed token refresh) drops isLoggedIn, and reading
 // the live flag would then point the stores at the bare, un-namespaced database,
 // where new plaintext would outlive the sign-out purge.
-let _boundWebId = null;
-export function boundWebId() {
-    const live = solidSession.info.isLoggedIn && solidSession.info.webId;
-    if (live) _boundWebId = live;
-    return _boundWebId;
+const _authContext = createAuthContextTracker(() => solidSession.info);
+let _rootAccount = null;
+export function authContext() {
+    const next = _authContext.current();
+    if (_rootAccount !== next.webId) {
+        _cachedStorageRoot = null;
+        _rootAccount = next.webId;
+    }
+    return next;
+}
+export function boundWebId() { return authContext().webId; }
+if (solidSession.events && typeof solidSession.events.on === 'function') {
+    for (const event of ['login', 'logout', 'sessionExpired', 'sessionRestore', 'sessionExtended']) {
+        solidSession.events.on(event, () => { _authContext.note(event); authContext(); });
+    }
 }
 export function accountDbName(base) {
     const webId = boundWebId();
@@ -146,7 +157,7 @@ export async function solidLogout() {
     } catch (e) {
         console.warn('OIDC logout failed:', e);
     }
-    _boundWebId = null;
+    _authContext.note('logout');
     _cachedStorageRoot = null;
     // Clear the persisted root too, so the next account signed in on this browser
     // does not inherit the previous account's pod root.
@@ -235,9 +246,11 @@ function _rootFromWebId(webId) {
 }
 
 export async function discoverStorageRoot() {
+    const context = authContext();
+    if (!context.authenticated) return null;
     if (_cachedStorageRoot) return _cachedStorageRoot;
-    if (!solidSession.info.isLoggedIn) return null;
-    const webId = solidSession.info.webId;
+    const webId = context.webId;
+    const current = () => authContext().epoch === context.epoch;
     if (!webId || !/^https?:\/\//.test(webId)) return null;
     // Same-origin, account-aware fallback for when the profile omits pim:storage.
     const fromWebId = _rootFromWebId(webId);
@@ -258,6 +271,7 @@ export async function discoverStorageRoot() {
         clearTimeout(timeout);
         if (!res.ok) throw new Error(`WebID fetch failed: ${res.status}`);
         const turtle = await res.text();
+        if (!current()) return null;
         const patterns = [
             /pim:storage\s+<([^>]+)>/,
             /<http:\/\/www\.w3\.org\/ns\/pim\/space#storage>\s+<([^>]+)>/,
@@ -287,15 +301,16 @@ export async function discoverStorageRoot() {
         return _cachedStorageRoot;
     } catch {
         clearTimeout(timeout);
+        if (!current()) return null;
         _cachedStorageRoot = fromWebId;
         return fromWebId;
     }
 }
 
 export function podStorageRoot() {
+    const webId = boundWebId();
     if (_cachedStorageRoot) return _cachedStorageRoot;
-    if (!solidSession.info.isLoggedIn) return null;
-    const webId = solidSession.info.webId;
+    if (!webId) return null;
     const cached = _readPersistedRoot(webId);
     if (cached) {
         _cachedStorageRoot = cached;

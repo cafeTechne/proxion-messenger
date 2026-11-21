@@ -1,7 +1,7 @@
 # Planned rounds 136–140
 
-Status: Round 136 complete; Rounds 137–140 remain planned. Rounds 130–135 remain
-closed; the limitations recorded in their closeouts are inputs to new work,
+Status: Round 136 complete; Round 137 in progress; Rounds 138–140 remain planned.
+Rounds 130–135 remain closed; the limitations recorded in their closeouts are inputs to new work,
 not additions to those completed rounds.
 
 This tracked document is the shared source for the five plans. Root-level
@@ -93,7 +93,17 @@ explicit unless an existing protocol can close it safely.
 
 ## Round 137: E2E identity and session lifecycle isolation
 
-Status: planned. Execute after Round 136. Rounds 130–135 remain closed.
+Status: in progress. Round 136 is complete. Rounds 130–135 remain closed.
+
+Progress: added a bound account/session generation tracker, retained the account
+namespace on expiry, invalidated cached storage roots on account changes, and
+dropped delayed root discovery after account/session replacement (including a
+switch away and back). Shell cache v299 includes the new module. Auth/root/cache
+checks pass; the frontend suite has 2,516 passing checks and 64 optional skips
+(two subprocess checks required a permitted rerun). The isolated live browser
+account journey passes. Crypto initialization, ratchet caches/queues, legacy-key
+fallback and outbox/receive generation integration remain open; this is not an
+E2E isolation closeout.
 
 ### Problem and result
 

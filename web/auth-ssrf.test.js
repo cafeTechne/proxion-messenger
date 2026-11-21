@@ -6,7 +6,11 @@ import { isPrivatePodHost, isPeerPodRootAllowed } from './ssrf.js';
 vi.mock('./solid-authn.bundle.js', () => ({
     default: {
         Session: class {
-            constructor() { this.info = { isLoggedIn: true, webId: null }; }
+            constructor() {
+                this.info = { isLoggedIn: true, webId: null };
+                const listeners = new Map();
+                this.events = { on: (name, fn) => listeners.set(name, fn), emit: name => listeners.get(name)?.() };
+            }
             async handleIncomingRedirect() {}
             async login() {}
             async logout() {}
@@ -15,7 +19,7 @@ vi.mock('./solid-authn.bundle.js', () => ({
     },
 }));
 
-import { solidSession, podStorageRoot, solidLogout } from './auth.js';
+import { solidSession, podStorageRoot, solidLogout, discoverStorageRoot, authContext } from './auth.js';
 
 function memLocalStorage() {
     const s = {};
@@ -97,6 +101,8 @@ describe('persisted storage root is bound per-WebID (no same-origin cache poison
         globalThis.localStorage = memLocalStorage();
         await solidLogout();                 // resets the in-memory root cache + clears storage
         globalThis.localStorage = memLocalStorage();
+        solidSession.info = { isLoggedIn: true, webId: null };
+        solidSession.events.emit('login');
     });
 
     it('does not return WebID A\'s cached root when signed in as WebID B on the same origin', () => {
@@ -119,4 +125,69 @@ describe('persisted storage root is bound per-WebID (no same-origin cache poison
         expect(podStorageRoot()).toBe(ALICE_ROOT);                         // re-derived, still correct
         expect(localStorage.getItem('proxion_storage_root_v2')).toBe(null); // untrusted legacy value dropped
     });
+    it('clears an in-memory discovered root on a same-origin account switch', async () => {
+        solidSession.info.webId = ALICE;
+        solidSession.fetch = vi.fn(async () => ({ ok: true, text: async () => 'pim:storage <https://shared.pod.example/custom/> .' }));
+        expect(await discoverStorageRoot()).toBe('https://shared.pod.example/custom/');
+        solidSession.info.webId = BOB;
+        expect(podStorageRoot()).toBe('https://shared.pod.example/bob/');
+    });
+
+    it.each(['resolve', 'reject'])('drops delayed discovery after a switch (%s)', async outcome => {
+        solidSession.info.webId = ALICE;
+        let resolve, reject;
+        solidSession.fetch = vi.fn(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
+        const pending = discoverStorageRoot();
+        solidSession.info.webId = BOB;
+        expect(podStorageRoot()).toBe('https://shared.pod.example/bob/');
+        if (outcome === 'resolve') resolve({ ok: true, text: async () => 'pim:storage <https://shared.pod.example/custom/> .' });
+        else reject(new Error('offline'));
+        expect(await pending).toBeNull();
+        expect(podStorageRoot()).toBe('https://shared.pod.example/bob/');
+        expect(localStorage.getItem('proxion_storage_root_v2')).toBeNull();
+    });
+
+    it('invalidates delayed discovery when the same account receives a replacement session', async () => {
+        solidSession.info.webId = ALICE;
+        let resolve;
+        solidSession.fetch = vi.fn(() => new Promise(yes => { resolve = yes; }));
+        const pending = discoverStorageRoot(), before = authContext();
+        solidSession.info = { ...solidSession.info };
+        expect(authContext().epoch).toBeGreaterThan(before.epoch);
+        resolve({ ok: true, text: async () => 'pim:storage <https://shared.pod.example/custom/> .' });
+        expect(await pending).toBeNull();
+        expect(podStorageRoot()).toBe(ALICE_ROOT);
+    });
+
+    it('keeps the account namespace during expiry and clears it on logout', () => {
+        solidSession.info.webId = ALICE;
+        const initial = authContext();
+        solidSession.events.emit('sessionExpired');
+        expect(authContext()).toMatchObject({ webId: ALICE, authenticated: false });
+        expect(authContext().epoch).toBeGreaterThan(initial.epoch);
+        expect(podStorageRoot()).toBe(ALICE_ROOT);
+        solidSession.events.emit('sessionExtended');
+        expect(authContext().authenticated).toBe(true);
+        solidSession.events.emit('logout');
+        expect(authContext()).toMatchObject({ webId: null, authenticated: false });
+        expect(podStorageRoot()).toBeNull();
+    });
+
+    it('drops a delayed response body after switching away and back', async () => {
+        solidSession.info.webId = ALICE;
+        let resolve, started;
+        const bodyStarted = new Promise(yes => { started = yes; });
+        solidSession.fetch = vi.fn(async () => ({ ok: true, text: () => {
+            started();
+            return new Promise(yes => { resolve = yes; });
+        } }));
+        const pending = discoverStorageRoot();
+        await bodyStarted;
+        solidSession.info.webId = BOB; authContext();
+        solidSession.info.webId = ALICE; authContext();
+        resolve('pim:storage <https://shared.pod.example/custom/> .');
+        expect(await pending).toBeNull();
+        expect(podStorageRoot()).toBe(ALICE_ROOT);
+    });
+
 });
