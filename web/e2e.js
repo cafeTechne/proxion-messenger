@@ -523,29 +523,53 @@ function _statePodUrls(peerId) {
     return { device: dir + 'state-' + _myPubB64u + '.enc', legacy: dir + 'state.enc' };
 }
 
+// Storage awaits and queued backups must never inherit a replacement account's
+// credentials, root or device key. Capture before doing any asynchronous work.
+function _stateContext() {
+    const session = solidSession;
+    const webId = _currentWebId();
+    const loggedIn = !!session?.info?.isLoggedIn;
+    const sessionId = session?.info?.sessionId;
+    const root = podStorageRoot();
+    const pub = _myPubB64u, stateKey = _stateEncKey;
+    return {
+        webId,
+        fetch: session?.fetch?.bind(session),
+        current: () => solidSession === session && _currentWebId() === webId
+            && !!session?.info?.isLoggedIn === loggedIn && session?.info?.sessionId === sessionId
+            && podStorageRoot() === root && _myPubB64u === pub && _stateEncKey === stateKey,
+    };
+}
+
 // GET + decrypt a pod state copy. null when missing, unreadable, or written by a
 // different device (its state key differs, so the GCM tag fails here).
-async function _readPodState(url) {
+async function _readPodState(url, context) {
     try {
-        const res = await solidSession.fetch(url);
-        if (!res || !res.ok) return null;
-        return await _decState(await res.text());
+        if (!context.current()) return null;
+        const res = await context.fetch(url);
+        if (!context.current() || !res || !res.ok) return null;
+        const enc = await res.text();
+        if (!context.current()) return null;
+        const state = await _decState(enc);
+        return context.current() ? state : null;
     } catch { return null; }
 }
 
-// One in-flight PUT per peer; overlapping saves coalesce to the latest blob so an
-// older write can never land after a newer one.
-const _podWrites = {};   // peerId -> { pending, running }
-function _queuePodWrite(peerId, url, enc) {
-    const q = _podWrites[peerId] || (_podWrites[peerId] = { pending: null, running: null });
-    q.pending = { url, enc };
+// One in-flight PUT per account/resource; overlapping saves coalesce to the
+// latest blob. Another account's resource need not wait on a stalled old PUT.
+const _podWrites = {};   // account/resource -> { pending, running }
+function _queuePodWrite(peerId, url, enc, context) {
+    const key = JSON.stringify([context.webId, peerId, url]);
+    const q = _podWrites[key] || (_podWrites[key] = { pending: null, running: null });
+    q.pending = { url, enc, context };
     if (q.running) return;
-    q.running = (async () => {
+    q.running = Promise.resolve().then(async () => {
         while (q.pending) {
             const job = q.pending;
             q.pending = null;
+            if (!job.context.current()) continue;
             try {
-                await solidSession.fetch(job.url, {
+                await job.context.fetch(job.url, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: job.enc,
@@ -553,7 +577,7 @@ function _queuePodWrite(peerId, url, enc) {
             } catch { /* best effort; localStorage holds the state */ }
         }
         q.running = null;
-    })();
+    });
 }
 
 // Test hook: resolves once every queued pod state write has been attempted.
@@ -566,6 +590,7 @@ export async function _podStateWritesSettled() {
 }
 
 export async function loadRatchetState(peerId) {
+    const context = _stateContext();
     if (_stateCache[peerId]) {
         const s = _stateCache[peerId];
         if (!s.rootKey) { delete _stateCache[peerId]; return null; } // Phase 1 migration
@@ -581,39 +606,44 @@ export async function loadRatchetState(peerId) {
         try { best = await _decState(ls); } catch { best = null; }
     }
 
+    if (!context.current()) throw new E2EDecryptError('State context changed');
     const urls = _statePodUrls(peerId);
     let podHasDevice = false;
     if (urls) {
-        let pod = await _readPodState(urls.device);
+        let pod = await _readPodState(urls.device, context);
+        if (!context.current()) throw new E2EDecryptError('State context changed');
         podHasDevice = !!pod;
-        if (!pod) pod = await _readPodState(urls.legacy);   // pre-device layout
+        if (!pod) pod = await _readPodState(urls.legacy, context);   // pre-device layout
         if (pod && (!best || (pod.ver || 0) > (best.ver || 0))) best = pod;
     }
 
+    if (!context.current()) throw new E2EDecryptError('State context changed');
     if (!best || !best.rootKey) return null; // none, or Phase 1 migration
-    _stateCache[peerId] = best;
     // Migrate: the per-device copy is missing (new device layout), write it now.
     if (urls && !podHasDevice && _stateEncKey) {
-        try { _queuePodWrite(peerId, urls.device, await _encState(best)); } catch { /* ignore */ }
+        try { _queuePodWrite(peerId, urls.device, await _encState(best), context); } catch { /* ignore */ }
     }
+    if (!context.current()) throw new E2EDecryptError('State context changed');
+    _stateCache[peerId] = best;
     return best;
 }
 
 export async function saveRatchetState(peerId, state, { current = () => true } = {}) {
+    const context = _stateContext();
     const storageKey = e2eScopedKey('proxion_e2e_state_' + peerId);
     const next = { ...state, ver: (Number.isSafeInteger(state.ver) ? state.ver : 0) + 1 };
     const urls = _statePodUrls(peerId);
-    if (!current()) throw new E2EDecryptError('Receive context changed');
+    if (!current() || !context.current()) throw new E2EDecryptError('State context changed');
     if (_stateEncKey) {
         const enc = await _encState(next);
-        if (!current() || storageKey !== e2eScopedKey('proxion_e2e_state_' + peerId)) {
+        if (!current() || !context.current() || storageKey !== e2eScopedKey('proxion_e2e_state_' + peerId)) {
             throw new E2EDecryptError('Receive context changed');
         }
         // The encrypted recovery copy and spent key advance share this atomic write.
         // A failed write must leave the live session retryable too.
         localStorage.setItem(storageKey, enc);
         _stateCache[peerId] = next;
-        if (urls) _queuePodWrite(peerId, urls.device, enc);
+        if (urls) _queuePodWrite(peerId, urls.device, enc, context);
     } else {
         _stateCache[peerId] = next;
     }

@@ -221,3 +221,149 @@ describe('saveRatchetState pod writes', () => {
         expect(typeof ratchetDecrypt).toBe('function');
     });
 });
+
+
+describe('ratchet backups keep their initiating context', () => {
+    const deferred = () => {
+        let resolve;
+        const promise = new Promise(r => { resolve = r; });
+        return { promise, resolve };
+    };
+    it.each(['replacement account', 'changed account in session', 'expired session', 'same account new session', 'changed session id', 'changed pod root'])(
+        'discards a queued backup after %s', async change => {
+            const waiting = deferred(), calls = [];
+            const original = _session;
+            original.info.sessionId = 'original-session';
+            original.fetch = vi.fn(async (url, opts) => {
+                if (opts?.method !== 'PUT') return fetchMock(url, opts);
+                calls.push({ url, body: opts.body });
+                if (calls.length === 1) return waiting.promise;
+                return { ok: true, status: 201 };
+            });
+            const peer = 'did:key:queued';
+            await saveRatchetState(peer, { rootKey: [1], skippedKeys: {}, sendMsgNum: 1 });
+            await saveRatchetState(peer, { rootKey: [1], skippedKeys: {}, sendMsgNum: 2 });
+            const local = localStorage.getItem(e2eScopedKey('proxion_e2e_state_' + peer));
+            const replacementFetch = vi.fn(async () => ({ ok: true, status: 201 }));
+            if (change === 'replacement account') _session = { info: { isLoggedIn: true, webId: 'https://other.example/#me' }, fetch: replacementFetch };
+            if (change === 'changed account in session') original.info.webId = 'https://other.example/#me';
+            if (change === 'expired session') original.info.isLoggedIn = false;
+            if (change === 'same account new session') _session = { info: { ...original.info }, fetch: replacementFetch };
+            if (change === 'changed session id') original.info.sessionId = 'replacement-session';
+            if (change === 'changed pod root') _root = 'https://new-root.example/';
+            waiting.resolve({ ok: true, status: 201 });
+            await _podStateWritesSettled();
+            expect(calls).toHaveLength(1);
+            expect(replacementFetch).not.toHaveBeenCalled();
+            expect(localStorage.getItem('proxion_e2e_state_' + peer + '::' + WEBID)).toBe(local);
+        });
+
+    it('coalesces queued saves to the newest blob while keeping the initiating fetch', async () => {
+        const waiting = deferred(), calls = [];
+        const originalFetch = vi.fn(async (url, opts) => {
+            calls.push({ url, opts });
+            if (calls.length === 1) await waiting.promise;
+            return fetchMock(url, opts);
+        });
+        _session.fetch = originalFetch;
+        const peer = 'did:key:coalesced';
+        for (let i = 1; i <= 3; i++) {
+            await saveRatchetState(peer, { rootKey: [1], skippedKeys: {}, sendMsgNum: i, ver: i });
+        }
+        const replacementFetch = vi.fn();
+        _session.fetch = replacementFetch;
+        waiting.resolve();
+        await _podStateWritesSettled();
+        expect(originalFetch).toHaveBeenCalledTimes(2);
+        expect(replacementFetch).not.toHaveBeenCalled();
+        _session.fetch = fetchMock;
+        localStorage.removeItem(e2eScopedKey('proxion_e2e_state_' + peer));
+        await reload();
+        expect((await loadRatchetState(peer)).sendMsgNum).toBe(3);
+        expect((await loadRatchetState(peer)).ver).toBe(4);
+    });
+
+    it('does not let an old account backup block the new account resource', async () => {
+        const waiting = deferred();
+        _session.fetch = vi.fn(() => waiting.promise);
+        const peer = 'did:key:independent';
+        await saveRatchetState(peer, { rootKey: [1], skippedKeys: {} });
+        const replacementFetch = vi.fn(async () => ({ ok: true, status: 201 }));
+        _session = { info: { isLoggedIn: true, webId: 'https://other.example/#me' }, fetch: replacementFetch };
+        _root = 'https://other.example/';
+        try {
+            await saveRatchetState(peer, { rootKey: [2], skippedKeys: {} });
+            expect(replacementFetch).toHaveBeenCalledTimes(1);
+            expect(replacementFetch.mock.calls[0][0]).toMatch(/^https:\/\/other.example\//);
+        } finally {
+            waiting.resolve({ ok: true, status: 201 });
+            await _podStateWritesSettled();
+        }
+    });
+
+    it('cancels a pending backup after the device key changes', async () => {
+        const waiting = deferred(), firstFetch = vi.fn(() => waiting.promise);
+        _session.fetch = firstFetch;
+        await saveRatchetState('did:key:rotated', { rootKey: [1], skippedKeys: {} });
+        await saveRatchetState('did:key:rotated', { rootKey: [1], skippedKeys: {} });
+        // Reinitialization clears the old queue registry, but its active runner
+        // must still refuse to start the old pending job after it is released.
+        localStorage.clear();
+        _session.fetch = fetchMock;
+        await reload();
+        waiting.resolve({ ok: true, status: 201 });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(firstFetch).toHaveBeenCalledTimes(1);
+        expect(stateUrls()).toEqual([]);
+    });
+
+    it.each(['response', 'body'])('does not finish a delayed pod read after an account switch during %s', async stage => {
+        const waiting = deferred(), body = vi.fn(() => stage === 'body' ? waiting.promise : Promise.resolve('{}'));
+        const originalFetch = vi.fn(() => stage === 'response' ? waiting.promise : Promise.resolve({ ok: true, text: body }));
+        _session.fetch = originalFetch;
+        const read = loadRatchetState('did:key:read-switch');
+        if (stage === 'body') await vi.waitFor(() => expect(body).toHaveBeenCalled());
+        const replacement = vi.fn(async () => ({ ok: false, status: 404 }));
+        _session = { info: { isLoggedIn: true, webId: 'https://other.example/#me' }, fetch: replacement };
+        waiting.resolve(stage === 'response' ? { ok: true, text: body } : '{}');
+        await expect(read).rejects.toThrow('context changed');
+        expect(originalFetch).toHaveBeenCalledTimes(1);
+        expect(replacement).not.toHaveBeenCalled();
+    });
+
+    it('does not migrate a local state after its root changes during encryption', async () => {
+        const peer = 'did:key:migration-switch';
+        await saveRatchetState(peer, { rootKey: [1], skippedKeys: {} });
+        await _podStateWritesSettled();
+        pod.clear();
+        await reload();
+        const original = crypto.subtle.encrypt.bind(crypto.subtle);
+        const spy = vi.spyOn(crypto.subtle, 'encrypt').mockImplementation(async (...args) => {
+            const result = await original(...args); _root = 'https://replacement.example/'; return result;
+        });
+        try { await expect(loadRatchetState(peer)).rejects.toThrow('context changed'); }
+        finally { spy.mockRestore(); }
+        await _podStateWritesSettled();
+        expect(stateUrls()).toEqual([]);
+        // Restoring the owner context permits the previously cancelled resource
+        // queue to run normally; cancellation must not leave a stuck runner.
+        _root = ROOT;
+        expect((await loadRatchetState(peer)).rootKey).toEqual([1]);
+        await _podStateWritesSettled();
+        expect(stateUrls()).toHaveLength(1);
+    });
+
+    it('rejects a save if its pod root changes during encryption', async () => {
+        const original = crypto.subtle.encrypt.bind(crypto.subtle);
+        const spy = vi.spyOn(crypto.subtle, 'encrypt').mockImplementation(async (...args) => {
+            const result = await original(...args);
+            _root = 'https://replacement.example/';
+            return result;
+        });
+        try {
+            await expect(saveRatchetState('did:key:save-switch', { rootKey: [1], skippedKeys: {} })).rejects.toThrow('context changed');
+        } finally { spy.mockRestore(); }
+        expect(localStorage.getItem('proxion_e2e_state_did:key:save-switch::' + WEBID)).toBeNull();
+        expect(stateUrls()).toEqual([]);
+    });
+});

@@ -830,9 +830,12 @@ Ratchet state for a peer id is serialized as JSON and encrypted with the state k
 - when signed in to a pod, to
   `{podRoot}proxion/e2e/<encodeURIComponent(peerId)>/state-<device>.enc`, where
   `<device>` is the device's X25519 public key (base64url). The PUT is not awaited;
-  writes for one peer run one at a time and overlapping saves collapse to the latest
-  (`_queuePodWrite`). No ACL is written for this resource; it inherits the access
-  control of the containing `proxion/` container.
+  writes for one account/resource run one at a time and overlapping saves collapse
+  to the latest (`_queuePodWrite`). Jobs capture the initiating session's fetch
+  function, WebID, session id, pod root and device state key. Queued jobs whose
+  context changes are discarded; a stalled old account/resource does not block
+  another account/resource. Requests already dispatched cannot be recalled.
+  No ACL is written for this resource; it inherits the access control of the containing `proxion/` container.
 
 Because the state key is a per-device, non-extractable key, a state blob is readable
 only on the device that wrote it, and each device writes its own pod resource.
@@ -845,6 +848,11 @@ is used, localStorage on a tie, so a pod copy whose write was lost does not roll
 session back. When the per-device pod resource was missing, the chosen state is
 written to it. A blob at the shared path written by another device fails to decrypt
 and is ignored. A state with no `ver` counts as 0.
+
+Asynchronous state reads, migration and saves also check the initiating context
+before returning or committing their results, so a late response cannot continue
+under a replacement session or root. Cancelling an already queued remote backup
+does not remove the valid local copy. Remote backups remain best effort.
 
 The state contains the current ratchet private key as a JWK, chain keys, root key,
 skipped message keys and `ver`. Pod inbox receives additionally keep up to 64
