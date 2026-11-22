@@ -72,7 +72,8 @@ new cryptography or automatic reauthoring of old prepared messages.
 
 ## Round 142: Durable native gateway inline DM media
 
-Status: in progress. Depends on 140–141.
+Status: complete for the original primary native-media scope. See
+[the acceptance audit](ROUND_142_143_CLOSEOUT.md).
 
 Preparation checkpoint (2026-11-21): `native-media-drafts.js` now provides
 transactional IndexedDB source/prepared/header stages, ten bounded inline drafts
@@ -124,6 +125,11 @@ Recorded voice and the preserved device-fanout fault journeys also pass. Larger
 inline HTTP bodies remain retained pending Round 143's chunk transport; neither
 142 nor 143 is closed. See [the transfer contract](ROUND_143_TRANSFER_PROTOCOL.md).
 
+Final acceptance (2026-11-22): all original requirements below are verified in
+the linked matrix, including GIF/voice byte equality, policy cleanup, every
+required crash checkpoint and exact accepted-inline migration. Earlier
+checkpoints above describe implementation history, not remaining work.
+
 ### Problem and result
 
 Native gateway inline files/voice use secondary sealed envelopes and live
@@ -133,19 +139,19 @@ existing supported inline route without copying file bytes into localStorage.
 
 ### Bounded work
 
-- [ ] Audit native inline file, GIF and voice routes, sealed metadata, gateway
+- [x] Audit native inline file, GIF and voice routes, sealed metadata, gateway
   message ids/deduplication and real delivery/echo semantics before editing.
-- [ ] Persist a bounded account/device-scoped IndexedDB draft containing original
+- [x] Persist a bounded account/device-scoped IndexedDB draft containing original
   or prepared encrypted bytes. Freeze logical id, destination and sealed header;
   keep only small references in outgoing metadata.
-- [ ] Journal secondary file-header ratchet preparation with the existing atomic
+- [x] Journal secondary file-header ratchet preparation with the existing atomic
   send journal. Retries must reuse the header/file ciphertext and never silently
   rotate recipients, keys or ids.
-- [ ] Honor stable client ids and exact-payload deduplication at applicable
+- [x] Honor stable client ids and exact-payload deduplication at applicable
   gateway boundaries. Refuse conflicting retries and false confirmation.
-- [ ] Keep the draft until supported acceptance/history completion is durable.
+- [x] Keep the draft until supported acceptance/history completion is durable.
   Apply block/revocation, account/tab isolation, capacity and explicit reset rules.
-- [ ] Expose honest pending/retry status and gate unsupported legacy recovery.
+- [x] Expose honest pending/retry status and gate unsupported legacy recovery.
 
 ### Acceptance and validation
 
@@ -170,7 +176,8 @@ chunk-transfer resume (Round 143). Do not silently reroute native files to pods.
 
 ## Round 143: Resumable encrypted gateway chunk transfers
 
-Status: in progress. Depends on 142.
+Status: complete for the original resumable primary-transfer scope. See
+[the acceptance audit](ROUND_142_143_CLOSEOUT.md).
 
 Audit checkpoint (2026-11-21): the legacy live chunk route now binds incoming
 chunks/completion and peer acceptance/rejection/receipts to the original sender
@@ -214,6 +221,11 @@ Decline is a distinct terminal outcome; the sender retains its exact prepared
 source. Full suites: 4,848 backend and 2,702 frontend passed. Final policy/route
 acceptance audit remains open. No additional round scope is introduced.
 
+Final acceptance (2026-11-22): all original requirements below are verified in
+the linked matrix, including GIF/voice byte equality, policy cleanup, every
+required crash checkpoint and exact accepted-inline migration. Earlier
+checkpoints above describe implementation history, not remaining work.
+
 ### Problem and result
 
 The existing file_offer/file_chunk/file_complete route buffers live transfer
@@ -223,18 +235,18 @@ bounded recovery to this separate transfer protocol.
 
 ### Bounded work
 
-- [ ] Inventory sender/receiver states, timeout/decline behavior, authorization,
+- [x] Inventory sender/receiver states, timeout/decline behavior, authorization,
   chunk and file limits and current file_received semantics.
-- [ ] Persist encrypted sender bytes, immutable transfer id/header and bounded
+- [x] Persist encrypted sender bytes, immutable transfer id/header and bounded
   receiver chunk progress in IndexedDB before relevant acknowledgements.
-- [ ] Negotiate recovery capability and resume only authenticated peer/transfer
+- [x] Negotiate recovery capability and resume only authenticated peer/transfer
   identities. Define missing-chunk queries, deduplication/conflict rules and
   interrupted finalization without unbounded retransmission or buffering.
-- [ ] Journal receive-header consumption and local history commit so complete/
+- [x] Journal receive-header consumption and local history commit so complete/
   acknowledgement replay does not decrypt a spent header or lose the only file.
-- [ ] Apply account/tab, block/revocation, cancellation, retention and capacity
+- [x] Apply account/tab, block/revocation, cancellation, retention and capacity
   rules. Legacy peers keep explicitly documented active-transfer behavior.
-- [ ] Provide accessible progress, reconnect/resume and failure controls.
+- [x] Provide accessible progress, reconnect/resume and failure controls.
 
 ### Acceptance and validation
 

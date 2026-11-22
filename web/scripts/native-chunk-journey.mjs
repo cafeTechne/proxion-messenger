@@ -27,7 +27,7 @@ export async function nativeChunkJourney({ sender, receiver, sourceGateway, targ
         let fetches = 0;
         WebSocket.prototype.send = function (wire) {
             let packet; try { packet = JSON.parse(wire); } catch { /* other frame */ }
-            if (packet?.cmd === 'native_media_fetch' && !window.__chunkAllowDownload && (blocked || ++fetches > 1)) return;
+            if (packet?.cmd === 'native_media_fetch' && !window.__chunkAllowDownload && ((blocked && !window.__chunkAllowFirstWindow) || ++fetches > 1)) return;
             if (packet?.cmd === 'native_media_commit' && !window.__chunkAllowCommit) {
                 window.__chunkLostCommits = (window.__chunkLostCommits || 0) + 1; return;
             }
@@ -43,7 +43,7 @@ export async function nativeChunkJourney({ sender, receiver, sourceGateway, targ
     };
     const sourceReader = await sender.evaluateOnNewDocument(reader), targetReader = await receiver.evaluateOnNewDocument(reader);
     const uploadHook = await sender.evaluateOnNewDocument(holdUpload);
-    let receiveHook = await receiver.evaluateOnNewDocument(holdReceive, false);
+    let receiveHook = await receiver.evaluateOnNewDocument(holdReceive, true);
     await sender.reload({ waitUntil: 'load' }); await online(sender); await openSender();
     await receiver.reload({ waitUntil: 'load' }); await online(receiver); await openReceiver();
     await sender.bringToFront();
@@ -76,6 +76,17 @@ export async function nativeChunkJourney({ sender, receiver, sourceGateway, targ
         || resumed.parts.some(seq => seq < 3)) throw Error('resumed upload changed bytes/header or resent durably accepted prefix');
     await sender.evaluate(() => { window.__chunkAllowUpload = true; });
     await receiver.bringToFront();
+    await receiver.waitForFunction(async id => (await window.__chunkInbox()).some(row => row.id === id && row.received === 0),
+        { timeout: 90000, polling: 250 }, before.id).catch(error => { throw Error('native chunk durable-offer-admission: ' + error.message); });
+    await sender.waitForFunction(async id => (await window.__chunkDrafts()).some(row => row.id === id && row.headerCommitted),
+        { timeout: 30000, polling: 250 }, before.id);
+    console.log(`  · native ${size}: offer/header saved with zero downloaded parts; restarting both endpoints`);
+    await sourceGateway.restart(); await targetGateway.restart();
+    await sender.reload({ waitUntil: 'load' }); await online(sender); await openSender();
+    await receiver.reload({ waitUntil: 'load' }); await online(receiver); await openReceiver(); await receiver.bringToFront();
+    const offerPrefix = await receiver.evaluate(async id => (await window.__chunkInbox()).find(row => row.id === id)?.received, before.id);
+    if (offerPrefix !== 0) throw Error('offer restart lost its exact zero-part admission: ' + offerPrefix);
+    await receiver.evaluate(() => { window.__chunkAllowFirstWindow = true; });
     await receiver.waitForFunction(async id => (await window.__chunkInbox()).some(row => row.id === id && row.received === 8),
         { timeout: 90000, polling: 250 }, before.id).catch(error => { throw Error('native chunk upload-to-receiver-prefix: ' + error.message); });
     await receiver.removeScriptToEvaluateOnNewDocument(receiveHook.identifier);
@@ -96,6 +107,13 @@ export async function nativeChunkJourney({ sender, receiver, sourceGateway, targ
         history: (await (await import('./dmhistory.js')).dmHistorySearch(name)).length,
     }), { id: before.id, name });
     if (!pending.row || pending.row.received !== pending.row.total || pending.history !== 0) throw Error('failed history did not retain complete receive ciphertext: ' + JSON.stringify(pending));
+    console.log(`  · native ${size}: restarting both endpoints before history can commit`);
+    await sourceGateway.restart(); await targetGateway.restart();
+    await sender.reload({ waitUntil: 'load' }); await online(sender); await openSender();
+    await receiver.reload({ waitUntil: 'load' }); await online(receiver); await openReceiver(); await receiver.bringToFront();
+    await receiver.waitForFunction(() => window.__chunkHistoryFailures > 0, { timeout: 60000 });
+    const complete = await receiver.evaluate(async id => { const row = (await window.__chunkInbox()).find(row => row.id === id); return row && { received: row.received, total: row.manifest.chunk_count }; }, before.id);
+    if (!complete || complete.received !== complete.total) throw Error('pre-history restart lost complete ciphertext');
     await receiver.evaluate(() => { window.__chunkAllowHistory = true; });
     await receiver.waitForFunction(() => window.__chunkLostCommits > 0, { timeout: 60000 });
     if (!await sender.evaluate(async id => (await window.__chunkDrafts()).some(row => row.id === id && !row.committed), before.id)) {

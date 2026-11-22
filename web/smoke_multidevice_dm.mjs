@@ -3,6 +3,7 @@ import { nativeMediaJourney } from './scripts/native-media-journey.mjs';
 import { nativeChunkJourney } from './scripts/native-chunk-journey.mjs';
 import { nativeInlineAdaptationJourney } from './scripts/native-inline-adaptation-journey.mjs';
 import { nativeDeclineJourney } from './scripts/native-decline-journey.mjs';
+import { nativeGifJourney, nativeBlockJourney, auditNativeVoiceHistory } from './scripts/native-policy-route-journey.mjs';
 // Cross-account, multi-device DM smoke (R52 E6) — the "never green-verified"
 // case from memory/multidevice-status.md.
 //
@@ -384,6 +385,9 @@ try {
   step = 'native-accepted-inline-adaptation';
   await nativeInlineAdaptationJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
     openSender: () => openFirstDm(ap, 'adapted inline sender'), openReceiver: () => openFirstDm(b, 'adapted inline recipient'), online });
+  step = 'native-gif-tray';
+  await nativeGifJourney({ sender: ap, receiver: b, openSender: () => openFirstDm(ap, 'GIF sender'),
+    openReceiver: () => openFirstDm(b, 'GIF recipient'), online });
   for (const size of [2 * 1024 * 1024, 25 * 1024 * 1024 - 16]) {
     step = 'native-chunk-resume-' + size;
     await nativeChunkJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
@@ -547,6 +551,13 @@ try {
   if (await ap.evaluate((sel) => !!document.querySelector(sel), revokeSel)) {
     fail('A-device came back in Linked devices after it was revoked');
   }
+
+  step = 'native-voice-byte-audit';
+  await auditNativeVoiceHistory([ap, b]);
+
+  step = 'native-policy-block';
+  await nativeBlockJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
+    openSender: () => openFirstDm(ap, 'blocked sender'), online });
 
   step = 'done';
   if (pageErrors.length) fail(`uncaught page errors: ${pageErrors.join(' | ')}`);

@@ -358,3 +358,23 @@ def test_decline_does_not_bypass_existing_block_and_revocation_policy(store):
     assert not store.decline_native_media('bob', row['queue_id'], 'alice', 'file', row['envelope_digest'], 'A' * 43)
     assert store.get_native_media('alice', 'file')['status'] == 'blocked'
     assert not store.get_native_media('alice', 'file')['declined']
+
+
+@pytest.mark.parametrize('action', ['sender block', 'recipient block', 'sender revoke', 'recipient revoke'])
+def test_policy_stops_forwarded_pending_receipts_without_changing_existing_terminal_evidence(store, action):
+    raw = b'X' * 17
+    forwarded = begin(store, raw, message='forwarded'); assert put(store, forwarded, 0, raw)
+    committed = begin(store, raw, message='committed'); assert put(store, committed, 0, raw)
+    declined = begin(store, raw, message='declined'); assert put(store, declined, 0, raw)
+    for row in [forwarded, committed]:
+        assert store.commit_native_media('bob', row['queue_id'], 'alice', row['message_id'], row['envelope_digest'], forwarded=row is forwarded)
+    assert store.decline_native_media('bob', declined['queue_id'], 'alice', 'declined', declined['envelope_digest'], 'A' * 43)
+    if action == 'sender block': store.set_block('alice', 'bob', True)
+    elif action == 'recipient block': store.set_block('bob', 'alice', True)
+    elif action == 'sender revoke': store.mark_revoked('device:alice', 'alice')
+    else: store.mark_revoked('device:bob', 'bob')
+    result = store.get_native_media('alice', 'forwarded')
+    assert result['status'] == 'blocked' and not result['committed'] and not result['header_committed']
+    assert not store.record_native_peer_progress('alice', 'forwarded', result['media_digest'], result['header_digest'], header_committed=True, committed=True)
+    assert store.get_native_media('alice', 'committed')['committed']
+    assert store.get_native_media('alice', 'declined')['declined']

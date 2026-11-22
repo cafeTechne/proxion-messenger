@@ -1,8 +1,7 @@
 # Round 143 implementation contract
 
-Status: primary browser chunk negotiation, sender/receiver resume, Blob history
-and accessible progress/retry/recipient decline are integrated. Round 143
-remains open for the final policy/route acceptance audit. This implements
+Status: complete for the original primary resumable-transfer scope. See
+[the requirement-by-requirement acceptance audit](ROUND_142_143_CLOSEOUT.md). This implements
 the existing Round 143 scope, rather than adding another round.
 
 ## Preserve the existing boundaries
@@ -338,3 +337,24 @@ ESLint, Ruff, cold-path, whitespace and translation gates pass (1,220 canonical
 keys, 15 fallback warnings). Shell cache 315 includes the final race guards.
 The final policy/route acceptance audit remains open; no 142–143 closeout or
 146–150 plan execution is claimed by this checkpoint.
+
+
+### Final acceptance closeout
+
+The final audit found and fixed a policy gap: block/device revocation now stop
+forwarded-unfinished native media too, while preserving prior committed/declined
+facts. Four regression cases cover both parties and policy types. Complete
+backend validation passed 4,852 tests (15 skipped). The real browser run passed
+all previous cases, actual GIF-tray and sidebar-block controls, identical
+non-empty voice history, and the additional offer/header-only and complete-
+ciphertext/pre-history restarts for both 2 MiB and maximum-size files. Its final
+exit was successful with no uncaught page errors. Frontend remains 2,702 passed,
+64 skipped; no frontend product code changed in this final policy/test audit.
+Ruff, cold-path and whitespace checks pass; prior ESLint/translation gates are
+unchanged (1,220 canonical keys, 15 fallback warnings).
+
+Both rounds close here without expanding their original scope. Native message
+actions use separate UI/reference paths and have follow-up audit findings; their
+implementation belongs to new bounded rounds. No source cancellation/reset or
+media fanout is implied by this closeout. Round 144's design-only outcome and
+Round 145's completed device receive-commit protocol are preserved.

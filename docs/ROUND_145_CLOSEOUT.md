@@ -1,7 +1,8 @@
 # Round 145: acknowledge durable device receive commits
 
-Status: complete for encrypted device fanout. Native file/chunk recovery remains
-in the open Rounds 142–143. This does not implement those media adapters.
+Status: complete for encrypted device fanout. Native file/chunk recovery was
+completed separately in Rounds 142–143; see their acceptance audit. This protocol
+does not implement media fanout or change the media adapters.
 
 A client opts in with `dm_commit_v: 1` on register, preserved through the
 signature challenge and delegated-device registration. The registered event
