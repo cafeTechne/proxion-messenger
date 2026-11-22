@@ -486,6 +486,9 @@ export function createConnection({
             if (_delegCert) {
                 try { _regPayload.delegation_cert = JSON.parse(_delegCert); } catch (_) { /* corrupt — ignore */ }
             }
+            if (!_regPayload.delegation_cert && _e2ePub && localStorage.getItem('dmHistoryEnabled') !== 'false') {
+                _regPayload.native_media_v = 1;
+            }
             ws.send(JSON.stringify(_regPayload)); // clientDid always set after generateOrLoadIdentity()
             // All other init commands are deferred to the "registered" event handler so
             // they never race with the auth challenge-response cycle under require_auth mode.

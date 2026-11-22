@@ -85,6 +85,7 @@ def test_block_and_device_revocation_remove_bytes_without_claiming_commit(store)
     assert not accept(store)
     assert [r['message_id'] for r in store.pending_native_media('bob')] == ['other']
     assert store.get_native_media('alice', 'm')['status'] == 'blocked'
+    assert ProxionGateway._native_status(store.get_native_media('alice', 'm'))['status'] == 'blocked'
     store.set_block('bob', 'alice', False)
     assert not accept(store)  # old key/id is never silently reauthored
     store.mark_revoked('device:bob', 'bob')
@@ -275,7 +276,7 @@ def test_later_block_does_not_erase_a_previous_commit_receipt(store):
 
 
 @pytest.mark.asyncio
-async def test_current_browser_registration_does_not_activate_staged_protocol(tmp_path):
+async def test_legacy_registration_does_not_activate_native_protocol(tmp_path):
     gw = gateway(tmp_path, 'legacy-default')
     ws = socket(gw, gw._own_gateway_did(), modern=False)
     ws.remote_address = ('127.0.0.1', 1234)
@@ -543,4 +544,7 @@ async def test_authenticated_registration_preserves_primary_key_for_capability(t
     await gw._handle_auth_response(ws, {'signature': signature})
     assert gw._native_ready(owner, 'A' * 43) == (True, 'A' * 43)
     assert gw._store.get_x25519_pub(owner) == 'A' * 43
+    registered = next(json.loads(call.args[0]) for call in ws.send.call_args_list
+                      if json.loads(call.args[0]).get('type') == 'registered')
+    assert registered['native_media_v'] == 1
     gw._store.close()

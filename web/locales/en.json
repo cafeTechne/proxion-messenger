@@ -1205,5 +1205,14 @@
   "outbox.confirmedAccount": "Message confirmed. Sign in to the original pod account to finish remaining work.",
   "outbox.unknownAccount": "This older saved send did not record its pod account. Automatic retry is paused; review before sending a new copy.",
   "outbox.actorReviewConfirm": "The original sender account was not recorded. Copy the text to the composer? Pressing Send creates a new message from the current account and may duplicate an earlier delivery.",
-  "outbox.actorNeeded": "Connect your pod account before sending in this conversation. Your draft is kept."
+  "outbox.actorNeeded": "Connect your pod account before sending in this conversation. Your draft is kept.",
+  "nativeMedia.waiting": "File saved on this device; waiting to send.",
+  "nativeMedia.peerUnavailable": "Waiting for the recipient’s supported primary browser to be online.",
+  "nativeMedia.headerWaiting": "Waiting for an earlier file header to be saved by the recipient. Later messages to this person wait too.",
+  "nativeMedia.fileWaiting": "The recipient saved the file key. Waiting for the file to be saved on their device.",
+  "nativeMedia.historyRequired": "Enable local DM history to finish saving this file. The pending file is retained.",
+  "nativeMedia.keyChanged": "The recipient’s original key is unavailable or changed. The prepared file is retained.",
+  "nativeMedia.saved": "File saved for delivery. You can review it in Pending sends.",
+  "nativeMedia.legacy": "This connection uses live file delivery. Reload recovery is unavailable.",
+  "nativeMedia.blocked": "Delivery was blocked or revoked. The prepared file is retained; it cannot be safely cancelled."
 }

@@ -1,4 +1,5 @@
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
+import { nativeMediaJourney } from './scripts/native-media-journey.mjs';
 // Cross-account, multi-device DM smoke (R52 E6) — the "never green-verified"
 // case from memory/multidevice-status.md.
 //
@@ -90,6 +91,9 @@ async function startGateway(name) {
   };
   await launch();
   return { url: `http://127.0.0.1:${httpPort}/`, httpPort, wsPort,
+    nativeState: () => JSON.parse(execFileSync('python', ['-c',
+      'import sqlite3,sys,json; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute("SELECT message_id,status,header_committed,event_json IS NOT NULL,incoming FROM native_media").fetchall()))',
+      join(dataDir, 'proxion.db')], { encoding: 'utf8' })),
     queued: (owner, device) => Number(execFileSync('python', ['-c',
       'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("SELECT COUNT(*) FROM pending_device_fanout WHERE to_webid=? AND to_device_id=?",sys.argv[2:]).fetchone()[0])',
       join(dataDir, 'proxion.db'), owner, device], { encoding: 'utf8' }).trim()),
@@ -368,6 +372,9 @@ try {
   await b.waitForFunction(async () => (await (await import('./dmhistory.js')).dmHistorySearch('voice.webm')).some(row => row.file?.mime_type === 'audio/webm'),
     { timeout: 20000, polling: 250 });
   console.log('  ✓ native DM voice records and sends through the sealed attachment route');
+  step = 'native-inline-durable-recovery';
+  await nativeMediaJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
+    openSender: () => openFirstDm(ap, 'native inline sender'), openReceiver: () => openFirstDm(b, 'native inline recipient'), online });
 
   // E5 slice 2: A-primary's SENT message self-synced to A-device. Check A-device's
   // local plaintext store (robust to which thread is active).

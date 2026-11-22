@@ -73,7 +73,7 @@ describe('connect', () => {
     ws.readyState = FakeWS.OPEN;
     await ws.onopen();
     const register = ws.sent.find(m => m.cmd === 'register');
-    expect(register).toMatchObject({ did: 'did:key:zSelf', x25519_pub: 'MYX25519PUB' });
+    expect(register).toMatchObject({ did: 'did:key:zSelf', x25519_pub: 'MYX25519PUB', native_media_v: 1 });
     // Queued command must NOT be sent yet — it would hit the gateway before we're
     // registered and be dropped as "Not registered".
     expect(ws.sent.find(m => m.cmd === 'queued_thing')).toBeFalsy();
@@ -89,6 +89,12 @@ describe('connect', () => {
     hostSocket = ws;
     ws.onmessage({ data: JSON.stringify({ type: 'hello', n: 1 }) });
     expect(handleEventAsync).toHaveBeenCalledWith({ type: 'hello', n: 1 });
+  });
+  it.each(['history disabled', 'linked device'])('does not opt into durable primary media with %s', async mode => {
+    if (mode === 'history disabled') store.dmHistoryEnabled = 'false';
+    else store.proxion_delegation_cert = JSON.stringify({ account_did: 'did:key:account' });
+    const c = make(); c.connect(); const ws = made[0]; ws.readyState = FakeWS.OPEN; await ws.onopen();
+    expect(ws.sent.find(frame => frame.cmd === 'register').native_media_v).toBeUndefined();
   });
   it('ignores messages from a superseded socket', () => {
     const handleEventAsync = vi.fn();

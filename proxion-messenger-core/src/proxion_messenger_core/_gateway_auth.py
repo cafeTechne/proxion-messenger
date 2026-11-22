@@ -456,6 +456,8 @@ class AuthHandlerMixin:
                     display_name=self._display_names.get(websocket, "")))
             turn_creds = self._make_turn_creds(identity)
             registered_msg: dict = {"type": "registered", "webid": identity, "dm_commit_v": 1}
+            if self._native_capable(websocket) and self._native_storage_writable():
+                registered_msg["native_media_v"] = 1
             if turn_creds:
                 registered_msg["turn"] = turn_creds
             # R85 Track 1: certify the connecting browser's signing key (its clientDid)

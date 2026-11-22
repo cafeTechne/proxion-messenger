@@ -40,8 +40,8 @@ export async function nativeMediaEnvelope(event) {
     return { bytes, receiveId, headerId, commit };
 }
 
-// Staged adapter: registration must not advertise this protocol until the
-// sender and live browser crash journeys are integrated as well.
+// Header consumption and complete file/history persistence have separate
+// acknowledgements; a protected full receipt survives a lost socket reply.
 export function createNativeMediaReceiver({ e2e, receipts, getScope, getGeneration = () => 0,
     isActive = () => true, persistMessage, handleEvent, toMessage, sendCommit,
     requestReplay = () => {}, onError = err => console.warn('[native-media] receive pending:', err) }) {

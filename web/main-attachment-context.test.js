@@ -14,6 +14,8 @@ function fixture() {
         activeView: { type: 'local_room', id: 'first' }, socket: { readyState: 1 },
         _isPodRoomView: () => false, _roomMedia: { send: vi.fn() },
         _isPodDmView: () => false, _dmMedia: { send: vi.fn() },
+        _nativeMedia: { available: () => false },
+        dmHistoryEnabled: () => true,
         _webRoomSessionId: () => session, _conversationSupports: () => true,
         captureMediaTarget, showToast: vi.fn(), t: key => key,
         needsDownscale: () => false, downscaleImage: vi.fn(), measureMedia: vi.fn(async () => null),
@@ -35,6 +37,19 @@ function fixture() {
 }
 
 describe('attachment destination across asynchronous preparation', () => {
+    it('retains the frozen native source without starting transmission after the view changes during its save', async () => {
+        const h = fixture(); let saved;
+        h.deps.secondary.mustSeal = () => true;
+        h.deps._nativeMedia.available = () => true;
+        h.deps._nativeMedia.sender = { enqueue: vi.fn(() => new Promise(resolve => { saved = resolve; })), retry: vi.fn() };
+        const sending = h.app.sendAttachmentFile(h.file);
+        await vi.waitFor(() => expect(saved).toBeTypeOf('function'));
+        h.app.setView({ type: 'local_dm', id: 'other', peerWebid: 'did:key:other' });
+        saved({ id: 'saved-original' }); await sending;
+        expect(h.deps._nativeMedia.sender.enqueue.mock.calls[0][1].id).toBe('first');
+        expect(h.deps._nativeMedia.sender.retry).not.toHaveBeenCalled(); expect(h.deps.sendCmd).not.toHaveBeenCalled();
+        expect(h.deps.showToast).toHaveBeenCalledWith('media.conversationChanged', 'error');
+    });
     it('sends and archives to the confirmed room', async () => {
         const h = fixture(); await h.app.sendAttachmentFile(h.file); h.finishRead();
         expect(h.deps.sendCmd).toHaveBeenCalledWith('send_file', expect.objectContaining({ room_id: 'first', data_b64: 'QUJD' }));

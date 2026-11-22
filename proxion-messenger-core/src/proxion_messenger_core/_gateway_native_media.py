@@ -31,7 +31,7 @@ class NativeMediaMixin:
     def _native_status(row):
         return {"type": "native_media_status", "v": 1, "message_id": row["message_id"],
                 "media_digest": row["media_digest"],
-                "status": row["status"] if row["committed"] or row["forwarded"] else "pending",
+                "status": row["status"] if row["committed"] or row["forwarded"] or row["status"] == "blocked" else "pending",
                 "header_digest": row["header_digest"], "header_committed": row["header_committed"]}
 
     async def _handle_native_inline(self, ws, data, sealed, file_bytes):

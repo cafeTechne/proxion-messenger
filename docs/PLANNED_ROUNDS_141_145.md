@@ -98,10 +98,10 @@ or cryptographic protocol changes; shell cache v305. Round 142 remains open.
 
 Gateway custody checkpoint: schema 68 now has a bounded opt-in inline-media
 queue with stable ids, exact-payload conflict checks, authenticated primary
-receive commits, policy cleanup and signed cross-gateway custody proofs. The
-current browser does not opt in and the gateway does not advertise it yet.
+receive commits, policy cleanup and signed cross-gateway custody proofs. At that
+checkpoint the browser did not opt in and the gateway did not advertise it.
 Validation: 4,766 backend checks and the final 39-check conformance subset pass.
-See [the staged native custody contract](ROUND_142_NATIVE_CUSTODY.md). Browser
+See [the native custody contract](ROUND_142_NATIVE_CUSTODY.md). Browser
 sender/receiver integration, pending controls and live fault journeys remain
 open; this does not complete 142 or native chunk resume in 143.
 
@@ -110,9 +110,19 @@ custody, durable header consumption and full file commit. Atomic shared-ratchet
 send holds preserve ordering without increasing MAX_SKIP. Tested sender/receiver
 adapters retain original drafts, encrypted key recovery and exact receipts across
 storage failures and reload; capability checks bind the original primary key.
-These adapters remain staged. Live file/voice routing, pending UI and browser
-fault journeys are still required. Details and validation are in the custody
+At that checkpoint the adapters remained staged; live file/voice routing,
+pending UI and browser fault journeys were still required. Details and validation are in the custody
 contract linked above; the scope and completion status are unchanged.
+
+Live integration checkpoint (2026-11-22): primary browsers now negotiate native
+inline file/voice recovery and expose pending/header/history/key/policy states.
+A real 32 KiB cross-gateway journey passes prepared-write interruption, keyboard
+retry, failed receiver history, exact header release, lost full commit and both
+gateway/browser restarts, retaining one exact file per primary. Frontend: 2,641
+passed plus the final lifecycle checks; native/event-contract backend: 29 passed.
+Recorded voice and the preserved device-fanout fault journeys also pass. Larger
+inline HTTP bodies remain retained pending Round 143's chunk transport; neither
+142 nor 143 is closed. See [the transfer contract](ROUND_143_TRANSFER_PROTOCOL.md).
 
 ### Problem and result
 

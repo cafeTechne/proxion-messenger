@@ -99,7 +99,7 @@ export function createNativeMediaStore(dbApi = globalThis.indexedDB) {
             }, current);
         },
         progress(scope, id, revision, patch, current = () => true) {
-            if (!patch || Object.keys(patch).some(key => !['headerCommitted', 'committed', 'historySaved'].includes(key))
+            if (!patch || Object.keys(patch).some(key => !['headerCommitted', 'committed', 'historySaved', 'blocked'].includes(key))
                 || Object.values(patch).some(value => value !== true)) throw fail('Invalid native media progress');
             return operation('readwrite', (store, done, abort) => {
                 const request = store.get(keyFor(scope, id));
@@ -124,6 +124,17 @@ export function createNativeMediaStore(dbApi = globalThis.indexedDB) {
                         || !row.headerCommitted || !row.committed || !row.historySaved) {
                         abort('Native media completion not durable'); return;
                     }
+                    store.delete(row.key); done(true);
+                };
+            }, current);
+        },
+        cancelSource(scope, id, revision, current = () => true) {
+            return operation('readwrite', (store, done, abort) => {
+                const request = store.get(keyFor(scope, id));
+                request.onsuccess = () => {
+                    const row = request.result;
+                    if (!current()) { abort('Native media context changed'); return; }
+                    if (!row || row.revision !== revision || row.stage !== 'source') { done(false); return; }
                     store.delete(row.key); done(true);
                 };
             }, current);

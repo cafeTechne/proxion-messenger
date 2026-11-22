@@ -1,7 +1,7 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, authContext, takeAuthError, reauthIssuer } from './auth.js';
 import {
     initE2E, setE2EActivityCheck, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
-    ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend, cachedPeerPub, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
+    ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, finishDmSend, releaseDmSendHold, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend, cachedPeerPub, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
@@ -60,6 +60,7 @@ import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attac
 import { createDmMedia, createDmMediaStore, deliverDmMedia, forwardDmMedia } from './dm-media.js';
 import { createDmReceiptStore } from './dm-receipts.js';
 import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receive.js';
+import { createNativeMedia } from './native-media.js';
 import { createDmOutbox } from './dm-outbox.js';
 import { createDmOutboxUi } from './dm-outbox-ui.js';
 import { createAssetInventoryUi } from './asset-inventory-ui.js';
@@ -299,7 +300,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const CMD_ALLOWED_KEYS = {
             connect_css:      new Set(["cmd","css_url","email","password"]),
             create_webhook:   new Set(["cmd","thread_id","direction","url","bot_name"]),
-            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler","width","height", ...SEALED_FIELDS]),
+            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler","width","height","native_media_v","message_id","media_digest", ...SEALED_FIELDS]),
             schedule_message: new Set(["cmd","thread_id","content","send_at","plaintext_ok"]),
             file_offer:       new Set(["cmd","to_webid","file_id","filename","mime_type","size_bytes","total_chunks", ...SEALED_FIELDS]),
             file_accept:      new Set(["cmd","to_webid","file_id"]),
@@ -868,6 +869,33 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const _mediaCleanup = new Map();
         const _outgoingGeneration = () => JSON.stringify([authContext().epoch, crossMode?.generation() || 0]);
         const _outgoingScope = () => JSON.stringify(['outgoing', selfWebId || clientDid, clientDid, e2eScopedKey('')]);
+        const _nativeMedia = createNativeMedia({ secondary,
+            e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend },
+            receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
+            isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
+            getPeerPub: cachedPeerPub, send: command => sendCmd(command.cmd, command),
+            persistMessage: message => dmHistoryEnabled() ? dmHistorySave(message) : false,
+            handleEvent,
+            toMessage: event => ({ type: 'message', source: 'local_dm', local: true,
+                message_id: 'native:' + event.from_webid + ':' + event.message_id,
+                from_webid: event.from_webid, from_display_name: event.from_display_name,
+                thread_id: peerDidToCertId[event.from_webid] || event.thread_id,
+                timestamp: event.timestamp }),
+            persistOwnMessage: async (row, current) => {
+                if (!dmHistoryEnabled() || !current()) return false;
+                const bytes = new Uint8Array(await row.blob.arrayBuffer());
+                if (!current()) return false;
+                const message = { type: 'message', source: 'local_dm', local: true, own: true, e2e: false,
+                    message_id: 'native:' + selfWebId + ':' + row.id, thread_id: row.view.id,
+                    from_webid: selfWebId, timestamp: row.timestamp, content: '📎 ' + row.metadata.name,
+                    file: { filename: row.metadata.name, mime_type: row.metadata.mime, size: bytes.length,
+                        data_b64: _u8ToB64(bytes), spoiler: row.metadata.spoiler,
+                        ...(row.metadata.width ? { width: row.metadata.width, height: row.metadata.height } : {}) },
+                    _persistDm: true, _dmHistoryManaged: true };
+                if (await dmHistorySave(message) === false || !current()) return false;
+                handleEvent(message); return true;
+            },
+        });
         const _dmOutbox = createDmOutbox({
             e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
             getScope: _outgoingScope, getGeneration: _outgoingGeneration, isActive: () => !!clientDid && tabLock.isLeader(),
@@ -942,7 +970,11 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             }
             return 'ready';
         }
-        const _pendingSendsUi = createDmOutboxUi({ outbox: _dmOutbox,
+        const _pendingSendsUi = createDmOutboxUi({ outbox: {
+            inspect: async () => [...await _dmOutbox.inspect(), ...await _nativeMedia.inspect()],
+            send: id => id.startsWith('native:') ? _nativeMedia.sender.retry(id.slice(7)) : _dmOutbox.send(id),
+            cancel: id => id.startsWith('native:') ? _nativeMedia.cancel(id.slice(7)) : _dmOutbox.cancel(id),
+        },
             getScope: () => JSON.stringify([_outgoingScope(), authContext().epoch, crossMode?.generation() || 0]),
             isActive: () => tabLock.isLeader() && (!boundWebId() || authContext().authenticated),
             getName: id => resolvePeerName(id) || id,
@@ -1273,6 +1305,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         tabLock.onStepDown(async () => {
             _pendingSendsUi.reset();
             _gatewayReceives.stop();
+            _nativeMedia.stop();
             _dmOutbox.stop();
             const queued = stopConnection();
             await ratchetIdle().catch(() => {});
@@ -2411,6 +2444,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // The pod bridge's own replies (gwpod.js) never reach the app dispatch.
             if (!fromPod && crossMode && crossMode.handleEvent(event)) return;
             if (!fromPod && crossRooms && crossRooms.handleEvent(event)) return;
+            if (!fromPod) {
+                try { if (await _nativeMedia.handleEvent(event)) return; }
+                catch (err) { console.warn('[native-media] recovery pending:', err); return; }
+            }
             // Cache peer's X25519 pub key from a gateway-delivered DM event only.
             if (!fromPod && event.x25519_pub && event.from_webid) {
                 cachePeerPub(event.from_webid, event.x25519_pub);
@@ -2899,6 +2936,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     break;
                 case "registered":
                     _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
+                    _nativeMedia.start(event.native_media_v);
                     _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;
@@ -6879,6 +6917,19 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             const dims = await measureMedia(file);
             if (!current()) return;
             if (sealFile) {
+                if (_nativeMedia.available()) {
+                    if (!dmHistoryEnabled()) { showToast(t('nativeMedia.historyRequired'), 'warning'); return; }
+                    try {
+                        const draft = await _nativeMedia.sender.enqueue(file, view, {
+                            name: file.name, mime: file.type || 'application/octet-stream',
+                            width: dims?.width, height: dims?.height, spoiler: opts.spoiler === true });
+                        if (!current()) return;
+                        showToast(t('nativeMedia.saved'));
+                        await _nativeMedia.sender.retry(draft.id);
+                    } catch (err) { console.warn('[native-media] send pending:', err); showToast(t('file.sendFailed'), 'error'); }
+                    return;
+                }
+                showToast(t('nativeMedia.legacy'), 'warning');
                 if (!socket || socket.readyState !== WebSocket.OPEN) { showToast(t('file.notConnected')); return; }
                 let sealed;
                 try {
@@ -8562,6 +8613,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // Full wipe: clears identity key, all data, and pod credentials.
             // Only used by "Reset Identity" — not by normal pod sign-out.
             async function _resetIdentity() {
+                _nativeMedia.stop();
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }

@@ -45,6 +45,28 @@ async function harness() {
 }
 
 describe('native media sender evidence boundaries', () => {
+    it('retains blocked prepared sends across reload without releasing or silently retrying their spent header', async () => {
+        const h = await harness(); await h.sender.retry('file-1');
+        expect(await h.sender.status(await h.status({ status: 'blocked' }))).toBe(true);
+        expect((await h.store.get('alice/device', 'file-1')).blocked).toBe(true);
+        expect(h.options.e2e.releaseDmSendHold).not.toHaveBeenCalled();
+        const sent = h.options.send.mock.calls.length;
+        expect(await h.engine().retry('file-1')).toBe(false);
+        expect(h.options.send).toHaveBeenCalledTimes(sent);
+        expect(h.options.e2e.finishDmSend).not.toHaveBeenCalled();
+    });
+    it('continues unrelated saved files after an earlier recovery attempt fails', async () => {
+        const h = await harness(); h.options.onError = vi.fn();
+        const engine = h.engine();
+        await engine.enqueue(new Blob(['other source']), { type: 'dm', id: 'other-thread', peerWebid: 'did:key:charlie' },
+            { name: 'other.txt', mime: 'text/plain' }, 'file-2');
+        h.options.capability.mockRejectedValueOnce(Error('first peer interrupted'));
+        expect(await engine.recover()).toBe(true);
+        expect(h.options.onError).toHaveBeenCalledTimes(1);
+        expect((await h.store.get('alice/device', 'file-1')).stage).toBe('source');
+        expect((await h.store.get('alice/device', 'file-2')).stage).toBe('sealed');
+        expect(h.options.send.mock.calls.some(([command]) => command.cmd === 'send_file' && command.message_id === 'file-2')).toBe(true);
+    });
     it('leaves an unsupported/offline peer source unspent and pins its original key', async () => {
         const h = await harness(); h.options.capability.mockResolvedValue({ supported: false });
         expect(await h.sender.retry('file-1')).toBe(false);

@@ -1,9 +1,11 @@
-# Round 142: staged native inline-media custody protocol
+# Round 142: native inline-media custody and primary browser recovery
 
-Status: backend checkpoint, not a completed Round 142. The current web client
-neither requests this protocol nor receives its optional responses. The gateway
-does not advertise `native_media_v` in `registered` yet. Browser draft/receive
-integration and pending controls are the next work; chunk resume remains 143.
+Status: browser integration checkpoint; Round 142 remains open for the larger
+cross-gateway inline path that needs Round 143's bounded chunk transport. Primary
+browsers with local DM history enabled now request `native_media_v: 1`, and a
+healthy durable gateway advertises the negotiated version in `registered`.
+Linked/older connections retain explicitly labeled live delivery. Media fanout
+is not implemented or claimed by this primary-only protocol.
 
 ## Custody and identity
 
@@ -108,7 +110,7 @@ safety outcome still applies. In particular, forwarding to a peer gateway is
 not evidence that its browser consumed the file header. The browser must not
 retire that pending ratchet header merely because custody transferred.
 
-## Remaining browser work
+## Header ordering and browser recovery
 
 ### Header ordering and adapter checkpoint (2026-11-22)
 
@@ -134,7 +136,7 @@ custody alone never clears either. MAX_SKIP remains 20. Releasing the hold retai
 the header send journal until full completion. Prepared cancellation and ratchet
 reset remain unavailable under Round 144's reviewed outcome.
 
-The staged `native-media-send.js` and `native-media-receive.js` adapters connect
+At this checkpoint, the staged `native-media-send.js` and `native-media-receive.js` adapters connected
 these boundaries without activating browser registration. Source progress is
 saved transactionally before hold release, and full peer commit plus sender
 history persistence precede journal/source cleanup. The receiver saves file-key
@@ -146,21 +148,46 @@ still bind the exact ciphertext. File bytes stay outside localStorage; recovery
 requests gateway replay. Native receive journals and receipts are isolated from
 ordinary gateway DM recovery.
 
-These adapters have unit and real WebCrypto ratchet coverage, including damaged
+At that checkpoint, the adapters had unit and real WebCrypto ratchet coverage, including damaged
 file bytes followed by reload and a DH turn, held sends, exact replay, lost ACK,
-quota failure, stale account continuations and source-history retry. They are
+quota failure, stale account continuations and source-history retry. They were
 still **staged**: live UI dispatch, pending controls, capability request wiring
 and real browser fault journeys remain open. No native file/voice delivery or
 Round 142 completion is claimed by this checkpoint. Round 143 remains open.
 
-Wire the staged adapters into primary-account registration, authenticated socket
-dispatch, capability request correlation, own/incoming history and file/voice
-entry points. Expose pending/retry, header ordering and unsupported-peer states
-honestly. Remove staged module/event-contract exclusions when live imports and
-dispatch exist, then advertise the version after validation. Validate reload,
-lost acknowledgement, quota, key/account changes and policy boundaries in real
-browser journeys. Preserve the existing HTTP limit; larger remote files need
-Round 143's durable chunk transport rather than a false inline acceptance claim.
+## Live browser integration checkpoint (2026-11-22)
+
+The adapters are now imported and dispatched by the primary gateway browser.
+File-picker, paste, GIF and sealed voice attachment entry points use durable
+inline drafts when negotiated. Direct frames keep attachment bytes outside the
+generic persisted command queue. Capability replies are correlated by request,
+original peer/key, account and connection generation. Reconnect and returning
+to the foreground reconcile receive receipts and source progress in bounded
+batches. History-disabled connections do not initially opt in; disabling history
+mid-transfer retains unfinished files instead of issuing a false full commit.
+
+Pending sends lists native files with separate peer, header, file/history, key
+and policy states. Later encrypted text waiting behind a header is not labeled
+as a storage failure. Only a transactional unspent source can be cancelled,
+including while disconnected. Prepared/blocked drafts remain protected under
+Round 144. A failed file does not prevent unrelated saved files from recovering.
+Step-down and explicit destructive identity reset stop native recovery first.
+
+The real multi-device browser journey now exercises a 32 KiB cross-gateway file
+through a failed prepared-header write, sender reload, keyboard retry, receiver
+history failure, later readable text after the header commit, deliberately lost
+full receive commit, both gateway restarts and both browser reloads. Exact file
+ciphertext/header are reused, source cleanup waits for full evidence and sender
+history, and each primary retains one exact readable file. Recorded WebM voice,
+600 KiB legacy chunk history, pairing and all Round 145 fanout restart/lost-ACK
+journeys pass in the same run. The larger native resumable chunk path remains
+unimplemented; the legacy chunk history check is not evidence of resume.
+
+The existing HTTP relay body cap still prevents larger inline envelopes from
+crossing gateways as one request. Their source is retained; do not claim those
+files complete. Round 143 must carry their original ciphertext/header in bounded
+parts and implement the durable larger-file path described in
+[the transfer implementation contract](ROUND_143_TRANSFER_PROTOCOL.md).
 
 ## Validation at the schema 68 custody checkpoint
 
@@ -174,7 +201,7 @@ safe mode, corruption, in-memory stores, bounded attempts and clean shutdown.
 The final 39-check conformance subset also passes, including 2 MiB and 25 MiB
 active transfers through two real gateways, native custody, fanout and event
 contracts. Ruff, the undefined-name cold-path gate and whitespace checks pass. No browser
-recovery journey is claimed for this still-staged protocol.
+recovery journey was claimed at that checkpoint.
 
 ## Validation at the schema 69 header/adapter checkpoint
 
@@ -186,3 +213,13 @@ suite passes six, and the final event contract passes four, including a guard
 that staged adapters are not imported by the live browser. ESLint reports no
 errors; Ruff, the undefined-name cold-path gate and whitespace checks pass.
 This is adapter/protocol validation, not a live browser native-media closeout.
+
+## Validation at the live browser integration checkpoint
+
+The complete frontend suite passes 2,641 checks with 64 skipped. The two later
+foreground/cancellation cases pass in the seven-check lifecycle suite. The final
+native/event-contract backend subset passes 29 checks. ESLint, Ruff, whitespace
+and translation gates pass (existing fallback-locale warnings remain). Shell
+cache is 308. `smoke_multidevice_dm.mjs`, including `nativeMediaJourney`, passes
+all native and preserved device-fanout cases. This does not close the remaining
+large-inline/chunk requirements in 142–143.

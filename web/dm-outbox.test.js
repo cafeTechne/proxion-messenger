@@ -31,6 +31,14 @@ function harness() {
 }
 
 describe('durable encrypted text outbox', () => {
+    it('reports an earlier native header hold distinctly from a storage failure and retries without key replacement', async () => {
+        const h = harness(), engine = h.engine(); await engine.queue(input);
+        h.e2e.ratchetEncrypt.mockRejectedValueOnce(Object.assign(Error('header pending'), { name: 'E2EHeaderPendingError' }));
+        expect(await engine.send(input.id)).toBe(false);
+        expect((await engine.inspect())[0].state).toBe('nativeHeader'); expect(h.frames).toEqual([]);
+        expect(await engine.send(input.id)).toBe(true);
+        expect((await engine.inspect())[0].state).toBe('confirmation'); expect(h.frames).toHaveLength(1);
+    });
     it('commits intent before encryption and prepared frames before transmission', async () => {
         const h = harness(), engine = h.engine();
         await engine.queue(input);

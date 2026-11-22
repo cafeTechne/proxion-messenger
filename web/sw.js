@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v307";
+const CACHE = "proxion-shell-v308";
 const SHELL = [
   "./",
   "index.html",
@@ -26,6 +26,10 @@ const SHELL = [
   "util.js",
   "filetransfer.js",
   "e2e-secondary.js",
+  "native-media.js",
+  "native-media-drafts.js",
+  "native-media-send.js",
+  "native-media-receive.js",
   "voice.js",
   "notifications.js",
   "onboarding.js",

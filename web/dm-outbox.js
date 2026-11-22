@@ -5,7 +5,11 @@ import { dmEnvelopeFingerprint } from './dm-receipts.js';
 export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActive = () => true, send,
     persistMessage, clearDelivery, canSend = () => true, planStatus = () => 'ready', onCancelled = () => {}, onPending = () => {}, onConfirmed = () => {},
     onError = err => console.warn('[dm-outbox] pending:', err), now = Date.now }) {
-    const failures = new Set();
+    const failures = new Set(), headerWaiting = new Set();
+    const rememberFailure = (id, err) => {
+        if (err?.name === 'E2EHeaderPendingError') headerWaiting.add(id);
+        else failures.add(id);
+    };
     const jobs = new Map(), queues = new Map(), notified = new Set(), settled = new Set(), attempts = new Map();
     let generation = 0, timer = null, restoring = null;
     const context = () => {
@@ -149,6 +153,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 if (job.peerConfirmed) await settleAccepted(job, ctx);
                 if (!ctx.current() || !canSend(job)) return false;
                 failures.delete(id);
+                headerWaiting.delete(id);
                 let ready = job, transmitted = false;
                 const encrypted = preparedResults(job);
                 const prepare = async (entry, index) => {
@@ -188,12 +193,12 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                         await save(next, ctx); ready = next;
                     } catch (err) {
                         if (!ctx.current()) throw err;
-                        failures.add(id); onError(err);
+                        rememberFailure(id, err); onError(err);
                     }
                 }
                 await transmitPhase(entry => entry.account !== job.peer);
                 return transmitted;
-            } catch (err) { if (ctx.current()) failures.add(id); onError(err); return false; }
+            } catch (err) { if (ctx.current()) rememberFailure(id, err); onError(err); return false; }
         });
     }
     function evidencedTargets(job, evidence) {
@@ -252,7 +257,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 ? latest.media ? 'mediaAttention' : latest.peerConfirmed ? 'accountConfirmed' : 'account'
                 : latest.media && latest.peerConfirmed && !latest.mediaReleased ? 'media'
                     : latest.confirmed ? 'cleanup' : latest.peerConfirmed ? (plan === 'changed' ? 'syncAttention' : 'sync')
-                        : plan === 'changed' ? 'attention' : failures.has(job.id) ? 'storage'
+                        : plan === 'changed' ? 'attention' : headerWaiting.has(job.id) ? 'nativeHeader' : failures.has(job.id) ? 'storage'
                             : !canSend(latest) || plan !== 'ready' ? 'waiting' : latest.frames ? 'confirmation' : 'waiting';
             const canRetry = remaining(latest).some(entry => planStatus({ ...latest, entries: [entry] }) === 'ready');
             rows.push({ id: latest.id, peer: latest.peer, timestamp: latest.record.timestamp, state, canCancel, canRetry });
@@ -339,6 +344,6 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             if (!timer) timer = setInterval(() => restore().catch(onError), 5000);
             return restore({ force: true }).catch(onError);
         },
-        stop() { generation++; if (timer) clearInterval(timer); timer = null; jobs.clear(); intentQueues.clear(); failures.clear(); notified.clear(); settled.clear(); attempts.clear(); restoring = null; },
+        stop() { generation++; if (timer) clearInterval(timer); timer = null; jobs.clear(); intentQueues.clear(); failures.clear(); headerWaiting.clear(); notified.clear(); settled.clear(); attempts.clear(); restoring = null; },
     };
 }
