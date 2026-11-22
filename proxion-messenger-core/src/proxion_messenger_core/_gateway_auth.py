@@ -156,6 +156,7 @@ class AuthHandlerMixin:
             "gateway_url": pending["gateway_url"],
             "delegation_cert": pending.get("delegation_cert"),
             "dm_commit_v": pending.get("dm_commit_v"),
+            "native_media_v": pending.get("native_media_v"),
         })
 
     def _rotated_from_identity(self, identity: str) -> str:
@@ -258,6 +259,7 @@ class AuthHandlerMixin:
                 "auth_ctx": _auth_ctx,
                 "delegation_cert": data.get("delegation_cert"),
                 "dm_commit_v": data.get("dm_commit_v"),
+                "native_media_v": data.get("native_media_v"),
             }
             _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
             logger.info("auth_challenge issued to %s for DID %s...", _ip_dbg2, identity[:20])
@@ -351,6 +353,7 @@ class AuthHandlerMixin:
             import uuid as _uuid_sess
             self._session_meta[websocket] = {
                 "dm_commit_v": 1 if data.get("dm_commit_v") == 1 else 0,
+                "native_media_v": 1 if type(data.get("native_media_v")) is int and data["native_media_v"] == 1 else 0,
                 "session_id": str(_uuid_sess.uuid4()),
                 "connected_at": datetime.now(timezone.utc).isoformat(),
                 "ip_addr": getattr(websocket, 'remote_address', ('unknown',))[0]

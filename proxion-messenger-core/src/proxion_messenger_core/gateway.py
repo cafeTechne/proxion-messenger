@@ -26,6 +26,7 @@ from ._gateway_pod import PodSyncMixin, extract_mentions
 from ._gateway_rooms import RoomHandlerMixin, _MAX_DISAPPEAR_MS
 from ._gateway_http import HttpEndpointsMixin
 from ._gateway_dm import DmHandlerMixin
+from ._gateway_native_media import NativeMediaMixin
 from ._gateway_auth import AuthHandlerMixin
 from ._gateway_misc import MiscHandlerMixin
 from ._gateway_podbridge import PodBridgeMixin
@@ -124,7 +125,7 @@ def invite_issuer_did(invite: dict) -> str:
         return ""
 
 
-class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, OwnerMixin, HttpEndpointsMixin):
+class ProxionGateway(NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, OwnerMixin, HttpEndpointsMixin):
     def __init__(
         self,
         agent: AgentState,
@@ -1696,6 +1697,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_get_peer_devices(websocket, data)
             elif cmd == "get_peer_device_keys":
                 await self._handle_get_peer_device_keys(websocket, data)
+            elif cmd == "native_media_commit":
+                await self._handle_native_media_commit(websocket, data)
+            elif cmd == "native_media_recover":
+                await self._handle_native_media_recover(websocket, data)
             elif cmd == "dm_receive_commit":
                 await self._handle_dm_receive_commit(websocket, data)
             elif cmd == "dm_receive_recover":
@@ -4740,6 +4745,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                             logger.error("gateway task failed, shutting down: %r", _failure)
                             break
             finally:
+                await self._stop_native_media()
                 _stop_task.cancel()
                 _wait_task.cancel()
                 # Drain: notify clients and give them 2 s

@@ -195,6 +195,8 @@ class SecurityStoreMixin(object):
             )
             if cert_id.startswith("device:"):
                 conn.execute("DELETE FROM pending_device_fanout WHERE to_device_id=?", (cert_id[len("device:"):],))
+                device = cert_id[len("device:"):]
+                conn.execute("UPDATE native_media SET event_json=NULL,byte_count=0,status='blocked' WHERE status='pending' AND (to_webid=? OR from_webid=?)", (device, device))
     def contact_revocation_cert_ids(self, peer_did: str) -> list:
         """The cert_ids of peer_did's contact revocations (never "device:" rows),
         i.e. the pod tombstones a re-add has to remove."""
@@ -872,6 +874,8 @@ class SecurityStoreMixin(object):
             return {}
         counts: dict = {}
         with self._conn() as conn:
+            counts["native_media"] = conn.execute(
+                "DELETE FROM native_media WHERE to_webid=? OR from_webid=?", (webid, webid)).rowcount
             counts["committed_device_fanout"] = conn.execute(
                 "DELETE FROM committed_device_fanout WHERE to_webid=? OR from_webid=?", (webid, webid)).rowcount
             counts["pending_device_fanout"] = conn.execute(

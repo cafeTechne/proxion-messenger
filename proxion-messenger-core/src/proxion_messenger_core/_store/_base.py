@@ -254,7 +254,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 67
+    _SCHEMA_VERSION = 68
     _integrity_ok: bool = True
     _migration_error: str = ""
     def _init_db(self) -> None:
@@ -1673,6 +1673,20 @@ class _StoreBase(object):
                     envelope_digest TEXT NOT NULL, queue_id INTEGER NOT NULL, committed_at REAL NOT NULL,
                     PRIMARY KEY(from_webid, message_id, to_webid, to_device_id)
                 )""",
+            ],
+            # 68: durable inline ciphertext and content-free exact retry receipts.
+            [
+                """CREATE TABLE IF NOT EXISTS native_media (
+                    queue_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_webid TEXT NOT NULL, message_id TEXT NOT NULL,
+                    to_webid TEXT NOT NULL, media_digest TEXT NOT NULL,
+                    envelope_digest TEXT NOT NULL, event_json TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending', incoming INTEGER NOT NULL DEFAULT 0,
+                    byte_count INTEGER NOT NULL, created_at REAL NOT NULL,
+                    UNIQUE(from_webid, message_id)
+                )""",
+                "CREATE INDEX IF NOT EXISTS native_media_recipient_pending ON native_media(to_webid, queue_id) WHERE event_json IS NOT NULL",
+                "CREATE INDEX IF NOT EXISTS native_media_sender_pending ON native_media(from_webid, queue_id) WHERE event_json IS NOT NULL",
             ],
         ]
 

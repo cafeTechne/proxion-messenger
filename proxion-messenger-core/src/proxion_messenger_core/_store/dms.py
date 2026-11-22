@@ -266,6 +266,7 @@ class DmStoreMixin(object):
                     (owner_webid, blocked_webid, int(time.time())),
                 )
                 conn.execute("DELETE FROM pending_device_fanout WHERE to_webid=? AND from_webid=?", (owner_webid, blocked_webid))
+                conn.execute("UPDATE native_media SET event_json=NULL,byte_count=0,status='blocked' WHERE status='pending' AND to_webid=? AND from_webid=?", (owner_webid, blocked_webid))
             else:
                 conn.execute(
                     "DELETE FROM blocks WHERE owner_webid = ? AND blocked_webid = ?",

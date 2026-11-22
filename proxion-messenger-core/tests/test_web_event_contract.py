@@ -21,6 +21,9 @@ WEB = ROOT / "web"
 # admin, security and recovery commands the browser does not send, and the
 # sender-key / session protocol the web client does not implement.
 NOT_FOR_WEB = {
+    # Round 142 backend-only opt-in protocol. The current web client neither
+    # requests native_media_v nor receives these replies; remove on integration.
+    "native_media_status", "native_media_committed",
     "access_grants_policy_state", "ack", "ack_delivered_ok", "ack_read_ok",
     "admin_action_confirmed", "admin_action_requested", "attachment_key", "audit_logs",
     "catch_up_ack_ok", "catch_up_batch", "checksum_mismatch_acked",

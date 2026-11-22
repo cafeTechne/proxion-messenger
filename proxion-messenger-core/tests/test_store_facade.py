@@ -47,4 +47,4 @@ def test_schema_version_intact():
     import sqlite3
     s = _store()
     v = sqlite3.connect(s.db_path).execute("SELECT version FROM schema_version").fetchone()[0]
-    assert v == LocalStore._SCHEMA_VERSION == 67  # 67 = durable device fanout commit receipts
+    assert v == LocalStore._SCHEMA_VERSION == 68  # 68 = durable native inline media

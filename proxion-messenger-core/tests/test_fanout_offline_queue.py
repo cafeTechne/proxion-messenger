@@ -206,12 +206,24 @@ async def test_full_relay_queue_refuses_without_spending_replay_id(gateway):
         "content": content, "timestamp": timestamp, "relay_nonce": nonce, "signature": signature, "message_scope": "dm-fanout"}
     status, _ = await gateway._handle_relay_post(json.dumps(data).encode())
     assert status.startswith("503")
-    assert not gateway._store.has_seen_relay_id(f"{from_did}:{transport_id}")
+    import hashlib
+    replay_key = f"{from_did}:{transport_id}:" + hashlib.sha256(content.encode()).hexdigest()
+    assert not gateway._store.has_seen_relay_id(replay_key)
     gateway._store.remove_device_fanout(recipient, device, gateway._store.pending_device_fanout(recipient, device)[0]["queue_id"])
     status, _ = await gateway._handle_relay_post(json.dumps(data).encode())
     assert status.startswith("200")
-    assert gateway._store.has_seen_relay_id(f"{from_did}:{transport_id}")
+    assert gateway._store.has_seen_relay_id(replay_key)
     assert len(gateway._store.pending_device_fanout(recipient, device)) == 100
+    # A new signature/nonce cannot turn a conflicting envelope into an accepted
+    # duplicate merely by reusing the earlier transport id.
+    changed = json.dumps({"message_id": "retry-after-cap", "to_device_id": device, "payload": {"content": "changed"}})
+    new_nonce = secrets.token_hex(8)
+    conflicting = {**data, "content": changed, "relay_nonce": new_nonce,
+        "signature": sign_relay_message(sender, from_did, recipient, transport_id, changed, timestamp, new_nonce, message_scope="dm-fanout")}
+    status, _ = await gateway._handle_relay_post(json.dumps(conflicting).encode())
+    assert status.startswith("503")
+    assert [r["payload"] for r in gateway._store.pending_device_fanout(recipient, device)
+            if r["message_id"] == "retry-after-cap"] == [{"content": "C"}]
 
 
 def _restart(gateway):

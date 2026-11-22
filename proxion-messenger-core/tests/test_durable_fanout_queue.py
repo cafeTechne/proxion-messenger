@@ -47,7 +47,7 @@ def test_schema_65_upgrade_preserves_existing_data(tmp_path):
         assert enqueue(upgraded)
         assert upgraded.get_messages("thread")[0]["message_id"] == "existing"
         with upgraded._conn() as conn:
-            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 67
+            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 68
     finally:
         upgraded.close()
 

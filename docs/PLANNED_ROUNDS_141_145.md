@@ -96,6 +96,15 @@ passed when rerun with subprocess access. Focused preparation/secondary/chunk
 coverage passes (57 checks), and ESLint/whitespace checks pass. No server schema
 or cryptographic protocol changes; shell cache v305. Round 142 remains open.
 
+Gateway custody checkpoint: schema 68 now has a bounded opt-in inline-media
+queue with stable ids, exact-payload conflict checks, authenticated primary
+receive commits, policy cleanup and signed cross-gateway custody proofs. The
+current browser does not opt in and the gateway does not advertise it yet.
+Validation: 4,766 backend checks and the final 39-check conformance subset pass.
+See [the staged native custody contract](ROUND_142_NATIVE_CUSTODY.md). Browser
+sender/receiver integration, pending controls and live fault journeys remain
+open; this does not complete 142 or native chunk resume in 143.
+
 ### Problem and result
 
 Native gateway inline files/voice use secondary sealed envelopes and live

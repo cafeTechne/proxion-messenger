@@ -412,6 +412,11 @@ class DmHandlerMixin:
 
         if len(file_bytes) > _max_bytes:
             await websocket.send(_too_large)
+        elif "native_media_v" in data:
+            if type(data["native_media_v"]) is not int or data["native_media_v"] != 1:
+                await websocket.send(json.dumps({"type": "error", "message": "native_media_unsupported_version"}))
+                return
+            await self._handle_native_inline(websocket, data, _sealed, file_bytes)
         elif cert_id and cert_id in self.dm_clients:
             import tempfile, os as _os
             from .files import send_file as _send_file_pod
