@@ -110,22 +110,59 @@ retire that pending ratchet header merely because custody transferred.
 
 ## Remaining browser work
 
-Connect the existing IndexedDB source/prepared/header drafts to this protocol,
-pin their original peer/key/account, recover exact headers via the send journal,
-and save the sender's own file history before releasing its draft. Propagate
-supported recipient commits across gateways and establish header-consumption
-ordering with other traffic on the same ratchet: an undispatched file header
-must not age out of the receiver's bounded skipped-key cache while ordinary
-text continues. Peer capability and this ordering need validation before
-activation; gateway custody alone is insufficient. Add durable
-receiver header/history/receipt recovery without putting file bytes into
-localStorage. Expose pending/retry and unsupported-peer states honestly. Remove
-the two staged responses from the event contract's non-web list when the web
-adapter actually handles them, then advertise the version. Validate reload,
-lost acknowledgement, quota and policy boundaries in real browser journeys
-before calling Round 142 complete.
+### Header ordering and adapter checkpoint (2026-11-22)
 
-## Validation checkpoint
+Schema 69 adds an exact sealed-header digest and a separate durable
+`header_committed` bit. A forwarded gateway receipt does not set that bit.
+Authenticated header-only commits retain the attachment ciphertext, while full
+client commits can release it. Signed, request-bound peer receipt queries
+propagate these two boundaries across gateway restarts. An inconsistent declared
+header digest is rejected before accepting bytes into custody. Schema 68
+forwarded receipts without original header evidence cannot manufacture it.
+
+Before spending a native file header, capability preflight requires an online,
+opted-in primary whose published X25519 key matches the source's frozen key.
+Registration challenge recovery retains that key. A negative or lost preflight
+leaves the source unprepared. Capability tasks share the bounded delivery task
+pool and discard replies after account/session changes.
+
+The existing shared Double Ratchet now supports an atomic send hold on a stable
+prepared header id. Later encryption on that peer chain waits for exact durable
+header-consumption evidence; incoming traffic, unrelated peers and exact pending
+replays remain possible. The hold and ciphertext survive encrypted-state reload;
+custody alone never clears either. MAX_SKIP remains 20. Releasing the hold retains
+the header send journal until full completion. Prepared cancellation and ratchet
+reset remain unavailable under Round 144's reviewed outcome.
+
+The staged `native-media-send.js` and `native-media-receive.js` adapters connect
+these boundaries without activating browser registration. Source progress is
+saved transactionally before hold release, and full peer commit plus sender
+history persistence precede journal/source cleanup. The receiver saves file-key
+metadata in the encrypted ratchet journal before its header commit, then saves
+file history and a protected exact-envelope receipt before the full commit.
+Header recovery identity excludes attachment bytes so corrected ciphertext can
+reuse an already-consumed header after a damaged-body retry. Full-file receipts
+still bind the exact ciphertext. File bytes stay outside localStorage; recovery
+requests gateway replay. Native receive journals and receipts are isolated from
+ordinary gateway DM recovery.
+
+These adapters have unit and real WebCrypto ratchet coverage, including damaged
+file bytes followed by reload and a DH turn, held sends, exact replay, lost ACK,
+quota failure, stale account continuations and source-history retry. They are
+still **staged**: live UI dispatch, pending controls, capability request wiring
+and real browser fault journeys remain open. No native file/voice delivery or
+Round 142 completion is claimed by this checkpoint. Round 143 remains open.
+
+Wire the staged adapters into primary-account registration, authenticated socket
+dispatch, capability request correlation, own/incoming history and file/voice
+entry points. Expose pending/retry, header ordering and unsupported-peer states
+honestly. Remove staged module/event-contract exclusions when live imports and
+dispatch exist, then advertise the version after validation. Validate reload,
+lost acknowledgement, quota, key/account changes and policy boundaries in real
+browser journeys. Preserve the existing HTTP limit; larger remote files need
+Round 143's durable chunk transport rather than a false inline acceptance claim.
+
+## Validation at the schema 68 custody checkpoint
 
 A complete backend non-integration run passed 4,766 checks, with one skipped
 and 14 integration checks deselected. The final focused native suite passes
@@ -138,3 +175,14 @@ The final 39-check conformance subset also passes, including 2 MiB and 25 MiB
 active transfers through two real gateways, native custody, fanout and event
 contracts. Ruff, the undefined-name cold-path gate and whitespace checks pass. No browser
 recovery journey is claimed for this still-staged protocol.
+
+## Validation at the schema 69 header/adapter checkpoint
+
+The complete frontend suite passed 2,628 checks with 64 skipped. Subsequent
+focused verification passed 88 checks covering the final source-cleanup retry,
+absent-account refusal, real ratchet adapter recovery and service-worker cache
+307. The native backend suite passes 26 checks, the preserved fanout commit
+suite passes six, and the final event contract passes four, including a guard
+that staged adapters are not imported by the live browser. ESLint reports no
+errors; Ruff, the undefined-name cold-path gate and whitespace checks pass.
+This is adapter/protocol validation, not a live browser native-media closeout.

@@ -254,7 +254,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 68
+    _SCHEMA_VERSION = 69
     _integrity_ok: bool = True
     _migration_error: str = ""
     def _init_db(self) -> None:
@@ -1687,6 +1687,12 @@ class _StoreBase(object):
                 )""",
                 "CREATE INDEX IF NOT EXISTS native_media_recipient_pending ON native_media(to_webid, queue_id) WHERE event_json IS NOT NULL",
                 "CREATE INDEX IF NOT EXISTS native_media_sender_pending ON native_media(from_webid, queue_id) WHERE event_json IS NOT NULL",
+            ],
+            # 69: distinguish durable header consumption from ciphertext custody.
+            [
+                "ALTER TABLE native_media ADD COLUMN header_digest TEXT",
+                "ALTER TABLE native_media ADD COLUMN header_committed INTEGER NOT NULL DEFAULT 0",
+                "UPDATE native_media SET header_committed=1 WHERE status='committed'",
             ],
         ]
 

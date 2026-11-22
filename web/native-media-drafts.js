@@ -64,6 +64,21 @@ export function createNativeMediaStore(dbApi = globalThis.indexedDB) {
                 };
             }, current);
         },
+        pinPeer(scope, id, revision, peerPub, current = () => true) {
+            if (typeof peerPub !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(peerPub)) throw fail('Invalid native media peer key');
+            return operation('readwrite', (store, done, abort) => {
+                const request = store.get(keyFor(scope, id));
+                request.onsuccess = () => {
+                    const row = request.result;
+                    if (!current()) { abort('Native media context changed'); return; }
+                    if (!row || row.revision !== revision || row.stage !== 'source' || row.peerPub) {
+                        abort('Native media draft changed'); return;
+                    }
+                    row.peerPub = peerPub; row.revision++;
+                    store.put(row); done(row);
+                };
+            }, current);
+        },
         transition(scope, id, revision, next, value, current = () => true) {
             return operation('readwrite', (store, done, abort) => {
                 const request = store.get(keyFor(scope, id));
@@ -83,13 +98,45 @@ export function createNativeMediaStore(dbApi = globalThis.indexedDB) {
                 };
             }, current);
         },
+        progress(scope, id, revision, patch, current = () => true) {
+            if (!patch || Object.keys(patch).some(key => !['headerCommitted', 'committed', 'historySaved'].includes(key))
+                || Object.values(patch).some(value => value !== true)) throw fail('Invalid native media progress');
+            return operation('readwrite', (store, done, abort) => {
+                const request = store.get(keyFor(scope, id));
+                request.onsuccess = () => {
+                    const row = request.result;
+                    if (!current()) { abort('Native media context changed'); return; }
+                    if (!row || row.stage !== 'sealed' || row.revision !== revision
+                        || (patch.committed && !patch.headerCommitted && !row.headerCommitted)
+                        || (patch.historySaved && !row.committed)) { abort('Invalid native media progress'); return; }
+                    Object.assign(row, patch); row.revision++;
+                    store.put(row); done(row);
+                };
+            }, current);
+        },
+        removeCompleted(scope, id, revision, current = () => true) {
+            return operation('readwrite', (store, done, abort) => {
+                const request = store.get(keyFor(scope, id));
+                request.onsuccess = () => {
+                    const row = request.result;
+                    if (!current()) { abort('Native media context changed'); return; }
+                    if (!row || row.revision !== revision || row.stage !== 'sealed'
+                        || !row.headerCommitted || !row.committed || !row.historySaved) {
+                        abort('Native media completion not durable'); return;
+                    }
+                    store.delete(row.key); done(true);
+                };
+            }, current);
+        },
     };
 }
 
 // Preparation only: gateway acceptance and source release are deliberately not
 // inferred here. The native sender adapter must supply those boundaries.
 export function createNativeMediaPreparation({ secondary, getScope, getGeneration = () => 0,
-    isActive = () => true, store = createNativeMediaStore() }) {
+    isActive = () => true, store = createNativeMediaStore(), getPeerPub = null, holdForReceive = false }) {
+    if (typeof holdForReceive !== 'boolean') throw fail('Invalid native receive hold option');
+    if (holdForReceive && typeof getPeerPub !== 'function') throw fail('Native receive hold requires peer key binding');
     const queues = new Map();
     function context() {
         const scope = getScope(), generation = getGeneration();
@@ -101,7 +148,9 @@ export function createNativeMediaPreparation({ secondary, getScope, getGeneratio
         const peer = secondary.peerFor(view), mime = String(metadata.mime || '').toLowerCase().split(';')[0].trim();
         if (!peer?.startsWith('did:key:') || !['dm', 'local_dm'].includes(view.type)
             || typeof view.id !== 'string' || !view.id || view.id.length > 2048 || !FILE_MIMES.has(mime)) throw fail('Unsupported native media destination');
-        return store.insert({ scope: ctx.scope, id, blob, peer,
+        const peerPub = getPeerPub?.(peer) || null;
+        if (peerPub && !/^[A-Za-z0-9_-]{43}$/.test(peerPub)) throw fail('Invalid native media peer key');
+        return store.insert({ scope: ctx.scope, id, blob, peer, peerPub, receiveHold: holdForReceive,
             view: { type: view.type, id: view.id, peerWebid: peer },
             metadata: { name: sanitizeFilename(metadata.name), mime, spoiler: metadata.spoiler === true,
                 ...(Number.isInteger(metadata.width) && Number.isInteger(metadata.height) ? { width: metadata.width, height: metadata.height } : {}) },
@@ -116,18 +165,29 @@ export function createNativeMediaPreparation({ secondary, getScope, getGeneratio
             if (!row) throw fail('Native media draft missing');
             if (row.scope !== ctx.scope || row.id !== id || !row.peer?.startsWith('did:key:')
                     || secondary.peerFor(row.view) !== row.peer) throw fail('Native media destination changed');
+            if (holdForReceive && row.receiveHold !== true) throw fail('Native media preparation lacks receive-hold evidence');
+            if (getPeerPub && !row.peerPub) {
+                const observed = getPeerPub(row.peer);
+                if (!observed) throw fail('Native media peer key unavailable');
+                if (row.stage !== 'source') throw fail('Native media preparation lacks original peer key evidence');
+                row = await store.pinPeer(ctx.scope, id, row.revision, observed, ctx.current);
+            }
+            const current = () => ctx.current() && (!getPeerPub || getPeerPub(row.peer) === row.peerPub);
+            if (!current()) throw fail('Native media destination changed');
             if (row.stage === 'source') {
                 const bytes = new Uint8Array(await row.blob.arrayBuffer()); assert(ctx);
-                const prepared = await prepareSecondaryFile(bytes, row.metadata, { current: ctx.current });
-                row = await store.transition(ctx.scope, id, row.revision, 'prepared', prepared, ctx.current);
+                const prepared = await prepareSecondaryFile(bytes, row.metadata, { current });
+                row = await store.transition(ctx.scope, id, row.revision, 'prepared', prepared, current);
             }
             if (row.stage === 'prepared') {
                 const sendId = await dmEnvelopeFingerprint({ scope: ctx.scope, message_id: id, kind: 'native-inline-file' }); assert(ctx);
-                const sealed = await secondary.sealPreparedFile(row.view, row.prepared, { sendId, current: ctx.current, echo: false });
+                const sealed = await secondary.sealPreparedFile(row.view, row.prepared, { sendId, current, echo: false,
+                    holdForReceive, peerPub: row.peerPub || undefined });
                 if (!sealed) throw fail('Native media peer key unavailable');
-                row = await store.transition(ctx.scope, id, row.revision, 'sealed', sealed.hdr, ctx.current);
+                row = await store.transition(ctx.scope, id, row.revision, 'sealed', sealed.hdr, current);
             }
-            assert(ctx); return row;
+            if (!current()) throw fail('Native media destination changed');
+            return row;
         });
         queues.set(queueKey, run);
         run.finally(() => { if (queues.get(queueKey) === run) queues.delete(queueKey); }).catch(() => {});

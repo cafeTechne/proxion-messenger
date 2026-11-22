@@ -401,13 +401,14 @@ export function createSecondaryCrypto({ encrypt, decrypt, isKeyed, isSelf, token
 
     // File encryption can be persisted before spending a ratchet key. Reopen
     // that exact prepared object after a crash; never generate a replacement key.
-    async function sealPreparedFile(view, prepared, { sendId, current = () => true, echo = false } = {}) {
+    async function sealPreparedFile(view, prepared, { sendId, current = () => true, echo = false, holdForReceive = false, peerPub } = {}) {
         const peer = sealPeer(view);
         if (!peer) return null;
         if (!current()) throw new SealedError('file context changed');
         await validatePreparedFile(prepared);
         if (!current()) throw new SealedError('file context changed');
-        const options = sendId === undefined ? { current } : { sendId, current };
+        const options = { current, ...(sendId === undefined ? {} : { sendId }),
+            ...(holdForReceive ? { holdForReceive: true } : {}), ...(peerPub ? { peerPub } : {}) };
         const hdr = await sealSecondary(encrypt, peer, KIND_FILE, prepared.body, options);
         if (!current()) throw new SealedError('file context changed');
         if (echo) {

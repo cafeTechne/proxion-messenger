@@ -16,15 +16,24 @@ class NativeMediaStoreMixin:
     MAX_NATIVE_MEDIA_PENDING = 10
 
     @staticmethod
-    def _native_media_row(row):
+    def _native_header_digest(payload):
+        from ..command_validation import SEALED_KEYS
+        header = {key: payload[key] for key in SEALED_KEYS}
+        return hashlib.sha256(json.dumps(header, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    @classmethod
+    def _native_media_row(cls, row):
         if not row:
             return None
-        return {"queue_id": row["queue_id"], "from_webid": row["from_webid"],
+        event = json.loads(row["event_json"]) if row["event_json"] else None
+        header_digest = row["header_digest"] or (cls._native_header_digest(event) if event else None)
+        return {"header_digest": header_digest, "header_committed": bool(row["header_committed"]),
+                "queue_id": row["queue_id"], "from_webid": row["from_webid"],
                 "message_id": row["message_id"], "to_webid": row["to_webid"],
                 "media_digest": row["media_digest"], "envelope_digest": row["envelope_digest"],
                 "incoming": bool(row["incoming"]), "committed": row["status"] == "committed",
                 "forwarded": row["status"] == "forwarded", "status": row["status"],
-                "event": json.loads(row["event_json"]) if row["event_json"] else None}
+                "event": event}
 
     def accept_native_media(self, sender, message_id, recipient, thread_id, media_digest,
                             payload, display_name="", *, incoming=False) -> dict | None:
@@ -66,6 +75,7 @@ class NativeMediaStoreMixin:
         if len(encoded.encode("utf-8")) > 710000:
             return None
         digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        header_digest = self._native_header_digest(payload)
         with self._conn() as conn:
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
@@ -78,7 +88,12 @@ class NativeMediaStoreMixin:
             row = conn.execute("SELECT * FROM native_media WHERE from_webid=? AND message_id=?",
                                (sender, message_id)).fetchone()
             if row:
-                return self._native_media_row(row) if row["envelope_digest"] == digest and row["status"] != "blocked" else None
+                if row["envelope_digest"] != digest or row["status"] == "blocked":
+                    return None
+                if not row["header_digest"]:
+                    conn.execute("UPDATE native_media SET header_digest=? WHERE queue_id=?", (header_digest, row["queue_id"]))
+                    row = conn.execute("SELECT * FROM native_media WHERE queue_id=?", (row["queue_id"],)).fetchone()
+                return self._native_media_row(row)
             if conn.execute("SELECT COUNT(*) FROM native_media").fetchone()[0] >= self.MAX_NATIVE_MEDIA_RECEIPTS:
                 return None
             count = conn.execute("SELECT COUNT(*) FROM native_media WHERE from_webid=? AND event_json IS NOT NULL",
@@ -95,8 +110,8 @@ class NativeMediaStoreMixin:
             if total + size > self.MAX_NATIVE_MEDIA_BYTES:
                 return None
             cur = conn.execute(
-                "INSERT INTO native_media(from_webid,message_id,to_webid,media_digest,envelope_digest,event_json,incoming,byte_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (sender, message_id, recipient, media_digest, digest, wire, int(incoming), size, time.time()))
+                "INSERT INTO native_media(from_webid,message_id,to_webid,media_digest,envelope_digest,event_json,incoming,byte_count,created_at,header_digest) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (sender, message_id, recipient, media_digest, digest, wire, int(incoming), size, time.time(), header_digest))
             row = conn.execute("SELECT * FROM native_media WHERE queue_id=?", (cur.lastrowid,)).fetchone()
         return self._native_media_row(row)
 
@@ -123,10 +138,35 @@ class NativeMediaStoreMixin:
         with self._conn() as conn:
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT status FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=? AND message_id=? AND envelope_digest=? AND status IN ('pending','committed','forwarded')",
+            row = conn.execute("SELECT status,event_json,header_digest FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=? AND message_id=? AND envelope_digest=? AND status IN ('pending','committed','forwarded')",
                                (queue_id, owner, sender, message_id, digest)).fetchone()
             if not row:
                 return False
-            conn.execute("UPDATE native_media SET event_json=NULL,byte_count=0,status=? WHERE queue_id=?",
-                         ("committed" if row[0] == "committed" or not forwarded else "forwarded", queue_id))
+            header_digest = row["header_digest"] or (self._native_header_digest(json.loads(row["event_json"])) if row["event_json"] else None)
+            conn.execute("UPDATE native_media SET event_json=NULL,byte_count=0,status=?,header_digest=?,header_committed=MAX(header_committed,?) WHERE queue_id=?",
+                         ("committed" if row[0] == "committed" or not forwarded else "forwarded", header_digest, int(not forwarded), queue_id))
         return True
+
+    def commit_native_media_header(self, owner, queue_id, sender, message_id, digest):
+        if type(queue_id) is not int or queue_id < 1:
+            return False
+        with self._conn() as conn:
+            row = conn.execute("SELECT event_json,header_digest FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=? AND message_id=? AND envelope_digest=? AND status IN ('pending','committed','forwarded')",
+                               (queue_id, owner, sender, message_id, digest)).fetchone()
+            if not row:
+                return False
+            header_digest = row["header_digest"] or (self._native_header_digest(json.loads(row["event_json"])) if row["event_json"] else None)
+            if not header_digest:
+                return False
+            conn.execute("UPDATE native_media SET header_committed=1,header_digest=? WHERE queue_id=?", (header_digest, queue_id))
+        return True
+
+    def record_native_peer_progress(self, sender, message_id, media_digest, header_digest, *, header_committed, committed):
+        if (type(header_committed) is not bool or type(committed) is not bool
+                or committed and not header_committed or not isinstance(header_digest, str)
+                or not re.fullmatch(r"[a-f0-9]{64}", header_digest)):
+            return False
+        with self._conn() as conn:
+            changed = conn.execute("UPDATE native_media SET header_committed=MAX(header_committed,?),status=CASE WHEN ? THEN 'committed' ELSE status END WHERE from_webid=? AND message_id=? AND media_digest=? AND header_digest=? AND status IN ('forwarded','committed')",
+                                  (int(header_committed), int(committed), sender, message_id, media_digest, header_digest)).rowcount
+        return bool(changed)

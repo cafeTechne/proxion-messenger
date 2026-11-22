@@ -31,7 +31,8 @@ class NativeMediaMixin:
     def _native_status(row):
         return {"type": "native_media_status", "v": 1, "message_id": row["message_id"],
                 "media_digest": row["media_digest"],
-                "status": row["status"] if row["committed"] or row["forwarded"] else "pending"}
+                "status": row["status"] if row["committed"] or row["forwarded"] else "pending",
+                "header_digest": row["header_digest"], "header_committed": row["header_committed"]}
 
     async def _handle_native_inline(self, ws, data, sealed, file_bytes):
         sender = self._client_webids.get(ws, "")
@@ -69,13 +70,15 @@ class NativeMediaMixin:
         # A slow/absent peer must not hold the source websocket's command loop.
         # Custody stays in SQLite; omitted work is picked up by the next bounded
         # recovery request. Keep at most sixteen active delivery attempts globally.
+        return self._schedule_native_task(row["queue_id"], lambda: self._deliver_native_media(row))
+
+    def _schedule_native_task(self, key, work):
         if not self._native_storage_writable():
-            return
+            return False
         tasks = self.__dict__.setdefault("_native_media_tasks", {})
-        key = row["queue_id"]
         if key in tasks or len(tasks) >= 16:
-            return
-        task = asyncio.create_task(self._deliver_native_media(row))
+            return False
+        task = asyncio.create_task(work())
         tasks[key] = task
         def completed(done):
             if tasks.get(key) is done:
@@ -83,6 +86,7 @@ class NativeMediaMixin:
             if not done.cancelled() and done.exception():
                 logger.warning("Native media custody retained after delivery failure: %s", done.exception())
         task.add_done_callback(completed)
+        return True
 
     async def _stop_native_media(self):
         self._native_media_stopping = True
@@ -100,8 +104,17 @@ class NativeMediaMixin:
             return
         row = latest
         peer, sender = row["to_webid"], row["from_webid"]
-        if (not row["event"] or self._is_blocked_for(peer, sender) or self._is_blocked_for(sender, peer)
+        if (self._is_blocked_for(peer, sender) or self._is_blocked_for(sender, peer)
                 or self._store.is_cert_revoked(f"device:{sender}") or self._store.is_cert_revoked(f"device:{peer}")):
+            return
+        if row["forwarded"]:
+            target = self._resolve_peer_gateway(peer)
+            proof = await self._query_native_receipt(target, row) if target else None
+            if proof and self._native_storage_writable():
+                self._store.record_native_peer_progress(sender, row["message_id"], row["media_digest"], row["header_digest"],
+                    header_committed=proof["header_committed"], committed=proof["committed"])
+            return
+        if not row["event"]:
             return
         # Native base-peer file crypto targets the primary account, not arbitrary
         # linked devices with independent keys. An unsupported device cannot drain.
@@ -130,49 +143,78 @@ class NativeMediaMixin:
         target = self._resolve_peer_gateway(peer)
         if not target:
             return
-        if await self._relay_native_media(target, row) and self._native_storage_writable():
-            self._store.commit_native_media(peer, row["queue_id"], sender, row["message_id"],
-                                            row["envelope_digest"], forwarded=True)
+        proof = await self._relay_native_media(target, row)
+        if proof and self._native_storage_writable():
+            if self._store.commit_native_media(peer, row["queue_id"], sender, row["message_id"], row["envelope_digest"], forwarded=True):
+                self._store.record_native_peer_progress(sender, row["message_id"], row["media_digest"], row["header_digest"],
+                    header_committed=proof["header_committed"], committed=proof["committed"])
 
-    async def _relay_native_media(self, target, row):
-        """Release only for a signed exact-request custody proof, never HTTP 2xx alone."""
+    async def _native_exchange(self, target, peer, payload, response_type):
         from .relay import sign_relay_envelope, verify_relay_envelope
         from .network import async_safe_request
         from datetime import datetime, timezone
         import secrets
-        event = row["event"]
-        payload = {"content_type": "native_inline", "from_webid": self._own_gateway_did(),
-                   "to_webid": row["to_webid"], "message_id": row["message_id"],
-                   "media_digest": row["media_digest"],
-                   "payload": {key: event[key] for key in ("e2e", "e2e_v", "content", "nonce", "msg_num", "pn", "ratchet_pub", "file")},
+        payload = {**payload, "from_webid": self._own_gateway_did(), "to_webid": peer,
                    "relay_sig_did": self._own_gateway_did(),
                    "relay_ts": datetime.now(timezone.utc).isoformat(), "relay_nonce": secrets.token_hex(16)}
         payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
         body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         if len(body) > 131072:
-            return False  # existing HTTP cap; large remote files need chunk transport
-        request_digest = hashlib.sha256(body).hexdigest()
+            return None
         try:
             url = target.replace("wss://", "https://").replace("ws://", "http://").rstrip("/") + "/relay"
             code, _, raw = await async_safe_request("POST", url, body=body,
                 headers={"Content-Type": "application/json"}, timeout=10, max_bytes=4096)
             proof = json.loads(raw)
-            return (code == 200 and type(proof.get("v")) is int and proof["v"] == 1 and proof.get("content_type") == "native_media_custody"
-                    and proof.get("from_webid") == row["to_webid"]
-                    and proof.get("relay_sig_did") == row["to_webid"]
-                    and proof.get("to_webid") == self._own_gateway_did()
-                    and proof.get("request_digest") == request_digest
-                    and proof.get("message_id") == row["message_id"]
-                    and proof.get("media_digest") == row["media_digest"]
-                    and verify_relay_envelope(proof))
+            if (code != 200 or type(proof.get("v")) is not int or proof["v"] != 1
+                    or proof.get("content_type") != response_type or proof.get("from_webid") != peer
+                    or proof.get("relay_sig_did") != peer or proof.get("to_webid") != self._own_gateway_did()
+                    or proof.get("request_digest") != hashlib.sha256(body).hexdigest()
+                    or any(proof.get(key) != payload[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub") if key in payload)
+                    or not verify_relay_envelope(proof)):
+                return None
+            return proof
         except Exception:
-            return False
+            return None
 
-    async def _handle_native_inline_relay(self, data):
-        # The HTTP router verifies the full envelope and requires signer==sender.
+    def _native_response(self, data, response_type, **fields):
         from .relay import sign_relay_envelope
         from datetime import datetime, timezone
         import secrets
+        proof = {"content_type": response_type, "v": 1,
+                 "from_webid": self._own_gateway_did(), "to_webid": data["from_webid"],
+                 **{key: data[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub") if key in data},
+                 "request_digest": hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                 "relay_sig_did": self._own_gateway_did(),
+                 "relay_ts": datetime.now(timezone.utc).isoformat(), "relay_nonce": secrets.token_hex(16), **fields}
+        proof["signature"] = sign_relay_envelope(self.agent.identity_key, proof)
+        return "200 OK", json.dumps(proof)
+
+    @staticmethod
+    def _native_progress_valid(proof):
+        return (isinstance(proof, dict) and type(proof.get("header_committed")) is bool
+                and type(proof.get("committed")) is bool and (not proof["committed"] or proof["header_committed"]))
+
+    async def _relay_native_media(self, target, row):
+        event = row["event"]
+        proof = await self._native_exchange(target, row["to_webid"], {
+            "content_type": "native_inline", "message_id": row["message_id"],
+            "media_digest": row["media_digest"], "header_digest": row["header_digest"],
+            "payload": {key: event[key] for key in ("e2e", "e2e_v", "content", "nonce", "msg_num", "pn", "ratchet_pub", "file")},
+        }, "native_media_custody")
+        return proof if self._native_progress_valid(proof) else None
+
+    async def _query_native_receipt(self, target, row):
+        if not row["header_digest"]:
+            return None  # old forwarded records need the exact saved payload, not an invented header
+        proof = await self._native_exchange(target, row["to_webid"], {
+            "content_type": "native_media_query", "operation": "receipt",
+            "message_id": row["message_id"], "media_digest": row["media_digest"], "header_digest": row["header_digest"],
+        }, "native_media_query_result")
+        return proof if self._native_progress_valid(proof) else None
+
+    async def _handle_native_inline_relay(self, data):
+        # The HTTP router verifies the full envelope and requires signer==sender.
         if not self._native_storage_writable():
             return "503 Service Unavailable", '{"error":"native_media_unavailable"}'
         sender = data.get("from_webid", "")
@@ -183,23 +225,95 @@ class NativeMediaMixin:
             return "200 OK", '{"status":"received"}'  # no receipt, no block reveal
         # Client-side normalization maps this peer id to the owner's current
         # sidebar thread; a mutable UI thread must not change retry identity.
+        try:
+            declared_header = self._store._native_header_digest(data.get("payload"))
+        except (KeyError, TypeError, ValueError):
+            return "409 Conflict", '{"error":"native_media_header_mismatch"}'
+        if data.get("header_digest") != declared_header:
+            return "409 Conflict", '{"error":"native_media_header_mismatch"}'
         row = self._store.accept_native_media(sender, data.get("message_id"), owner, sender,
                                              data.get("media_digest"), data.get("payload"), incoming=True)
         if not row:
             return "503 Service Unavailable", '{"error":"native_media_not_accepted"}'
-        canonical = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
-        proof = {"content_type": "native_media_custody", "v": 1,
-                 "from_webid": self._own_gateway_did(), "to_webid": sender,
-                 "message_id": row["message_id"], "media_digest": row["media_digest"],
-                 "request_digest": hashlib.sha256(canonical).hexdigest(),
-                 "relay_sig_did": self._own_gateway_did(),
-                 "relay_ts": datetime.now(timezone.utc).isoformat(), "relay_nonce": secrets.token_hex(16)}
-        proof["signature"] = sign_relay_envelope(self.agent.identity_key, proof)
-        # The browser's next native recovery request drains the committed row;
-        # replying does not depend on any socket write or live tab.
-        return "200 OK", json.dumps(proof)
+        if data.get("header_digest") != row["header_digest"]:
+            return "409 Conflict", '{"error":"native_media_header_mismatch"}'
+        return self._native_response(data, "native_media_custody", header_committed=row["header_committed"], committed=row["committed"])
 
-    async def _handle_native_media_commit(self, ws, data):
+    def _native_ready(self, owner, expected_pub):
+        pub = self._store.get_x25519_pub(owner) if self._store else None
+        if not isinstance(pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", pub):
+            return False, None
+        sockets = self._device_sockets(owner, owner)
+        supported = any(self._native_capable(ws) and (self._session_meta.get(ws) or {}).get("native_media_pub") == pub for ws in sockets)
+        return supported and pub == expected_pub, pub if supported else None
+
+    async def _handle_native_media_capability(self, ws, data):
+        if not self._native_capable(ws) or not self._native_storage_writable():
+            return
+        request_id, expected_pub = data.get("request_id"), data.get("expected_pub")
+        if (not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id)
+                or not isinstance(expected_pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", expected_pub)):
+            return
+        owner = self._client_webids[ws]
+        thread = next((t for t in self._store.get_dm_threads(owner_webid=owner) if t["thread_id"] == data.get("cert_id")), None)
+        if not thread or not str(thread["peer_webid"]).startswith("did:key:"):
+            return
+        peer, session = thread["peer_webid"], self._session_meta[ws].get("session_id")
+        async def respond():
+            supported, pub = False, None
+            if not self._is_blocked_for(peer, owner) and not self._is_blocked_for(owner, peer):
+                if self._sockets_for_exact(peer):
+                    supported, pub = self._native_ready(peer, expected_pub)
+                else:
+                    target = self._resolve_peer_gateway(peer)
+                    if target and self._is_owner_account(ws, owner):
+                        proof = await self._native_exchange(target, peer, {"content_type": "native_media_query",
+                            "operation": "capability", "request_id": request_id, "expected_pub": expected_pub}, "native_media_query_result")
+                        if proof and proof.get("header_commit_supported") is True and type(proof.get("supported")) is bool:
+                            pub = proof.get("peer_pub")
+                            if pub is not None and (not isinstance(pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", pub)):
+                                pub = None
+                            supported = proof["supported"] and pub == expected_pub
+            live = self._session_meta.get(ws) or {}
+            current_thread = next((t for t in self._store.get_dm_threads(owner_webid=owner) if t["thread_id"] == data.get("cert_id")), None)
+            if (not self._native_storage_writable() or self._store.is_cert_revoked(f"device:{owner}")
+                    or self._client_webids.get(ws) != owner or live.get("session_id") != session
+                    or not self._native_capable(ws) or not current_thread or current_thread["peer_webid"] != peer):
+                return
+            await ws.send(json.dumps({"type": "native_media_capability_result", "v": 1,
+                "request_id": request_id, "peer_webid": peer, "expected_pub": expected_pub,
+                "supported": bool(supported), "peer_pub": pub}))
+        if not self._schedule_native_task(("capability", id(ws), request_id), respond):
+            await ws.send(json.dumps({"type": "native_media_capability_result", "v": 1,
+                "request_id": request_id, "peer_webid": peer, "expected_pub": expected_pub,
+                "supported": False, "peer_pub": None}))
+
+    async def _handle_native_media_query_relay(self, data):
+        if not self._native_storage_writable() or data.get("to_webid") != self._own_gateway_did():
+            return "503 Service Unavailable", '{"error":"native_media_unavailable"}'
+        sender = data.get("from_webid", "")
+        if data.get("operation") == "capability":
+            owner = self._store.get_relationship_owner(sender)
+            expected_pub, request_id = data.get("expected_pub"), data.get("request_id")
+            if (not isinstance(expected_pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", expected_pub)
+                    or not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id)):
+                return "400 Bad Request", '{"error":"invalid_native_query"}'
+            if not owner or self._is_blocked_for(owner, sender) or self._store.is_revoked(sender):
+                return "200 OK", '{"status":"received"}'
+            ready, pub = self._native_ready(owner, expected_pub)
+            return self._native_response(data, "native_media_query_result", header_commit_supported=True, supported=ready, peer_pub=pub)
+        if data.get("operation") == "receipt":
+            message, digest, header = data.get("message_id"), data.get("media_digest"), data.get("header_digest")
+            if not all(isinstance(value, str) for value in (sender, message, digest, header)):
+                return "400 Bad Request", '{"error":"invalid_native_query"}'
+            row = self._store.get_native_media(sender, message)
+            if (not row or not row["incoming"] or row["media_digest"] != digest or row["header_digest"] != header
+                    or self._is_blocked_for(row["to_webid"], sender) or self._store.is_revoked(sender)):
+                return "200 OK", '{"status":"received"}'
+            return self._native_response(data, "native_media_query_result", header_committed=row["header_committed"], committed=row["committed"])
+        return "400 Bad Request", '{"error":"invalid_native_query"}'
+
+    async def _handle_native_media_commit(self, ws, data, *, header_only=False):
         owner = self._client_webids.get(ws, "")
         if (not self._native_capable(ws) or not self._native_storage_writable()
                 or type(data.get("v")) is not int or data["v"] != 1):
@@ -213,10 +327,13 @@ class NativeMediaMixin:
                 or not re.fullmatch(r"[a-f0-9]{64}", digest)
                 or not 0 < len(sender) <= 2048 or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", message)):
             return
-        if self._store.commit_native_media(owner, data.get("queue_id"), sender, message, digest):
-            await ws.send(json.dumps({"type": "native_media_committed", "v": 1,
-                "queue_id": data["queue_id"], "from_webid": sender, "message_id": message,
-                "envelope_digest": digest, "receive_id": receive_id}))
+        commit = self._store.commit_native_media_header if header_only else self._store.commit_native_media
+        if commit(owner, data.get("queue_id"), sender, message, digest):
+            fields = {"v": 1, "queue_id": data["queue_id"], "from_webid": sender, "message_id": message,
+                      "envelope_digest": digest, "receive_id": receive_id}
+            reply = ({"type": "native_media_header_committed", **fields} if header_only
+                     else {"type": "native_media_committed", **fields})
+            await ws.send(json.dumps(reply))
 
     async def _handle_native_media_recover(self, ws, data):
         owner = self._client_webids.get(ws, "")
@@ -236,6 +353,8 @@ class NativeMediaMixin:
             row = self._store.get_native_media(owner, message_id)
             status = self._native_status(row) if row else {"type": "native_media_status", "v": 1, "message_id": message_id, "status": "missing"}
             await ws.send(json.dumps(status))
+            if row and row["forwarded"]:
+                self._schedule_native_media(row)
         for outgoing in (False, True):
             for row in self._store.pending_native_media(owner, outgoing=outgoing):
                 if self._client_webids.get(ws) != owner or not self._native_capable(ws):

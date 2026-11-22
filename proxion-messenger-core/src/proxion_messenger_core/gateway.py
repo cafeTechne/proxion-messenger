@@ -1697,6 +1697,10 @@ class ProxionGateway(NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, Mai
                 await self._handle_get_peer_devices(websocket, data)
             elif cmd == "get_peer_device_keys":
                 await self._handle_get_peer_device_keys(websocket, data)
+            elif cmd == "native_media_capability":
+                await self._handle_native_media_capability(websocket, data)
+            elif cmd == "native_media_header_commit":
+                await self._handle_native_media_commit(websocket, data, header_only=True)
             elif cmd == "native_media_commit":
                 await self._handle_native_media_commit(websocket, data)
             elif cmd == "native_media_recover":

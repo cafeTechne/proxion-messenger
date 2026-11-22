@@ -994,8 +994,8 @@ class HttpEndpointsMixin:
             # the relaying gateway, verified against relay_sig_did over relay_ts.
             "relay_sig_did", "relay_ts",
         })
-        if data.get("content_type") == "native_inline":
-            _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"media_digest", "payload"}
+        if data.get("content_type") in ("native_inline", "native_media_query"):
+            _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"media_digest", "payload", "header_digest", "operation", "request_id", "expected_pub"}
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
             return "400 Bad Request", '{"error":"unknown_relay_fields"}'
@@ -1022,7 +1022,7 @@ class HttpEndpointsMixin:
         #     participate in the channel, else it could inject a fake peer.
         _SELF_SIGNED_TYPES = (
             "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer",
-            "voice_signal", "contact_removed", "native_inline")
+            "voice_signal", "contact_removed", "native_inline", "native_media_query")
         _MEMBER_SIGNED_TYPES = (
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
             "room_emoji", "room_update",
@@ -1182,6 +1182,8 @@ class HttpEndpointsMixin:
 
         if data.get("content_type") == "native_inline":
             return await self._handle_native_inline_relay(data)
+        if data.get("content_type") == "native_media_query":
+            return await self._handle_native_media_query_relay(data)
 
         # ── Chunked file transfer relay (cross-gateway) ──
         if data.get("content_type") in (

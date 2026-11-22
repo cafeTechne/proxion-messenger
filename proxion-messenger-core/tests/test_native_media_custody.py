@@ -126,7 +126,7 @@ def test_schema_67_upgrade_preserves_fanout(tmp_path):
         assert accept(upgraded)
         assert upgraded.pending_device_fanout('b', 'd')[0]['payload']['content'] == 'cipher'
         with upgraded._conn() as conn:
-            assert conn.execute('SELECT version FROM schema_version').fetchone()[0] == 68
+            assert conn.execute('SELECT version FROM schema_version').fetchone()[0] == 69
     finally:
         upgraded.close()
 
@@ -385,3 +385,162 @@ def test_peer_custody_is_not_a_client_commit_and_cannot_downgrade_one(store):
     assert store.get_native_media('alice', 'm')['committed']
     assert store.commit_native_media('bob', *args, forwarded=True)
     assert store.get_native_media('alice', 'm')['committed']
+
+
+def test_header_commit_retains_file_custody_and_requires_exact_primary_receipt(store):
+    row = accept(store)
+    args = (row['queue_id'], 'alice', 'm', row['envelope_digest'])
+    assert not store.commit_native_media_header('foreign', *args)
+    assert not store.commit_native_media_header('bob', *args[:-1], 'b' * 64)
+    assert store.commit_native_media_header('bob', *args)
+    assert store.commit_native_media_header('bob', *args)
+    received = store.get_native_media('alice', 'm')
+    assert received['header_committed'] and not received['committed']
+    assert received['event'] == row['event']  # no file/history acceptance was implied
+    assert store.commit_native_media('bob', *args)
+    assert store.get_native_media('alice', 'm')['committed']
+
+
+@pytest.mark.asyncio
+async def test_signed_header_and_file_progress_survive_peer_restart(tmp_path, monkeypatch):
+    source, target = gateway(tmp_path, 'progress-source'), gateway(tmp_path, 'progress-target')
+    source_did, target_did = source._own_gateway_did(), target._own_gateway_did()
+    target._store.save_relationship({'certificate_id': 'contact', 'subject': 'ab' * 32,
+        'created_at': 0, 'expires_at': 2**31-1}, peer_did=source_did, owner_webid='did:key:bob')
+    row = accept(source._store, peer=target_did)
+    wrong_header = {'from_webid': source_did, 'to_webid': target_did, 'message_id': 'm',
+        'media_digest': row['media_digest'], 'header_digest': 'f' * 64,
+        'payload': {key: value for key, value in row['event'].items()
+            if key in ('e2e', 'e2e_v', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'file')}}
+    assert (await target._handle_native_inline_relay(wrong_header))[0].startswith('409')
+    assert target._store.get_native_media(source_did, 'm') is None
+    async def route(method, url, **kwargs):
+        status, body = await target._handle_relay_post(kwargs['body'], client_ip='127.0.0.1')
+        return int(status.split()[0]), {}, body.encode()
+    monkeypatch.setattr('proxion_messenger_core.network.async_safe_request', route)
+    proof = await source._relay_native_media('https://peer.example', row)
+    assert proof and not proof['header_committed'] and not proof['committed']
+    assert source._store.commit_native_media(target_did, row['queue_id'], 'alice', 'm', row['envelope_digest'], forwarded=True)
+    forwarded = source._store.get_native_media('alice', 'm')
+    incoming = target._store.get_native_media(source_did, 'm')
+    receiver = socket(target, 'did:key:bob')
+    ack = {'v': 1, 'queue_id': incoming['queue_id'], 'from_webid': source_did,
+        'message_id': 'm', 'envelope_digest': incoming['envelope_digest'], 'receive_id': 'a' * 64}
+    await target._handle_native_media_commit(receiver, ack, header_only=True)
+    assert json.loads(receiver.send.call_args.args[0])['type'] == 'native_media_header_committed'
+    path = str(target._store.db_path); target._store.close(); target._store = LocalStore(path)
+    proof = await source._query_native_receipt('https://peer.example', forwarded)
+    assert proof['header_committed'] and not proof['committed']
+    assert source._store.record_native_peer_progress('alice', 'm', row['media_digest'], row['header_digest'],
+        header_committed=proof['header_committed'], committed=proof['committed'])
+    assert source._store.get_native_media('alice', 'm')['header_committed']
+    assert not source._store.get_native_media('alice', 'm')['committed']
+    assert target._store.pending_native_media('did:key:bob')[0]['event']
+    wrong = {**forwarded, 'header_digest': 'f' * 64}
+    assert not await source._query_native_receipt('https://peer.example', wrong)
+    await target._handle_native_media_commit(receiver, ack)
+    proof = await source._query_native_receipt('https://peer.example', forwarded)
+    assert proof['header_committed'] and proof['committed']
+    assert source._store.record_native_peer_progress('alice', 'm', row['media_digest'], row['header_digest'],
+        header_committed=True, committed=True)
+    assert not source._store.record_native_peer_progress('alice', 'm', row['media_digest'], 'f' * 64,
+        header_committed=True, committed=True)
+    assert source._store.record_native_peer_progress('alice', 'm', row['media_digest'], row['header_digest'],
+        header_committed=False, committed=False)  # stale evidence never clears confirmation
+    assert source._store.get_native_media('alice', 'm')['committed']
+    source._store.close(); target._store.close()
+
+
+def test_schema_68_migration_does_not_invent_header_consumption_for_forwarded_files(tmp_path):
+    path = str(tmp_path / 'upgrade-68.db'); old = LocalStore(path)
+    pending, forwarded, committed = accept(old, 'pending'), accept(old, 'forwarded'), accept(old, 'committed')
+    assert old.commit_native_media('bob', forwarded['queue_id'], 'alice', 'forwarded', forwarded['envelope_digest'], forwarded=True)
+    assert old.commit_native_media('bob', committed['queue_id'], 'alice', 'committed', committed['envelope_digest'])
+    old.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute('ALTER TABLE native_media DROP COLUMN header_digest')
+        conn.execute('ALTER TABLE native_media DROP COLUMN header_committed')
+        conn.execute('UPDATE schema_version SET version=68')
+    migrated = LocalStore(path)
+    try:
+        assert not migrated.get_native_media('alice', 'forwarded')['header_committed']
+        assert migrated.get_native_media('alice', 'forwarded')['header_digest'] is None
+        assert migrated.get_native_media('alice', 'committed')['header_committed']
+        assert migrated.get_native_media('alice', 'pending')['event'] == pending['event']
+        repaired = accept(migrated, 'forwarded')  # only exact original bytes can backfill its digest
+        assert repaired['header_digest'] == forwarded['header_digest']
+        assert not repaired['header_committed']
+    finally:
+        migrated.close()
+
+
+@pytest.mark.asyncio
+async def test_capability_requires_an_online_opted_in_primary_with_the_original_key(tmp_path):
+    gw = gateway(tmp_path, 'capability')
+    owner, peer, pub = 'did:key:alice', 'did:key:bob', 'A' * 43
+    caller, receiver = socket(gw, owner), socket(gw, peer, modern=False)
+    gw._store.save_dm_thread('thread', peer, owner_webid=owner)
+    gw._store.save_x25519_pub(peer, pub); gw._session_meta[receiver]['native_media_pub'] = pub
+    data = {'cert_id': 'thread', 'request_id': 'query', 'expected_pub': pub}
+    await gw._handle_native_media_capability(caller, data)
+    await asyncio.gather(*list(gw._native_media_tasks.values()))
+    assert not json.loads(caller.send.call_args.args[0])['supported']
+    gw._session_meta[receiver]['native_media_v'] = 1
+    await gw._handle_native_media_capability(caller, data)
+    await asyncio.gather(*list(gw._native_media_tasks.values()))
+    assert json.loads(caller.send.call_args.args[0])['supported']
+    await gw._handle_native_media_capability(caller, {**data, 'expected_pub': 'B' * 43})
+    await asyncio.gather(*list(gw._native_media_tasks.values()))
+    result = json.loads(caller.send.call_args.args[0])
+    assert not result['supported'] and result['expected_pub'] == 'B' * 43 and result['peer_pub'] == pub
+    assert not gw._store.pending_native_media(owner, outgoing=True)
+    gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_cross_gateway_capability_is_signed_and_stale_sessions_cannot_receive_it(tmp_path, monkeypatch):
+    source, target = gateway(tmp_path, 'cap-source'), gateway(tmp_path, 'cap-target')
+    owner, peer, pub = 'did:key:alice', target._own_gateway_did(), 'A' * 43
+    caller, receiver = socket(source, owner), socket(target, 'did:key:bob')
+    source._session_meta[caller]['session_id'] = 'original'
+    source._store.save_dm_thread('thread', peer, owner_webid=owner)
+    target._store.save_x25519_pub('did:key:bob', pub); target._session_meta[receiver]['native_media_pub'] = pub
+    target._store.save_relationship({'certificate_id': 'contact', 'subject': 'ab' * 32,
+        'created_at': 0, 'expires_at': 2**31-1}, peer_did=source._own_gateway_did(), owner_webid='did:key:bob')
+    monkeypatch.setattr(source, '_resolve_peer_gateway', lambda _: 'https://peer.example')
+    monkeypatch.setattr(source, '_is_owner_account', lambda *args: True)
+    async def route(method, url, **kwargs):
+        status, body = await target._handle_relay_post(kwargs['body'], client_ip='127.0.0.1')
+        return int(status.split()[0]), {}, body.encode()
+    monkeypatch.setattr('proxion_messenger_core.network.async_safe_request', route)
+    data = {'cert_id': 'thread', 'request_id': 'query', 'expected_pub': pub}
+    await source._handle_native_media_capability(caller, data)
+    await asyncio.gather(*list(source._native_media_tasks.values()))
+    assert json.loads(caller.send.call_args.args[0])['supported']
+    caller.send.reset_mock()
+    real_exchange = source._native_exchange
+    async def changed(*args):
+        proof = await real_exchange(*args)
+        source._session_meta[caller]['session_id'] = 'replacement'
+        return proof
+    monkeypatch.setattr(source, '_native_exchange', changed)
+    await source._handle_native_media_capability(caller, data)
+    await asyncio.gather(*list(source._native_media_tasks.values()))
+    caller.send.assert_not_called()
+    source._store.close(); target._store.close()
+
+
+@pytest.mark.asyncio
+async def test_authenticated_registration_preserves_primary_key_for_capability(tmp_path, monkeypatch):
+    from proxion_messenger_core.didkey import pub_key_to_did
+    monkeypatch.setenv('PROXION_REQUIRE_AUTH', '1')
+    gw = gateway(tmp_path, 'cap-auth')
+    client = AgentState.generate(); owner = pub_key_to_did(client.identity_pub_bytes)
+    ws = socket(gw, owner, modern=False); ws.remote_address = ('127.0.0.1', 1234)
+    await gw._handle_register(ws, {'did': owner, 'native_media_v': 1, 'x25519_pub': 'A' * 43})
+    nonce = gw._pending_auth[ws]['nonce']
+    signature = base64.urlsafe_b64encode(client.identity_key.sign(nonce.encode())).rstrip(b'=').decode()
+    await gw._handle_auth_response(ws, {'signature': signature})
+    assert gw._native_ready(owner, 'A' * 43) == (True, 'A' * 43)
+    assert gw._store.get_x25519_pub(owner) == 'A' * 43
+    gw._store.close()

@@ -100,3 +100,45 @@ describe('native media preparation recovery', () => {
         expect(await engine.list()).toEqual([]); expect(h.encrypt).not.toHaveBeenCalled();
     });
 });
+
+
+describe('native media key and receive-hold binding', () => {
+    const first = 'A'.repeat(43), replacement = 'B'.repeat(43);
+    it('freezes the original peer key before encryption and requests a journalled receive hold', async () => {
+        const h = fixture(); let key = first;
+        const engine = createNativeMediaPreparation({ ...h.options, getPeerPub: () => key, holdForReceive: true });
+        const source = await engine.enqueue(new Blob(['source']), view, metadata, 'bound');
+        expect(source.peerPub).toBe(first); expect(source.receiveHold).toBe(true);
+        key = replacement;
+        await expect(engine.prepare('bound')).rejects.toThrow('destination changed');
+        expect(h.encrypt).not.toHaveBeenCalled();
+        key = first; await engine.prepare('bound');
+        expect(h.encrypt.mock.calls[0][2]).toMatchObject({ peerPub: first, holdForReceive: true });
+        key = replacement;
+        await expect(engine.prepare('bound')).rejects.toThrow('destination changed');
+        expect(h.encrypt).toHaveBeenCalledTimes(1);
+    });
+    it('keeps an unprepared source while the peer key is unavailable, then pins it once', async () => {
+        const h = fixture(); let key = null;
+        const engine = createNativeMediaPreparation({ ...h.options, getPeerPub: () => key, holdForReceive: true });
+        await engine.enqueue(new Blob(['original']), view, metadata, 'unknown');
+        await expect(engine.prepare('unknown')).rejects.toThrow('key unavailable');
+        expect(h.encrypt).not.toHaveBeenCalled();
+        expect((await h.store.get('alice/device', 'unknown')).stage).toBe('source');
+        key = first; const prepared = await engine.prepare('unknown');
+        expect(prepared.peerPub).toBe(first);
+        await expect(h.store.pinPeer('alice/device', 'unknown', prepared.revision, replacement)).rejects.toThrow('draft changed');
+        expect((await h.store.get('alice/device', 'unknown')).peerPub).toBe(first);
+    });
+    it('does not reinterpret older preparations as receive-held sends', async () => {
+        const h = fixture(); await h.engine().enqueue(new Blob(['legacy']), view, metadata, 'legacy');
+        await h.engine().prepare('legacy');
+        const held = createNativeMediaPreparation({ ...h.options, getPeerPub: () => first, holdForReceive: true });
+        await expect(held.prepare('legacy')).rejects.toThrow('receive-hold evidence');
+        expect(h.encrypt).toHaveBeenCalledTimes(1);
+    });
+    it('requires a key binding before an adapter can request a receive hold', () => {
+        const h = fixture();
+        expect(() => createNativeMediaPreparation({ ...h.options, holdForReceive: true })).toThrow('peer key binding');
+    });
+});

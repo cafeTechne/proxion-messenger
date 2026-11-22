@@ -16,6 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "proxion-messenger-core" / "src" / "proxion_messenger_core"
 WEB = ROOT / "web"
+# Round 142 adapters are tested but not imported by the live browser yet.
+# Remove each exclusion together with its registration/dispatch integration.
+STAGED_WEB_MODULES = {"native-media-send.js", "native-media-receive.js"}
 
 # Sent by the gateway, never referenced by the web client. Mostly responses to
 # admin, security and recovery commands the browser does not send, and the
@@ -23,7 +26,7 @@ WEB = ROOT / "web"
 NOT_FOR_WEB = {
     # Round 142 backend-only opt-in protocol. The current web client neither
     # requests native_media_v nor receives these replies; remove on integration.
-    "native_media_status", "native_media_committed",
+    "native_media_status", "native_media_committed", "native_media_header_committed", "native_media_capability_result",
     "access_grants_policy_state", "ack", "ack_delivered_ok", "ack_read_ok",
     "admin_action_confirmed", "admin_action_requested", "attachment_key", "audit_logs",
     "catch_up_ack_ok", "catch_up_batch", "checksum_mismatch_acked",
@@ -73,6 +76,7 @@ def _web_source() -> str:
     return "".join(
         p.read_text(encoding="utf-8") for p in WEB.glob("*.js")
         if not p.name.endswith(".test.js") and not p.name.startswith("smoke")
+        and p.name not in STAGED_WEB_MODULES
     )
 
 
@@ -85,6 +89,13 @@ def _known_to_web(event: str, web: str) -> bool:
 def test_storage_names_do_not_count_as_event_handlers():
     assert not _known_to_web('receipts', "db.transaction('receipts').objectStore('receipts')")
     assert _known_to_web('receipts', 'switch(event.type) { case "receipts": break; }')
+
+
+def test_staged_adapters_are_not_imported_by_live_browser():
+    web = _web_source()
+    html = "".join(p.read_text(encoding="utf-8") for p in WEB.glob("*.html"))
+    for name in STAGED_WEB_MODULES:
+        assert name not in web + html, f"{name} is integrated: remove its staged event-contract exclusion"
 
 
 def test_every_gateway_event_is_handled_or_listed():

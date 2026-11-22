@@ -126,7 +126,7 @@ _OPTIONAL_PATH_IDS: dict[str, frozenset] = {
 # and a failed DB integrity check all block these (except TEARDOWN_COMMANDS).
 MUTATING_COMMANDS: frozenset[str] = frozenset({
     # messages and content
-    "send_dm", "send_room", "local_dm", "sealed_dm", "send_dm_fanout", "dm_receive_commit", "native_media_commit", "native_media_recover",
+    "send_dm", "send_room", "local_dm", "sealed_dm", "send_dm_fanout", "dm_receive_commit", "native_media_commit", "native_media_header_commit", "native_media_recover",
     "edit_message", "edit_local_message", "delete_local_message", "forward_message",
     "send_file", "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
     "file_received",
@@ -189,7 +189,7 @@ TEARDOWN_COMMANDS: frozenset[str] = frozenset({
 # client needs in order to read (read markers, delivery acks, ratchet session
 # upkeep, typing/screen-share notices inside an existing call or thread).
 READ_ONLY_COMMANDS: frozenset[str] = frozenset({
-    "register", "auth_response", "link_pod", "ping", "list_owner_devices", "dm_receive_recover",
+    "register", "auth_response", "link_pod", "ping", "list_owner_devices", "dm_receive_recover", "native_media_capability",
     "get_rooms", "get_dms", "get_local_history", "get_room_members", "get_message",
     "get_files", "export_ticket",
     "read_dm", "read_room", "search", "get_receipts", "get_message_readers",

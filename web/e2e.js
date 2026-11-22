@@ -737,7 +737,8 @@ export function finishDmReceive(peerId, receiveId, current = () => true) {
 
 // Local recovery needs message metadata when a gateway will not replay a socket
 // event after reload. The metadata is encrypted in the same state record.
-export async function pendingDmReceives() {
+export async function pendingDmReceives({ transport = 'gateway' } = {}) {
+    if (!['gateway', 'native-media'].includes(transport)) throw new TypeError('Unsupported receive transport');
     await _ready(_cryptoContext());
     const context = _stateContext(), webId = _currentWebId();
     const prefix = 'proxion_e2e_state_', suffix = webId ? '::' + webId : '';
@@ -752,7 +753,7 @@ export async function pendingDmReceives() {
         if (!context.current()) throw new E2EDecryptError('State context changed');
         if (!state?.rootKey) continue;
         for (const [receiveId, data] of Object.entries(state.pendingReceiveData || {})) {
-            if (/^[a-f0-9]{64}$/.test(receiveId) && data?.transport === 'gateway'
+            if (/^[a-f0-9]{64}$/.test(receiveId) && data?.transport === transport
                     && typeof state.pendingReceives?.[receiveId] === 'string') {
                 rows.push({ peerId, receiveId, content: state.pendingReceives[receiveId], data });
             }
@@ -768,6 +769,33 @@ export function hasPendingDmSend(peerId, sendId) {
 }
 export function cachedPeerPub(peerId) { return _peerPub(peerId); }
 
+// A native file header may be waiting in a different transport from text on
+// this same chain. Hold later encryption until that exact header is durably
+// consumed. Custody alone must never call this release operation.
+export class E2EHeaderPendingError extends Error {
+    constructor(message = 'An earlier file header is awaiting durable receive') {
+        super(message); this.name = 'E2EHeaderPendingError';
+    }
+}
+export function dmSendHoldState(peerId, sendId) {
+    return _serialize(peerId, async () => (await loadRatchetState(peerId))?.sendHolds?.[sendId] || null);
+}
+export function releaseDmSendHold(peerId, sendId, current = () => true) {
+    return _serialize(peerId, async context => {
+        const active = () => context.current() && current();
+        if (!active()) return false;
+        const state = await loadRatchetState(peerId);
+        if (!active()) return false;
+        if (state?.sendHolds?.[sendId] === 'received') return true;
+        if (state?.sendHolds?.[sendId] !== 'waiting' || state.sendBarrier !== sendId
+                || !state.pendingSends?.[sendId]) return false;
+        const next = { ...state, sendHolds: { ...state.sendHolds, [sendId]: 'received' } };
+        delete next.sendBarrier;
+        await saveRatchetState(peerId, next, { current: active });
+        return true;
+    });
+}
+
 export function finishDmSend(peerId, sendId, current = () => true) {
     return _serialize(peerId, async context => {
         const callerCurrent = current;
@@ -775,8 +803,10 @@ export function finishDmSend(peerId, sendId, current = () => true) {
         if (!current()) return false;
         const state = await loadRatchetState(peerId);
         if (!current()) return false;
+        if (state?.sendBarrier === sendId || state?.sendHolds?.[sendId] === 'waiting') return false;
         if (!state?.pendingSends?.[sendId]) return true;
-        const next = { ...state, pendingSends: { ...state.pendingSends } };
+        const next = { ...state, pendingSends: { ...state.pendingSends }, sendHolds: { ...state.sendHolds } };
+        delete next.sendHolds[sendId];
         delete next.pendingSends[sendId];
         await saveRatchetState(peerId, next, { current });
         return true;
@@ -973,10 +1003,19 @@ async function _ratchetEncryptImpl(peerId, plaintext, opts = {}) {
 
     const current = opts.current || (() => true), sendId = opts.sendId;
     if (sendId !== undefined && (typeof sendId !== 'string' || !/^[a-f0-9]{64}$/.test(sendId))) throw Error('Invalid send id');
+    if (opts.holdForReceive && !sendId) throw Error('A receive hold requires a stable send id');
     if (!current()) throw Error('Send context changed');
     let state = await loadRatchetState(peerId);
     if (!current()) throw Error('Send context changed');
-    if (sendId && state?.pendingSends?.[sendId]) return { ...state.pendingSends[sendId] };
+    if (sendId && state?.pendingSends?.[sendId]) {
+        // Old preparations without a hold cannot silently acquire one at an
+        // already-spent position. A previously released hold replays unchanged.
+        if (opts.holdForReceive && !state.sendHolds?.[sendId]) {
+            throw new E2EHeaderPendingError('Prepared header lacks original receive-hold evidence');
+        }
+        return { ...state.pendingSends[sendId] };
+    }
+    if (state?.sendBarrier) throw new E2EHeaderPendingError();
     if (sendId && Object.keys(state?.pendingSends || {}).length >= 64) throw Error('Pending send recovery is full');
     // A failed commit must not advance the live sender session either.
     if (state) state = JSON.parse(JSON.stringify(state));
@@ -1005,6 +1044,10 @@ async function _ratchetEncryptImpl(peerId, plaintext, opts = {}) {
 
     const result = { ciphertext: b64uEnc(ct), nonce: b64uEnc(nonce), msgNum, pn, ratchetPub };
     if (sendId) state.pendingSends = { ...state.pendingSends, [sendId]: result };
+    if (opts.holdForReceive) {
+        state.sendHolds = { ...state.sendHolds, [sendId]: 'waiting' };
+        state.sendBarrier = sendId;
+    }
     await saveRatchetState(peerId, state, { current });
     return result;
 }

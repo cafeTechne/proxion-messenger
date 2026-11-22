@@ -13,6 +13,10 @@ import { createWebDm } from './webdm.js';
 import { createGatewayDmReceiver, gatewayDmEnvelope } from './gateway-dm-receive.js';
 import { createDmOutbox } from './dm-outbox.js';
 import { createDmReceiptStore, dmEnvelopeFingerprint } from './dm-receipts.js';
+import { createNativeMediaReceiver } from './native-media-receive.js';
+import { createNativeMediaSender, nativeMediaSendIdentity } from './native-media-send.js';
+import { createNativeMediaStore } from './native-media-drafts.js';
+import { createSecondaryCrypto } from './e2e-secondary.js';
 
 // ── Mock localStorage ────────────────────────────────────────────────────────
 const _ls = {};
@@ -58,7 +62,8 @@ import {
     ratchetDecrypt,
     finishDmReceive,
     pendingDmReceives,
-    finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob,
+    finishDmSend, releaseDmSendHold, dmSendHoldState, E2EHeaderPendingError,
+    saveDmSendJob, listDmSendJobs, removeDmSendJob,
     loadRatchetState,
     saveRatchetState,
     advanceChain,
@@ -962,5 +967,155 @@ describe('atomic encrypted sender outbox', () => {
             { to_webid: 'bob-account', to_device_id: 'b2' }] });
         expect(await listDmSendJobs()).toEqual([]);
         expect((await loadRatchetState('bob-device-1')).pendingSends).toEqual({});
+    });
+});
+
+
+describe('native header receive holds on the shared ratchet', () => {
+    let alice, bob;
+    const sid = 'a'.repeat(64), other = 'b'.repeat(64);
+    const decrypt = (peer, packet, options) => ratchetDecrypt(peer, packet.ciphertext, packet.nonce,
+        packet.msgNum, packet.ratchetPub, packet.pn, options);
+    const become = pair => swapIdentity(pair.privJwk, pair.pubB64u);
+    beforeEach(async () => {
+        _e2eSession = { info: { isLoggedIn: false } }; _e2eRoot = null;
+        localStorage.clear(); _resetForTesting(); _authTracker = createAuthContextTracker(() => _e2eSession.info);
+        await initE2E();
+        alice = { pubB64u: myX25519PubB64u(), privJwk: JSON.parse(localStorage.getItem('proxion_e2e_x25519_priv_jwk')) };
+        bob = await makeX25519Pair(); cachePeerPub('hold-bob', bob.pubB64u);
+    });
+    it('recovers a real native attachment header after corrupt bytes, reload and a later DH turn', async () => {
+        const db = new IDBFactory(), store = createNativeMediaStore(db), wire = [];
+        cachePeerPub('did:key:bob', bob.pubB64u);
+        const sender = createNativeMediaSender({ store,
+            secondary: createSecondaryCrypto({ encrypt: ratchetEncrypt, isKeyed: () => true, isSelf: () => false }),
+            e2e: { releaseDmSendHold, finishDmSend }, getScope: () => 'alice', getPeerPub: () => bob.pubB64u,
+            capability: async () => ({ supported: true, peer_pub: bob.pubB64u }),
+            send: async event => { wire.push(event); return true; }, persistOwnMessage: async () => true });
+        await sender.enqueue(new Blob(['recover this exact file']), { type: 'dm', id: 'thread', peerWebid: 'did:key:bob' },
+            { name: 'private.txt', mime: 'text/plain' }, 'real-file');
+        await sender.retry('real-file');
+        await expect(ratchetEncrypt('did:key:bob', 'later')).rejects.toBeInstanceOf(E2EHeaderPendingError);
+        const packet = wire[0], row = await store.get('alice', 'real-file'), identity = await nativeMediaSendIdentity(row);
+        const event = { ...packet, type: 'message', thread_id: 'thread', from_webid: 'did:key:alice',
+            file: { filename: 'file', mime_type: 'application/octet-stream', size: row.prepared.ct.length, data_b64: packet.data_b64 },
+            native_commit: { v: 1, queue_id: 1, envelope_digest: 'a'.repeat(64) } };
+        await become(bob);
+        const commits = [], messages = [], receipts = createDmReceiptStore(db);
+        const options = { e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives }, receipts,
+            getScope: () => 'bob', toMessage: ev => ({ message_id: ev.message_id, thread_id: ev.thread_id }),
+            persistMessage: async () => true, handleEvent: async message => { messages.push(message); },
+            sendCommit: async commit => { commits.push(commit); return true; } };
+        const corrupt = Uint8Array.from(atob(event.file.data_b64), c => c.charCodeAt(0)); corrupt[0] ^= 1;
+        await expect(createNativeMediaReceiver(options).receive({ ...event,
+            file: { ...event.file, data_b64: btoa(String.fromCharCode(...corrupt)) } })).rejects.toThrow();
+        expect(commits.map(c => c.cmd)).toEqual(['native_media_header_commit']);
+        expect(await pendingDmReceives()).toEqual([]);
+        expect(await pendingDmReceives({ transport: 'native-media' })).toHaveLength(1);
+        const answer = await ratchetEncrypt('did:key:alice', 'answer');
+        await become(alice); expect(await decrypt('did:key:bob', answer)).toBe('answer');
+        await sender.status({ type: 'native_media_status', v: 1, message_id: 'real-file',
+            media_digest: identity.mediaDigest, header_digest: identity.headerDigest,
+            status: 'forwarded', header_committed: true });
+        const later = await ratchetEncrypt('did:key:bob', 'after saved header');
+        await become(bob); expect(await decrypt('did:key:alice', later)).toBe('after saved header');
+        expect(await createNativeMediaReceiver(options).receive(event)).toBe(true);
+        expect(atob(messages[0].file.data_b64)).toBe('recover this exact file');
+        expect(await pendingDmReceives({ transport: 'native-media' })).toEqual([]);
+    });
+    it('atomically holds later encryption, preserves exact replay and refuses premature cleanup', async () => {
+        const earlier = await ratchetEncrypt('hold-bob', 'earlier', { sendId: other });
+        const file = await ratchetEncrypt('hold-bob', 'file key metadata', { sendId: sid, holdForReceive: true });
+        const before = await loadRatchetState('hold-bob');
+        await expect(ratchetEncrypt('hold-bob', 'later text')).rejects.toBeInstanceOf(E2EHeaderPendingError);
+        await expect(ratchetEncrypt('hold-bob', 'another file', { sendId: 'c'.repeat(64), holdForReceive: true })).rejects.toBeInstanceOf(E2EHeaderPendingError);
+        expect(await ratchetEncrypt('hold-bob', 'earlier', { sendId: other })).toEqual(earlier);
+        expect(await finishDmSend('hold-bob', other)).toBe(true);
+        expect(await finishDmSend('hold-bob', sid)).toBe(false);
+        expect((await loadRatchetState('hold-bob')).sendMsgNum).toBe(before.sendMsgNum);
+        await become(alice); cachePeerPub('hold-bob', bob.pubB64u);
+        expect(await ratchetEncrypt('hold-bob', 'file key metadata', { sendId: sid, holdForReceive: true })).toEqual(file);
+        expect(await dmSendHoldState('hold-bob', sid)).toBe('waiting');
+        cachePeerPub('unrelated-bob', bob.pubB64u);
+        expect((await ratchetEncrypt('unrelated-bob', 'unrelated conversation')).msgNum).toBe(0);
+    });
+    it('releases only the matching hold and cannot clear a subsequent header', async () => {
+        const file = await ratchetEncrypt('hold-bob', 'file', { sendId: sid, holdForReceive: true });
+        expect(await releaseDmSendHold('hold-bob', other)).toBe(false);
+        expect(await releaseDmSendHold('hold-bob', sid, () => false)).toBe(false);
+        expect(await releaseDmSendHold('hold-bob', sid)).toBe(true);
+        expect(await dmSendHoldState('hold-bob', sid)).toBe('received');
+        await ratchetEncrypt('hold-bob', 'second file', { sendId: other, holdForReceive: true });
+        expect(await ratchetEncrypt('hold-bob', 'file', { sendId: sid, holdForReceive: true })).toEqual(file);
+        expect(await releaseDmSendHold('hold-bob', sid)).toBe(true);
+        expect(await finishDmSend('hold-bob', sid)).toBe(true);
+        expect(await dmSendHoldState('hold-bob', other)).toBe('waiting');
+        await expect(ratchetEncrypt('hold-bob', 'still blocked')).rejects.toBeInstanceOf(E2EHeaderPendingError);
+    });
+    it('commits the hold and release atomically with encrypted state storage', async () => {
+        await ratchetEncrypt('hold-bob', 'earlier');
+        const setItem = localStorage.setItem;
+        const failState = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+            if (key === 'proxion_e2e_state_hold-bob') throw Error('state quota');
+            return setItem(key, value);
+        });
+        try {
+            await expect(ratchetEncrypt('hold-bob', 'file', { sendId: sid, holdForReceive: true })).rejects.toThrow('state quota');
+        } finally { failState.mockRestore(); }
+        expect((await loadRatchetState('hold-bob')).sendBarrier).toBeUndefined();
+        expect((await loadRatchetState('hold-bob')).sendMsgNum).toBe(1);
+        const file = await ratchetEncrypt('hold-bob', 'file', { sendId: sid, holdForReceive: true });
+        expect(file.msgNum).toBe(1);
+        const failRelease = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+            if (key === 'proxion_e2e_state_hold-bob') throw Error('release quota');
+            return setItem(key, value);
+        });
+        try { await expect(releaseDmSendHold('hold-bob', sid)).rejects.toThrow('release quota'); }
+        finally { failRelease.mockRestore(); }
+        expect(await dmSendHoldState('hold-bob', sid)).toBe('waiting');
+        await expect(ratchetEncrypt('hold-bob', 'later')).rejects.toBeInstanceOf(E2EHeaderPendingError);
+        expect(await releaseDmSendHold('hold-bob', sid)).toBe(true);
+        expect((await ratchetEncrypt('hold-bob', 'later')).msgNum).toBe(2);
+    });
+    it('does not retrofit a hold to an older spent preparation', async () => {
+        await expect(ratchetEncrypt('hold-bob', 'bad', { holdForReceive: true })).rejects.toThrow('stable send id');
+        expect(await loadRatchetState('hold-bob')).toBeNull();
+        const original = await ratchetEncrypt('hold-bob', 'legacy', { sendId: sid });
+        await expect(ratchetEncrypt('hold-bob', 'legacy', { sendId: sid, holdForReceive: true })).rejects.toThrow('original receive-hold evidence');
+        expect(await ratchetEncrypt('hold-bob', 'legacy', { sendId: sid })).toEqual(original);
+        expect(await releaseDmSendHold('hold-bob', sid)).toBe(false);
+    });
+    it('keeps a delayed header decryptable through incoming traffic and later DH turns after consumption', async () => {
+        const hello = await ratchetEncrypt('hold-bob', 'hello');
+        await become(bob); expect(await decrypt('hold-alice', hello)).toBe('hello');
+        cachePeerPub('hold-alice', alice.pubB64u);
+        const reply = await ratchetEncrypt('hold-alice', 'reply');
+        await become(alice); expect(await decrypt('hold-bob', reply)).toBe('reply');
+        const file = await ratchetEncrypt('hold-bob', 'held-key-metadata', { sendId: sid, holdForReceive: true });
+        await become(bob);
+        const incoming = [];
+        for (let i = 0; i < 25; i++) incoming.push(await ratchetEncrypt('hold-alice', 'incoming-' + i));
+        await become(alice);
+        for (let i = 0; i < incoming.length; i++) expect(await decrypt('hold-bob', incoming[i])).toBe('incoming-' + i);
+        await expect(ratchetEncrypt('hold-bob', 'cannot skip file')).rejects.toBeInstanceOf(E2EHeaderPendingError);
+        await become(bob);
+        const receiveId = 'd'.repeat(64), receive = { receiveId, receiveData: { transport: 'native-media', scope: 'bob' } };
+        expect(await decrypt('hold-alice', file, receive)).toBe('held-key-metadata');
+        await become(alice); expect(await releaseDmSendHold('hold-bob', sid)).toBe(true);
+        for (let i = 0; i < 4; i++) {
+            const packet = await ratchetEncrypt('hold-bob', 'after-' + i);
+            await become(bob); expect(await decrypt('hold-alice', packet)).toBe('after-' + i);
+            const answer = await ratchetEncrypt('hold-alice', 'answer-' + i);
+            await become(alice); expect(await decrypt('hold-bob', answer)).toBe('answer-' + i);
+        }
+        await become(bob);
+        expect(await decrypt('hold-alice', file, receive)).toBe('held-key-metadata');
+        expect((await loadRatchetState('hold-alice')).pendingReceives[receiveId]).toBe('held-key-metadata');
+        expect(await pendingDmReceives()).toEqual([]);
+        expect(await pendingDmReceives({ transport: 'native-media' })).toEqual([
+            expect.objectContaining({ peerId: 'hold-alice', receiveId, content: 'held-key-metadata' }),
+        ]);
+        await expect(pendingDmReceives({ transport: 'unknown' })).rejects.toThrow('Unsupported receive transport');
+        expect(MAX_SKIP).toBe(20);
     });
 });
