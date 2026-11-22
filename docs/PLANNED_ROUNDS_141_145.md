@@ -105,6 +105,15 @@ See [the staged native custody contract](ROUND_142_NATIVE_CUSTODY.md). Browser
 sender/receiver integration, pending controls and live fault journeys remain
 open; this does not complete 142 or native chunk resume in 143.
 
+Header/adapter checkpoint (2026-11-22): schema 69 separates signed gateway
+custody, durable header consumption and full file commit. Atomic shared-ratchet
+send holds preserve ordering without increasing MAX_SKIP. Tested sender/receiver
+adapters retain original drafts, encrypted key recovery and exact receipts across
+storage failures and reload; capability checks bind the original primary key.
+These adapters remain staged. Live file/voice routing, pending UI and browser
+fault journeys are still required. Details and validation are in the custody
+contract linked above; the scope and completion status are unchanged.
+
 ### Problem and result
 
 Native gateway inline files/voice use secondary sealed envelopes and live
