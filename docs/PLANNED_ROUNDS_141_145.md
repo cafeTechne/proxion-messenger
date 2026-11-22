@@ -1,6 +1,6 @@
 # Planned rounds 141–145
 
-Status: Round 141 complete; Round 142 in progress; Rounds 143–145 planned after the audited completion
+Status: Rounds 141 and 145 complete; Round 144 reviewed (design-only); Rounds 142–143 in progress after the audited completion
 of Rounds 136–140. Earlier rounds
 remain closed; retained limitations become new bounded work, not additions to
 closed rounds. This tracked file is authoritative; ignored root-level plan
@@ -80,6 +80,8 @@ per account/device scope, stable ratchet send-journal ids, and generation guards
 Secondary file preparation validates and freezes metadata before encryption;
 reopening a prepared file reuses the exact file ciphertext and ratchet header.
 This internal component is not connected to the live native send path yet.
+Native keyed DM recordings now route through sealed attachments rather than the
+room-oriented voice command; this does not yet make their sender drafts durable.
 
 The gateway audit found that native inline sends replace client message ids,
 echo before delivery acceptance, and save only a summary in message history.
@@ -140,7 +142,19 @@ chunk-transfer resume (Round 143). Do not silently reroute native files to pods.
 
 ## Round 143: Resumable encrypted gateway chunk transfers
 
-Status: planned. Depends on 142.
+Status: in progress. Depends on 142.
+
+Audit checkpoint (2026-11-21): the legacy live chunk route now binds incoming
+chunks/completion and peer acceptance/rejection/receipts to the original sender
+or destination. Colliding offers cannot replace partial state; null-prototype
+maps avoid special-id object-property behavior. Receiver chunk and total byte
+limits are checked against the offer before acknowledging completion. Enabled
+local file history (within its existing byte-retention cap) now commits before a completion receipt; a failed write keeps
+the live assembly for retry, and account changes suppress stale receipts. New
+adversarial and storage-failure tests cover these boundaries. This is integrity hardening, not
+resumability: persistent chunk storage, negotiation and replay-safe header/history
+commit remain open. No legacy socket/chunk acknowledgement is relabeled as a
+durable file receipt.
 
 ### Problem and result
 
@@ -187,7 +201,7 @@ clients and cannot weaken sender authentication or encryption.
 
 ## Round 144: Safe retirement of blocked prepared sends
 
-Status: planned. Depends on 139–143.
+Status: reviewed, design-only outcome. See [Round 144 safety review](ROUND_144_SAFETY_REVIEW.md). No additional prepared cancellation or reset is enabled. Media implementation remains open in 142–143.
 
 ### Problem and result
 
@@ -236,7 +250,7 @@ recipient retargeting or unreviewed cryptographic protocol deployment.
 
 ## Round 145: Device fanout acknowledgement after durable receive commit
 
-Status: planned. Depends on 136, 139, 142–144.
+Status: complete for encrypted device fanout. See [Round 145 closeout](ROUND_145_CLOSEOUT.md). This independently closes the fanout socket-write gap; it does not claim completion of media Rounds 142–143.
 
 ### Problem and result
 

@@ -36,9 +36,10 @@ const TRANSFER_IDLE_TIMEOUT_MS = 60 * 1000;
  */
 import { announce } from './a11y.js';
 
-export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiveView, resolveSender }) {
-    const _outgoingFiles = {};   // file_id -> {resolve, reject, onAck, onFail, onReceived}
-    const _incomingFiles = {};   // file_id -> {meta, chunks[], received, total, fromWebid}
+export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiveView, resolveSender,
+    persistMessage = null, getContext = () => '' }) {
+    const _outgoingFiles = Object.create(null);   // file_id -> {resolve, reject, onAck, onFail, onReceived}
+    const _incomingFiles = Object.create(null);   // file_id -> {meta, chunks[], received, total, fromWebid}
 
     // `verb` is a discriminator ('sending' | 'receiving'), not display text, so the
     // visible label, aria-label, and spoken announcement all come from locale keys.
@@ -88,6 +89,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         if (rec._idleTimer) clearTimeout(rec._idleTimer);
         rec._idleTimer = setTimeout(() => {
             if (!_incomingFiles[fileId]) return;
+            if (getContext() !== rec.context) { _dropIncoming(fileId); return; }
             sendCmd("file_reject", { to_webid: rec.fromWebid, file_id: fileId, reason: "incomplete" });
             showToast(t('file.transferFailed', {
                 filename: rec.meta.filename, received: rec.received, total: rec.total,
@@ -117,7 +119,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             offer = { filename: SEALED_FILE_NAME, mime_type: SEALED_FILE_MIME, size_bytes: buf.length, ...sealed.hdr };
         }
         const total = Math.ceil(buf.length / CHUNK_BYTES) || 1;
-        const rec = { stage: "offer" };
+        const rec = { stage: "offer", toWebid };
         _outgoingFiles[fileId] = rec;
         const acceptP = new Promise((resolve, reject) => {
             rec.resolve = resolve; rec.reject = reject;
@@ -173,6 +175,18 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     // A sealed offer arrives already opened by the caller (_sealedFile holds
     // the real metadata and file key) or marked _sealedBad.
     function handleFileOffer(event) {
+        if (typeof event.file_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(event.file_id)
+            || typeof event.from_webid !== 'string' || !event.from_webid
+            || !Number.isSafeInteger(event.size_bytes) || event.size_bytes < 0) return;
+        for (const [id, row] of Object.entries(_incomingFiles)) {
+            if (row.context !== getContext()) _dropIncoming(id);
+        }
+        if (_incomingFiles[event.file_id]) {
+            // A collision cannot replace another sender's partial bytes, key or
+            // watchdog. Recovery negotiation will require an exact offer match.
+            sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "already_in_progress" });
+            return;
+        }
         if (event._sealedBad) {
             sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "bad_offer" });
             return;
@@ -199,8 +213,8 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         }
         _incomingFiles[event.file_id] = {
             meta: { filename: event.filename, mime_type: event.mime_type, size: event.size_bytes },
-            chunks: new Array(event.total_chunks), received: 0, total: event.total_chunks,
-            fromWebid: event.from_webid, sealed,
+            chunks: new Array(event.total_chunks), received: 0, byteCount: 0, total: event.total_chunks,
+            fromWebid: event.from_webid, sealed, context: getContext(),
         };
         _armIdleTimeout(event.file_id);
         sendCmd("file_accept", { to_webid: event.from_webid, file_id: event.file_id });
@@ -208,7 +222,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     }
     function handleFileChunk(event) {
         const rec = _incomingFiles[event.file_id];
-        if (!rec) return;
+        if (!rec || event.from_webid !== rec.fromWebid || getContext() !== rec.context) return;
         // seq and data are attacker-controlled. seq MUST be an integer in
         // [0, total): an out-of-range or non-integer seq would write outside the
         // real chunk indices yet still bump `received`, letting the completeness
@@ -217,8 +231,12 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         // stop, so the guarantee only holds if every counted seq is a valid index.
         const seq = event.seq;
         if (!Number.isInteger(seq) || seq < 0 || seq >= rec.total) return;
-        if (typeof event.data !== "string") return;
+        if (typeof event.data !== "string" || event.data.length > Math.ceil(CHUNK_BYTES / 3) * 4) return;
         if (rec.chunks[seq] === undefined) {
+            let size;
+            try { size = b64ToU8(event.data).length; } catch { return; }
+            if (size > CHUNK_BYTES || rec.byteCount + size > rec.meta.size) return;
+            rec.byteCount += size;
             rec.chunks[seq] = event.data;
             rec.received++;
             _armIdleTimeout(event.file_id);   // fresh chunk = still active
@@ -227,13 +245,14 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     }
     function handleFileComplete(event) {
         const rec = _incomingFiles[event.file_id];
-        if (!rec) return;
+        if (!rec || event.from_webid !== rec.fromWebid || getContext() !== rec.context) return;
+        if (rec.finalizing) return rec.finalizing;
         if (rec._idleTimer) { clearTimeout(rec._idleTimer); rec._idleTimer = null; }
         _clearTransferProgress(event.file_id);
         // Verify every chunk actually arrived. Without this, a dropped or
         // never-delivered chunk is silently filled with empty bytes below,
         // producing a corrupt file the user can't tell apart from a good one.
-        if (rec.received < rec.total) {
+        if (rec.received < rec.total || rec.byteCount !== rec.meta.size) {
             delete _incomingFiles[event.file_id];
             sendCmd("file_reject", { to_webid: rec.fromWebid, file_id: event.file_id, reason: "incomplete" });
             showToast(t('file.transferFailed', { filename: rec.meta.filename, received: rec.received, total: rec.total }), "error");
@@ -246,41 +265,67 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         let off = 0;
         for (const p of parts) { full.set(p, off); off += p.length; }
         const fromWebid = rec.fromWebid;
-        delete _incomingFiles[event.file_id];
         const av = getActiveView();
         // Cross-gateway, fromWebid is the peer's gateway did: label the message
         // with the contact's name (and thread) rather than a slice of that key.
         const who = (resolveSender && resolveSender(fromWebid)) || {};
         const threadId = (av && av.peerWebid === fromWebid) ? av.id : (who.threadId || fromWebid);
         const render = (bytes, extra = {}) => {
-            renderMessage({
+            const message = {
                 type: "message", source: "relay", thread_id: threadId,
                 from_webid: fromWebid, from_display_name: who.name || dmFallbackName(fromWebid),
                 content: `📎 ${rec.meta.filename}`, timestamp: new Date().toISOString(),
                 message_id: "file-" + event.file_id, local: true,
                 file: { filename: rec.meta.filename, mime_type: rec.meta.mime_type, size: bytes.length, data_b64: u8ToB64(bytes), ...extra },
+            };
+            const finish = () => {
+                if (getContext() !== rec.context) return false;
+                delete _incomingFiles[event.file_id];
+                sendCmd("file_received", { to_webid: fromWebid, file_id: event.file_id });
+                try { renderMessage(message); } catch (error) { console.warn('[filetransfer] committed file UI:', error); }
+                return true;
+            };
+            if (!persistMessage) return finish();
+            if (getContext() !== rec.context) return false;
+            return Promise.resolve().then(() => {
+                if (getContext() !== rec.context) return false;
+                return persistMessage(message);
+            }).then(saved => {
+                if (saved !== false) return finish();
+                if (getContext() === rec.context) _armIdleTimeout(event.file_id);
+                return false;
+            }, () => {
+                if (getContext() === rec.context) _armIdleTimeout(event.file_id);
+                return false;
             });
-            sendCmd("file_received", { to_webid: fromWebid, file_id: event.file_id });
         };
-        if (!rec.sealed) { render(full, { size: rec.meta.size }); return; }
+        const rememberFinalization = result => {
+            if (!result || typeof result.then !== 'function') return result;
+            rec.finalizing = Promise.resolve(result).finally(() => { rec.finalizing = null; });
+            return rec.finalizing;
+        };
+        if (!rec.sealed) return rememberFinalization(render(full));
         const s = rec.sealed;
         const dims = s.width ? { width: s.width, height: s.height } : {};
-        return openFileBytes(full, s)
+        return rememberFinalization(openFileBytes(full, s)
             .then((bytes) => render(bytes, { spoiler: s.spoiler === true, ...dims }))
             .catch(() => {
+                if (getContext() !== rec.context) return false;
+                _dropIncoming(event.file_id);
                 sendCmd("file_reject", { to_webid: fromWebid, file_id: event.file_id, reason: "decrypt_failed" });
                 showToast(t('file.decryptFailed', { filename: rec.meta.filename }), "error");
-            });
+            }));
     }
+
     function handleFileAccept(event) {
         const rec = _outgoingFiles[event.file_id];
-        if (rec && rec.resolve) rec.resolve();
+        if (rec && rec.resolve && event.from_webid === rec.toWebid) rec.resolve();
     }
     // Once accepted, a reject means the receiver could not assemble or open
     // the file; the sending loop reports that as a failed delivery.
     function handleFileReject(event) {
         const rec = _outgoingFiles[event.file_id];
-        if (!rec) return;
+        if (!rec || event.from_webid !== rec.toWebid) return;
         if (rec.stage !== "offer") { rec.onFail?.(event.reason || "rejected"); return; }
         rec.reject(new Error(event.reason || "rejected"));
         delete _outgoingFiles[event.file_id];
@@ -303,7 +348,8 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         _outgoingFiles[event.file_id]?.onFail?.(event.reason || "relay_failed");
     }
     function handleFileReceived(event) {
-        _outgoingFiles[event.file_id]?.onReceived?.(true);
+        const rec = _outgoingFiles[event.file_id];
+        if (rec && event.from_webid === rec.toWebid) rec.onReceived?.(true);
     }
 
     return {

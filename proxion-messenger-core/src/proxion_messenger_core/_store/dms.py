@@ -7,6 +7,7 @@ that gateway restarts and browser reloads can fully restore session state.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import sqlite3
 import time
@@ -48,6 +49,7 @@ class DmStoreMixin(object):
     # Accepted entries are never evicted for capacity. No automatic TTL: deletion
     # requires delivery acceptance or an explicit block/revocation/account purge.
     MAX_FANOUT_BYTES = 32 * 1024 * 1024
+    MAX_FANOUT_COMMIT_RECEIPTS = 100000
 
     def enqueue_device_fanout(self, message_id: str, sender: str, owner: str,
                               device: str, payload: dict) -> bool:
@@ -67,6 +69,11 @@ class DmStoreMixin(object):
                 return False
             if conn.execute("SELECT 1 FROM revocations WHERE cert_id=?", (f"device:{device}",)).fetchone():
                 return False
+            committed = conn.execute(
+                "SELECT envelope_digest FROM committed_device_fanout WHERE from_webid=? AND message_id=? AND to_webid=? AND to_device_id=?",
+                (sender, message_id, owner, device)).fetchone()
+            if committed:
+                return committed[0] == hashlib.sha256(encoded.encode("utf-8")).hexdigest()
             existing = conn.execute(
                 "SELECT payload_json FROM pending_device_fanout WHERE from_webid=? AND message_id=? AND to_webid=? AND to_device_id=?",
                 (sender, message_id, owner, device)).fetchone()
@@ -82,6 +89,10 @@ class DmStoreMixin(object):
             total = conn.execute("SELECT COALESCE(SUM(byte_count),0) FROM pending_device_fanout").fetchone()[0]
             if total + size > self.MAX_FANOUT_BYTES:
                 return False
+            receipts = conn.execute("SELECT COUNT(*) FROM committed_device_fanout").fetchone()[0]
+            pending = conn.execute("SELECT COUNT(*) FROM pending_device_fanout").fetchone()[0]
+            if receipts + pending >= self.MAX_FANOUT_COMMIT_RECEIPTS:
+                return False  # reserve a small receipt slot for every accepted envelope
             conn.execute(
                 "INSERT INTO pending_device_fanout(from_webid,message_id,to_webid,to_device_id,payload_json,byte_count,created_at) VALUES(?,?,?,?,?,?,?)",
                 (sender, message_id, owner, device, encoded, size, time.time()))
@@ -95,7 +106,40 @@ class DmStoreMixin(object):
                 "SELECT queue_id,message_id,from_webid,payload_json FROM pending_device_fanout WHERE to_webid=? AND to_device_id=? ORDER BY queue_id LIMIT ?",
                 (owner, device, limit)).fetchall()
         return [{"queue_id": row["queue_id"], "message_id": row["message_id"],
-                 "from_webid": row["from_webid"], "payload": json.loads(row["payload_json"])} for row in rows]
+                 "from_webid": row["from_webid"], "payload": json.loads(row["payload_json"]),
+                 "envelope_digest": hashlib.sha256(row["payload_json"].encode("utf-8")).hexdigest()} for row in rows]
+
+    def acknowledge_device_fanout(self, owner: str, device: str, queue_id: int,
+                                   sender: str, message_id: str, digest: str) -> bool:
+        """Only an authenticated recipient's exact durable envelope can drain."""
+        if (type(queue_id) is not int or queue_id < 1 or not isinstance(digest, str)
+                or len(digest) != 64):
+            return False
+        with self._conn() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT payload_json FROM pending_device_fanout WHERE queue_id=? AND to_webid=? AND to_device_id=? AND from_webid=? AND message_id=?",
+                (queue_id, owner, device, sender, message_id)).fetchone()
+            if not row:
+                committed = conn.execute(
+                    "SELECT 1 FROM committed_device_fanout WHERE from_webid=? AND message_id=? AND to_webid=? AND to_device_id=? AND envelope_digest=? AND queue_id=?",
+                    (sender, message_id, owner, device, digest, queue_id)).fetchone()
+                return bool(committed)
+            if hashlib.sha256(row[0].encode("utf-8")).hexdigest() != digest:
+                return False
+            conn.execute("INSERT OR IGNORE INTO committed_device_fanout VALUES(?,?,?,?,?,?,?)",
+                         (sender, message_id, owner, device, digest, queue_id, time.time()))
+            conn.execute("DELETE FROM pending_device_fanout WHERE queue_id=?", (queue_id,))
+        return True
+
+    def device_fanout_committed(self, owner, device, sender, message_id, payload) -> bool:
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT envelope_digest FROM committed_device_fanout WHERE from_webid=? AND message_id=? AND to_webid=? AND to_device_id=?",
+                (sender, message_id, owner, device)).fetchone()
+        return bool(row and row[0] == hashlib.sha256(encoded.encode("utf-8")).hexdigest())
 
     def has_device_fanout(self, owner: str, device: str, queue_id: int) -> bool:
         with self._conn() as conn:

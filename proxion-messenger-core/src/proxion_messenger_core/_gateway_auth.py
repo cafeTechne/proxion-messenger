@@ -155,6 +155,7 @@ class AuthHandlerMixin:
             "display_name": pending["display_name"],
             "gateway_url": pending["gateway_url"],
             "delegation_cert": pending.get("delegation_cert"),
+            "dm_commit_v": pending.get("dm_commit_v"),
         })
 
     def _rotated_from_identity(self, identity: str) -> str:
@@ -256,6 +257,7 @@ class AuthHandlerMixin:
                 "expires_at": time.time() + 30,
                 "auth_ctx": _auth_ctx,
                 "delegation_cert": data.get("delegation_cert"),
+                "dm_commit_v": data.get("dm_commit_v"),
             }
             _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
             logger.info("auth_challenge issued to %s for DID %s...", _ip_dbg2, identity[:20])
@@ -348,6 +350,7 @@ class AuthHandlerMixin:
             self._presence_by_identity.setdefault(identity, set()).add(websocket)
             import uuid as _uuid_sess
             self._session_meta[websocket] = {
+                "dm_commit_v": 1 if data.get("dm_commit_v") == 1 else 0,
                 "session_id": str(_uuid_sess.uuid4()),
                 "connected_at": datetime.now(timezone.utc).isoformat(),
                 "ip_addr": getattr(websocket, 'remote_address', ('unknown',))[0]
@@ -407,7 +410,7 @@ class AuthHandlerMixin:
                         break
                     if not self._store.has_device_fanout(identity, _dev_id, _env["queue_id"]):
                         continue  # removed by account/policy cleanup or another completed drain
-                    await websocket.send(json.dumps({
+                    await websocket.send(json.dumps(self._fanout_commit_event(_env, _dev_id) if self._fanout_commit_capable(websocket) else {
                         "type": "dm_fanout", "message_id": _env["message_id"],
                         "from_webid": _env["from_webid"], "to_device_id": _dev_id,
                         "payload": _env["payload"],
@@ -415,6 +418,8 @@ class AuthHandlerMixin:
                     # Peek, send, remove: a crash before removal replays exact
                     # ciphertext. A successful socket write is the existing
                     # acceptance boundary, not a client commit/read receipt.
+                    if self._fanout_commit_capable(websocket):
+                        continue  # client must commit receipt/history before removal
                     self._store.remove_device_fanout(identity, _dev_id, _env["queue_id"])
                     self._store.mark_dm_delivered(_env["message_id"], identity, _dev_id)
                 except Exception as exc:
@@ -444,7 +449,7 @@ class AuthHandlerMixin:
                     identity, "online", self._user_presence[identity]["status_message"],
                     display_name=self._display_names.get(websocket, "")))
             turn_creds = self._make_turn_creds(identity)
-            registered_msg: dict = {"type": "registered", "webid": identity}
+            registered_msg: dict = {"type": "registered", "webid": identity, "dm_commit_v": 1}
             if turn_creds:
                 registered_msg["turn"] = turn_creds
             # R85 Track 1: certify the connecting browser's signing key (its clientDid)

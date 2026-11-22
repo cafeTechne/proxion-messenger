@@ -23,6 +23,7 @@ function makeFT(overrides = {}) {
     renderMessage: overrides.renderMessage || (() => {}),
     getActiveView: overrides.getActiveView || (() => null),
     resolveSender: overrides.resolveSender,
+    persistMessage: overrides.persistMessage, getContext: overrides.getContext,
   });
   return { ft, calls, toasts };
 }
@@ -52,7 +53,7 @@ async function startSend(ft, calls, n) {
   const p = ft.sendFileChunked(fileOf(n), 'did:bob');
   await tick();
   const offer = calls.find(c => c.cmd === 'file_offer');
-  ft.handleFileAccept({ file_id: offer.payload.file_id });
+  ft.handleFileAccept({ from_webid: 'did:bob', file_id: offer.payload.file_id });
   await tick();
   return { p, id: offer.payload.file_id, total: offer.payload.total_chunks };
 }
@@ -87,9 +88,9 @@ describe('handleFileComplete integrity', () => {
     const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
     ft.handleFileOffer({ file_id: 'fm', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 5, total_chunks: 3 });
     // Only 2 of 3 chunks arrive (middle one dropped).
-    ft.handleFileChunk({ file_id: 'fm', seq: 0, data: 'AA==' });
-    ft.handleFileChunk({ file_id: 'fm', seq: 2, data: 'AA==' });
-    ft.handleFileComplete({ file_id: 'fm' });
+    ft.handleFileChunk({ from_webid: 'did:x', file_id: 'fm', seq: 0, data: 'AA==' });
+    ft.handleFileChunk({ from_webid: 'did:x', file_id: 'fm', seq: 2, data: 'AA==' });
+    ft.handleFileComplete({ from_webid: 'did:x', file_id: 'fm' });
     expect(rendered).toBeNull(); // no silently-corrupt file rendered
   });
 
@@ -100,8 +101,8 @@ describe('handleFileComplete integrity', () => {
     let rendered = null;
     const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
     ft.handleFileOffer({ file_id: 'fx', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 3, total_chunks: 3 });
-    for (const seq of [10, 11, 12]) ft.handleFileChunk({ file_id: 'fx', seq, data: 'AA==' });
-    ft.handleFileComplete({ file_id: 'fx' });
+    for (const seq of [10, 11, 12]) ft.handleFileChunk({ from_webid: 'did:x', file_id: 'fx', seq, data: 'AA==' });
+    ft.handleFileComplete({ from_webid: 'did:x', file_id: 'fx' });
     expect(rendered).toBeNull();
   });
 
@@ -109,10 +110,10 @@ describe('handleFileComplete integrity', () => {
     let rendered = null;
     const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
     ft.handleFileOffer({ file_id: 'fy', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 2, total_chunks: 2 });
-    ft.handleFileChunk({ file_id: 'fy', seq: '0', data: 'AA==' });   // string, not index 0
-    ft.handleFileChunk({ file_id: 'fy', seq: -1, data: 'AA==' });
-    ft.handleFileChunk({ file_id: 'fy', seq: 1.5, data: 'AA==' });
-    ft.handleFileComplete({ file_id: 'fy' });
+    ft.handleFileChunk({ from_webid: 'did:x', file_id: 'fy', seq: '0', data: 'AA==' });   // string, not index 0
+    ft.handleFileChunk({ from_webid: 'did:x', file_id: 'fy', seq: -1, data: 'AA==' });
+    ft.handleFileChunk({ from_webid: 'did:x', file_id: 'fy', seq: 1.5, data: 'AA==' });
+    ft.handleFileComplete({ from_webid: 'did:x', file_id: 'fy' });
     expect(rendered).toBeNull();
   });
 
@@ -120,8 +121,8 @@ describe('handleFileComplete integrity', () => {
     let rendered = null;
     const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
     ft.handleFileOffer({ file_id: 'fz', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 1, total_chunks: 1 });
-    ft.handleFileChunk({ file_id: 'fz', seq: 0, data: { evil: true } });
-    ft.handleFileComplete({ file_id: 'fz' });
+    ft.handleFileChunk({ from_webid: 'did:x', file_id: 'fz', seq: 0, data: { evil: true } });
+    ft.handleFileComplete({ from_webid: 'did:x', file_id: 'fz' });
     expect(rendered).toBeNull();
   });
 });
@@ -134,9 +135,9 @@ describe('handleFileChunk + handleFileComplete reassembly', () => {
     ft.handleFileOffer({ file_id: 'f3', from_webid: 'did:bob', filename: 'hi.txt', mime_type: 'text/plain', size_bytes: 6, total_chunks: 2 });
     // "abc" + "def" base64
     const b64 = (s) => btoa(s);
-    ft.handleFileChunk({ file_id: 'f3', seq: 0, data: b64('abc') });
-    ft.handleFileChunk({ file_id: 'f3', seq: 1, data: b64('def') });
-    ft.handleFileComplete({ file_id: 'f3' });
+    ft.handleFileChunk({ from_webid: 'did:bob', file_id: 'f3', seq: 0, data: b64('abc') });
+    ft.handleFileChunk({ from_webid: 'did:bob', file_id: 'f3', seq: 1, data: b64('def') });
+    ft.handleFileComplete({ from_webid: 'did:bob', file_id: 'f3' });
     expect(rendered).toHaveLength(1);
     const msg = rendered[0];
     expect(msg.file.filename).toBe('hi.txt');
@@ -151,8 +152,8 @@ describe('handleFileChunk + handleFileComplete reassembly', () => {
       getActiveView: () => ({ id: 'cert-123', peerWebid: 'did:bob' }),
     });
     ft.handleFileOffer({ file_id: 'f4', from_webid: 'did:bob', filename: 'x', mime_type: 'text/plain', size_bytes: 1, total_chunks: 1 });
-    ft.handleFileChunk({ file_id: 'f4', seq: 0, data: btoa('z') });
-    ft.handleFileComplete({ file_id: 'f4' });
+    ft.handleFileChunk({ from_webid: 'did:bob', file_id: 'f4', seq: 0, data: btoa('z') });
+    ft.handleFileComplete({ from_webid: 'did:bob', file_id: 'f4' });
     expect(rendered[0].thread_id).toBe('cert-123');
   });
 });
@@ -176,8 +177,8 @@ describe('receive-side resource bounds', () => {
   it('a completed transfer frees its slot', () => {
     const { ft } = makeFT();
     offer(ft, 'done', 1);
-    ft.handleFileChunk({ file_id: 'done', seq: 0, data: btoa('z') });
-    ft.handleFileComplete({ file_id: 'done' });
+    ft.handleFileChunk({ from_webid: 'did:x', file_id: 'done', seq: 0, data: btoa('z') });
+    ft.handleFileComplete({ from_webid: 'did:x', file_id: 'done' });
     expect(ft._incomingCount()).toBe(0);
   });
 
@@ -186,7 +187,7 @@ describe('receive-side resource bounds', () => {
     try {
       const { ft } = makeFT();
       offer(ft, 'stall', 3);
-      ft.handleFileChunk({ file_id: 'stall', seq: 0, data: btoa('a') });
+      ft.handleFileChunk({ from_webid: 'did:x', file_id: 'stall', seq: 0, data: btoa('a') });
       expect(ft._incomingCount()).toBe(1);
       vi.advanceTimersByTime(ft.TRANSFER_IDLE_TIMEOUT_MS + 1);
       expect(ft._incomingCount()).toBe(0); // buffered chunks freed
@@ -201,9 +202,9 @@ describe('receive-side resource bounds', () => {
       const { ft } = makeFT();
       offer(ft, 'active', 3);
       const half = Math.floor(ft.TRANSFER_IDLE_TIMEOUT_MS * 0.75);
-      ft.handleFileChunk({ file_id: 'active', seq: 0, data: btoa('a') });
+      ft.handleFileChunk({ from_webid: 'did:x', file_id: 'active', seq: 0, data: btoa('a') });
       vi.advanceTimersByTime(half);
-      ft.handleFileChunk({ file_id: 'active', seq: 1, data: btoa('b') });  // activity
+      ft.handleFileChunk({ from_webid: 'did:x', file_id: 'active', seq: 1, data: btoa('b') });  // activity
       vi.advanceTimersByTime(half);                                        // past original deadline
       expect(ft._incomingCount()).toBe(1);                                 // still alive
     } finally {
@@ -218,7 +219,7 @@ describe('accept/reject settle the send handshake', () => {
     let ft;
     const made = makeFT({ onCmd: (cmd, p) => {
       if (cmd === 'file_chunk') queueMicrotask(() => ft.handleFileChunkAck({ file_id: p.file_id, seq: p.seq }));
-      if (cmd === 'file_complete') queueMicrotask(() => ft.handleFileReceived({ file_id: p.file_id }));
+      if (cmd === 'file_complete') queueMicrotask(() => ft.handleFileReceived({ from_webid: 'did:bob', file_id: p.file_id }));
     } });
     ft = made.ft;
     const { p } = await startSend(ft, made.calls, 3);
@@ -232,7 +233,7 @@ describe('accept/reject settle the send handshake', () => {
     const p = ft.sendFileChunked(file, 'did:bob');
     await new Promise(r => setTimeout(r, 10));
     const offer = calls.find(c => c.cmd === 'file_offer');
-    ft.handleFileReject({ file_id: offer.payload.file_id, reason: 'declined' });
+    ft.handleFileReject({ from_webid: 'did:bob', file_id: offer.payload.file_id, reason: 'declined' });
     await p;
     expect(calls.some(c => c.cmd === 'file_chunk')).toBe(false);
   });
@@ -257,7 +258,7 @@ describe('send side delivery (paced, confirmed)', () => {
     expect(calls.some(c => c.cmd === 'file_complete')).toBe(true);
     // Every chunk went out, but nothing says "Sent" until the receiver confirms.
     expect(toasts.some(m => SENT.test(m))).toBe(false);
-    ft.handleFileReceived({ file_id: id });
+    ft.handleFileReceived({ from_webid: 'did:bob', file_id: id });
     expect(await p).toBe(true);
     expect(toasts.some(m => SENT.test(m))).toBe(true);
   });
@@ -281,7 +282,7 @@ describe('send side delivery (paced, confirmed)', () => {
     ft.handleFileChunkAck({ file_id: id, seq: 1 });
     await tick();
     expect(calls.some(c => c.cmd === 'file_complete')).toBe(true);
-    ft.handleFileReject({ file_id: id, reason: 'incomplete' });
+    ft.handleFileReject({ from_webid: 'did:bob', file_id: id, reason: 'incomplete' });
     expect(await p).toBe(false);
     expect(toasts.some(m => FAILED.test(m))).toBe(true);
     expect(toasts.some(m => /declined/i.test(m))).toBe(false);
@@ -292,13 +293,13 @@ describe('receive side confirms and names the sender', () => {
   it('confirms a complete file, and reports an incomplete one back', () => {
     const { ft, calls } = makeFT();
     ft.handleFileOffer({ file_id: 'ok', from_webid: 'did:key:z6MkGw', filename: 'a.txt', mime_type: 'text/plain', size_bytes: 3, total_chunks: 1 });
-    ft.handleFileChunk({ file_id: 'ok', seq: 0, data: btoa('abc') });
-    ft.handleFileComplete({ file_id: 'ok' });
+    ft.handleFileChunk({ from_webid: 'did:key:z6MkGw', file_id: 'ok', seq: 0, data: btoa('abc') });
+    ft.handleFileComplete({ from_webid: 'did:key:z6MkGw', file_id: 'ok' });
     expect(calls.find(c => c.cmd === 'file_received')?.payload).toEqual({ to_webid: 'did:key:z6MkGw', file_id: 'ok' });
 
     ft.handleFileOffer({ file_id: 'bad', from_webid: 'did:key:z6MkGw', filename: 'a.txt', mime_type: 'text/plain', size_bytes: 6, total_chunks: 2 });
-    ft.handleFileChunk({ file_id: 'bad', seq: 0, data: btoa('abc') });
-    ft.handleFileComplete({ file_id: 'bad' });
+    ft.handleFileChunk({ from_webid: 'did:key:z6MkGw', file_id: 'bad', seq: 0, data: btoa('abc') });
+    ft.handleFileComplete({ from_webid: 'did:key:z6MkGw', file_id: 'bad' });
     const rej = calls.find(c => c.cmd === 'file_reject' && c.payload.file_id === 'bad');
     expect(rej.payload.reason).toBe('incomplete');
   });
@@ -311,17 +312,85 @@ describe('receive side confirms and names the sender', () => {
       resolveSender: (w) => (w === gwDid ? { name: 'Bob', threadId: 'cert-bob' } : null),
     });
     ft.handleFileOffer({ file_id: 'n1', from_webid: gwDid, filename: 'a.txt', mime_type: 'text/plain', size_bytes: 1, total_chunks: 1 });
-    ft.handleFileChunk({ file_id: 'n1', seq: 0, data: btoa('a') });
-    ft.handleFileComplete({ file_id: 'n1' });
+    ft.handleFileChunk({ from_webid: gwDid, file_id: 'n1', seq: 0, data: btoa('a') });
+    ft.handleFileComplete({ from_webid: gwDid, file_id: 'n1' });
     expect(rendered[0].from_display_name).toBe('Bob');
     expect(rendered[0].thread_id).toBe('cert-bob');
 
     // Unknown sender: the distinguishing tail, never "did:key:z6Mk".
     const { ft: ft2 } = makeFT({ renderMessage: (m) => rendered.push(m) });
     ft2.handleFileOffer({ file_id: 'n2', from_webid: gwDid, filename: 'a.txt', mime_type: 'text/plain', size_bytes: 1, total_chunks: 1 });
-    ft2.handleFileChunk({ file_id: 'n2', seq: 0, data: btoa('a') });
-    ft2.handleFileComplete({ file_id: 'n2' });
+    ft2.handleFileChunk({ from_webid: gwDid, file_id: 'n2', seq: 0, data: btoa('a') });
+    ft2.handleFileComplete({ from_webid: gwDid, file_id: 'n2' });
     expect(rendered[1].from_display_name).not.toBe(gwDid.slice(0, 12));
     expect(rendered[1].from_display_name.endsWith(gwDid.slice(-10))).toBe(true);
+  });
+});
+
+describe('transfer identity and resource boundaries', () => {
+  it('ignores chunks and completion from a different sender even with the same transfer id', () => {
+    const rendered = [], { ft, calls } = makeFT({ renderMessage: msg => rendered.push(msg) });
+    ft.handleFileOffer({ file_id: 'bound', from_webid: 'did:alice', filename: 'a.txt', mime_type: 'text/plain', size_bytes: 3, total_chunks: 1 });
+    ft.handleFileChunk({ file_id: 'bound', from_webid: 'did:mallory', seq: 0, data: btoa('bad') });
+    ft.handleFileComplete({ file_id: 'bound', from_webid: 'did:mallory' });
+    expect(ft._incomingCount()).toBe(1); expect(rendered).toHaveLength(0);
+    ft.handleFileChunk({ file_id: 'bound', from_webid: 'did:alice', seq: 0, data: btoa('abc') });
+    ft.handleFileComplete({ file_id: 'bound', from_webid: 'did:alice' });
+    expect(rendered[0].file.data_b64).toBe(btoa('abc'));
+    expect(calls.filter(call => call.cmd === 'file_received')).toHaveLength(1);
+  });
+  it('does not let a colliding offer overwrite partial bytes, metadata or the original sender', () => {
+    const rendered = [], { ft, calls } = makeFT({ renderMessage: msg => rendered.push(msg) });
+    ft.handleFileOffer({ file_id: 'collision', from_webid: 'did:alice', filename: 'original.txt', mime_type: 'text/plain', size_bytes: 2, total_chunks: 2 });
+    ft.handleFileChunk({ file_id: 'collision', from_webid: 'did:alice', seq: 0, data: btoa('a') });
+    ft.handleFileOffer({ file_id: 'collision', from_webid: 'did:mallory', filename: 'replacement.txt', mime_type: 'text/plain', size_bytes: 1, total_chunks: 1 });
+    expect(calls.at(-1).payload.reason).toBe('already_in_progress');
+    ft.handleFileChunk({ file_id: 'collision', from_webid: 'did:alice', seq: 1, data: btoa('b') });
+    ft.handleFileComplete({ file_id: 'collision', from_webid: 'did:alice' });
+    expect(rendered[0].file.filename).toBe('original.txt'); expect(rendered[0].file.data_b64).toBe(btoa('ab'));
+  });
+  it('does not confirm a file with oversized chunks or a length different from its offer', () => {
+    const rendered = [], { ft, calls } = makeFT({ renderMessage: msg => rendered.push(msg) });
+    ft.handleFileOffer({ file_id: '__proto__', from_webid: 'did:alice', filename: 'a', mime_type: 'text/plain', size_bytes: 1, total_chunks: 1 });
+    expect(ft._incomingCount()).toBe(1);
+    ft.handleFileChunk({ file_id: '__proto__', from_webid: 'did:alice', seq: 0, data: btoa('too long') });
+    ft.handleFileComplete({ file_id: '__proto__', from_webid: 'did:alice' });
+    expect(rendered).toHaveLength(0); expect(calls.some(call => call.cmd === 'file_received')).toBe(false);
+    expect(ft._incomingCount()).toBe(0);
+  });
+  it('does not accept a completion receipt from a different peer', async () => {
+    const { ft, calls } = makeFT();
+    const { p, id } = await startSend(ft, calls, 1);
+    ft.handleFileChunkAck({ file_id: id, seq: 0 }); await tick();
+    let completed = false; p.then(() => { completed = true; });
+    ft.handleFileReceived({ file_id: id, from_webid: 'did:mallory' }); await tick();
+    expect(completed).toBe(false);
+    ft.handleFileReceived({ file_id: id, from_webid: 'did:bob' }); expect(await p).toBe(true);
+  });
+});
+
+
+describe('file history commit before receipt', () => {
+  const offer = { file_id: 'history', from_webid: 'did:alice', filename: 'a.txt', mime_type: 'text/plain', size_bytes: 1, total_chunks: 1 };
+  it('retains the assembled file on storage failure and acknowledges only a successful retry', async () => {
+    const persistMessage = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true), rendered = [];
+    const { ft, calls } = makeFT({ persistMessage, renderMessage: msg => rendered.push(msg) });
+    ft.handleFileOffer(offer); ft.handleFileChunk({ ...offer, seq: 0, data: btoa('a') });
+    expect(await ft.handleFileComplete(offer)).toBe(false);
+    expect(ft._incomingCount()).toBe(1); expect(rendered).toHaveLength(0);
+    expect(calls.some(call => call.cmd === 'file_received')).toBe(false);
+    expect(await ft.handleFileComplete(offer)).toBe(true);
+    expect(ft._incomingCount()).toBe(0); expect(rendered).toHaveLength(1);
+    expect(calls.filter(call => call.cmd === 'file_received')).toHaveLength(1);
+  });
+  it('shares finalization and sends no receipt after the original account changes', async () => {
+    let release, account = 'alice'; const pending = new Promise(resolve => { release = resolve; });
+    const persistMessage = vi.fn(() => pending), rendered = [];
+    const { ft, calls } = makeFT({ persistMessage, getContext: () => account, renderMessage: msg => rendered.push(msg) });
+    ft.handleFileOffer(offer); ft.handleFileChunk({ ...offer, seq: 0, data: btoa('a') });
+    const first = ft.handleFileComplete(offer), second = ft.handleFileComplete(offer);
+    expect(first).toBe(second); await tick(); expect(persistMessage).toHaveBeenCalledTimes(1);
+    account = 'replacement'; release(true); expect(await first).toBe(false);
+    expect(rendered).toHaveLength(0); expect(calls.some(call => call.cmd === 'file_received')).toBe(false);
   });
 });

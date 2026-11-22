@@ -941,6 +941,15 @@ copies. Registrations read a bounded recipient/device batch and remove a row onl
 after a successful socket write; interruption before removal can replay the same
 ciphertext. A successful write is still not proof of a client commit or read.
 See [Round 136](ROUND_136_CLOSEOUT.md) for limits and cleanup policy.
+
+Round 145 strengthens this for clients negotiating `dm_commit_v: 1`: envelopes
+are queued before live writes and retained until the authenticated device
+acknowledges an exact durable receive commit. A content-free server receipt
+(schema 67) makes acknowledgement replay and conflicting retries safe; the
+browser protects its unconfirmed receipt until the server confirms removal.
+Legacy clients retain the socket-write boundary described above. See
+[Round 145](ROUND_145_CLOSEOUT.md) for negotiation, limits, history-disabled
+policy and the distinction between gateway acceptance, consumption and reading.
 Sender self-sync mirrors retain their existing best-effort
 semantics and do not override recipient confirmation. Clearing browser storage
 or losing the device state key can lose pending jobs. A frozen recipient plan is

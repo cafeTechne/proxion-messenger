@@ -245,6 +245,10 @@ describe('independent sender mirror recovery', () => {
         ] };
         await engine.queue(job); await engine.send(job.id);
         expect(await engine.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'bob', to_device_id: 'b1' }] })).toBe(false);
+        expect((await engine.inspect())[0].canCancel).toBe(false);
+        expect(await engine.cancel(job.id)).toBe(false);
+        expect(await engine.cancel(job.id)).toBe(false);
+        expect(h.disk.size).toBe(1);
         await engine.send(job.id);
         expect(h.frames[1].fanout.map(row => row.to_device_id)).toEqual(['b2']);
         expect(await engine.confirm(job.id, { kind: 'fanout', delivered: [{ to_webid: 'bob', to_device_id: 'b2' }] })).toBe(true);

@@ -23,8 +23,19 @@ export function gatewayDmEnvelope(event) {
     };
 }
 
+// The server token binds the exact opaque payload. It is never an authority:
+// the gateway also checks the authenticated account/device and row identity.
+export function gatewayReceiveCommit(event) {
+    const token = event?.receive_commit;
+    if (event?.type !== 'dm_fanout' || token?.v !== 1 || !Number.isSafeInteger(token.queue_id)
+        || token.queue_id < 1 || !/^[a-f0-9]{64}$/.test(token.envelope_digest || '')) return null;
+    return { cmd: 'dm_receive_commit', v: 1, queue_id: token.queue_id,
+        envelope_digest: token.envelope_digest, from_webid: event.from_webid, message_id: event.message_id };
+}
+
 export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleEvent,
     getScope, getGeneration = () => 0, toMessage, isActive = () => true, isSealedPlain = () => false,
+    sendCommit = () => true, requestReplay = () => {},
     onError = err => console.warn('[gateway-dm] receive pending:', err) }) {
     let generation = 0, timer = null, recovering = null;
     const queues = new Map(), presented = new Set(), waiting = new Map();
@@ -43,7 +54,9 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
         if (!ctx.current()) return false;
         if (await receipts.has(ctx.scope, row.receiveId)) {
             if (!ctx.current()) return false;
-            await receipts.acknowledge(ctx.scope, row.receiveId);
+            if (row.data.commit && await sendCommit(row.data.commit) === false) return false;
+            if (!ctx.current()) return false;
+            if (!row.data.commit) await receipts.acknowledge(ctx.scope, row.receiveId);
             if (!ctx.current()) return false;
             await e2e.finishDmReceive(row.peerId, row.receiveId, ctx.current);
             presented.delete(key);
@@ -59,8 +72,10 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
             }
             if (!ctx.current() || await persistMessage(message) === false || !ctx.current()) return false;
         }
-        if (!await receipts.remember(ctx.scope, row.receiveId) || !ctx.current()) return false;
-        await receipts.acknowledge(ctx.scope, row.receiveId);
+        if (!await receipts.remember(ctx.scope, row.receiveId, null, row.data.commit) || !ctx.current()) return false;
+        if (row.data.commit && await sendCommit(row.data.commit) === false) return false;
+        if (!ctx.current()) return false;
+        if (!row.data.commit) await receipts.acknowledge(ctx.scope, row.receiveId);
         if (!ctx.current()) return false;
         await e2e.finishDmReceive(row.peerId, row.receiveId, ctx.current);
         presented.delete(key);
@@ -81,7 +96,11 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
                 ? event.from_webid + '#' + (p.from_device_id || event.from_webid) : event.from_webid;
             if (await receipts.has(ctx.scope, receiveId)) {
                 if (!ctx.current()) return false;
-                await receipts.acknowledge(ctx.scope, receiveId);
+                const rawCommit = gatewayReceiveCommit(event);
+                const commit = rawCommit ? { ...rawCommit, receive_id: receiveId } : null;
+                if (commit && await sendCommit(commit) === false) return false;
+                if (!ctx.current()) return false;
+                if (!commit) await receipts.acknowledge(ctx.scope, receiveId);
                 if (!ctx.current()) return false;
                 await e2e.finishDmReceive(peerId, receiveId, ctx.current);
                 return true;
@@ -90,7 +109,8 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
             if (!presented.has(ctx.scope + receiveId) && presented.size >= 1024) return false;
             const message = toMessage(event);
             if (!message?.message_id || !message.thread_id) return false;
-            const data = { transport: 'gateway', scope: ctx.scope, message };
+            const rawCommit = gatewayReceiveCommit(event);
+            const data = { transport: 'gateway', scope: ctx.scope, message, commit: rawCommit ? { ...rawCommit, receive_id: receiveId } : null };
             let content;
             try {
                 content = await e2e.ratchetDecrypt(peerId, p.content, p.nonce, p.msg_num ?? 0,
@@ -114,9 +134,16 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
             for (const row of await e2e.pendingDmReceives()) {
                 if (!ctx.current()) return;
                 if (row.data.scope !== ctx.scope) continue;
-                try { await serialized(ctx.scope + row.receiveId, () => complete(row, ctx)); }
+                try {
+                    if (await serialized(ctx.scope + row.receiveId, () => complete(row, ctx))) waiting.delete(ctx.scope + row.receiveId);
+                }
                 catch (err) { onError(err); }
             }
+            if (receipts.pendingCommits) for (const commit of await receipts.pendingCommits(ctx.scope)) {
+                if (!ctx.current()) return;
+                await sendCommit(commit);
+            }
+            if (ctx.current()) await requestReplay();
             for (const row of [...waiting.values()]) {
                 if (!ctx.current()) return;
                 if (row.scope !== ctx.scope) continue;
@@ -129,6 +156,11 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
     }
     return {
         receive, recover,
+        async confirmCommit(event) {
+            const ctx = context();
+            if (!ctx.current() || !/^[a-f0-9]{64}$/.test(event?.receive_id || '')) return false;
+            return receipts.confirmCommit(ctx.scope, event.receive_id, event);
+        },
         start() {
             if (!timer) timer = setInterval(() => recover().catch(onError), 5000);
             return recover().catch(onError);

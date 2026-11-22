@@ -1125,8 +1125,9 @@ class DmHandlerMixin:
                 "to_device_id": to_device_id,
                 "payload": entry.get("payload"),
             })
-            accepted = False
-            for ws in dev_sockets:
+            committed = await self._deliver_commit_fanout(dev_sockets, message_id, from_webid, to_device_id, entry.get("payload"))
+            accepted = committed is True
+            for ws in dev_sockets if committed is None else []:
                 try:
                     await ws.send(event)
                     accepted = True
@@ -1136,7 +1137,7 @@ class DmHandlerMixin:
                     logger.warning("dm_fanout relay failed to %s/%s: %s", to_webid, to_device_id, exc)
             # A stale socket is offline too. Acknowledge only delivery or
             # acceptance into a retry queue, never a failed send alone.
-            if not accepted:
+            if not accepted and committed is None:
                 account_sockets = self._sockets_for(to_webid) or []
                 if not account_sockets and self._resolve_peer_gateway(to_webid):
                     accepted = await self._relay_dm_fanout_entry(message_id, to_webid, to_device_id,
@@ -1156,6 +1157,79 @@ class DmHandlerMixin:
             "message_id": message_id,
             "delivered": delivered,
         }))
+
+    def _fanout_commit_capable(self, websocket) -> bool:
+        return (self._session_meta.get(websocket) or {}).get("dm_commit_v") == 1
+
+    @staticmethod
+    def _fanout_commit_event(row: dict, device: str) -> dict:
+        return {"type": "dm_fanout", "message_id": row["message_id"],
+                "from_webid": row["from_webid"], "to_device_id": device,
+                "payload": row["payload"],
+                "receive_commit": {"v": 1, "queue_id": row["queue_id"],
+                                   "envelope_digest": row["envelope_digest"]}}
+
+    async def _deliver_commit_fanout(self, sockets, message_id, sender, device, payload):
+        """None means legacy; False means admission failed. Queue BEFORE write."""
+        modern = [ws for ws in sockets if self._fanout_commit_capable(ws)]
+        if not modern:
+            return None
+        owner = self._client_webids.get(modern[0], "")
+        if not self._queue_fanout_envelope(message_id, sender, owner, device, payload):
+            return False
+        row = next((row for row in self._store.pending_device_fanout(owner, device)
+                    if row["message_id"] == message_id and row["from_webid"] == sender), None)
+        if not row:
+            return self._store.device_fanout_committed(owner, device, sender, message_id, payload)
+        wire = json.dumps(self._fanout_commit_event(row, device))
+        for ws in sockets:
+            try:
+                await ws.send(wire)
+            except Exception:
+                pass  # durable admission, not socket write, is acceptance
+        return True
+
+    async def _handle_dm_receive_commit(self, websocket, data):
+        owner = self._client_webids.get(websocket, "")
+        device = self._session_device_did.get(websocket) or owner
+        if not owner or not self._fanout_commit_capable(websocket) or not self._store:
+            return
+        if self._store.is_cert_revoked(f"device:{device}"):
+            return
+        if data.get("v") != 1:
+            return
+        sender, message = data.get("from_webid"), data.get("message_id")
+        if not isinstance(sender, str) or not isinstance(message, str):
+            return
+        if self._store.acknowledge_device_fanout(owner, device, data.get("queue_id"),
+                                                sender, message, data.get("envelope_digest")):
+            self._store.mark_dm_delivered(message, owner, device)
+            receive_id = data.get("receive_id")
+            if isinstance(receive_id, str) and _re.fullmatch(r"[a-f0-9]{64}", receive_id):
+                await websocket.send(json.dumps({"type": "dm_receive_committed", "v": 1,
+                    "receive_id": receive_id, "queue_id": data["queue_id"],
+                    "from_webid": sender, "message_id": message,
+                    "envelope_digest": data["envelope_digest"]}))
+
+    async def _handle_dm_receive_recover(self, websocket, data):
+        import time
+        meta = self._session_meta.get(websocket) or {}
+        owner = self._client_webids.get(websocket, "")
+        device = self._session_device_did.get(websocket) or owner
+        if not owner or not self._fanout_commit_capable(websocket) or not self._store:
+            return
+        now = time.monotonic()
+        if now - meta.get("dm_commit_replay_at", 0) < 4:
+            return
+        meta["dm_commit_replay_at"] = now
+        if self._store.is_cert_revoked(f"device:{device}"):
+            return
+        for row in self._store.pending_device_fanout(owner, device):
+            if self._client_webids.get(websocket) != owner:
+                break
+            if self._is_blocked_for(owner, row["from_webid"]):
+                continue
+            await websocket.send(json.dumps(self._fanout_commit_event(row, device)))
 
     def _device_sockets(self, to_webid: str, to_device_id: str) -> list:
         """The specific DEVICE's live sockets within an account's sessions.
@@ -1381,7 +1455,8 @@ class DmHandlerMixin:
         # Dedup per transport id (one per device-envelope).
         if self._store:
             from .relay import RELAY_ID_DEDUP_TTL_SECONDS as _ID_TTL
-            _key = f"{from_webid}:{transport_id}"
+            import hashlib
+            _key = f"{from_webid}:{transport_id}:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
             if self._store.has_seen_relay_id(_key, ttl_seconds=_ID_TTL):
                 return "200 OK", '{"status":"duplicate"}'
         try:
@@ -1408,8 +1483,11 @@ class DmHandlerMixin:
             "payload": payload,
         })
         dev_sockets = self._device_sockets(to_webid, to_device_id)
-        accepted = False
-        for ws in dev_sockets:
+        committed = await self._deliver_commit_fanout(dev_sockets, message_id, from_webid, to_device_id, payload)
+        if committed is False:
+            return "503 Service Unavailable", '{"error":"fanout queue full"}'
+        accepted = committed is True
+        for ws in dev_sockets if committed is None else []:
             try:
                 await ws.send(event)
                 accepted = True

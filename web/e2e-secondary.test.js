@@ -239,7 +239,7 @@ describe('chunked files', () => {
         const ftA = createFileTransfer({ sendCmd: (cmd, p) => {
             sent.push({ cmd, ...p });
             if (cmd === 'file_chunk') queueMicrotask(() => ftA.handleFileChunkAck({ file_id: p.file_id, seq: p.seq }));
-            if (cmd === 'file_complete') queueMicrotask(() => ftA.handleFileReceived({ file_id: p.file_id }));
+            if (cmd === 'file_complete') queueMicrotask(() => ftA.handleFileReceived({ from_webid: 'bob', file_id: p.file_id }));
         }, showToast() {}, renderMessage() {}, getActiveView: () => viewAtAlice });
         const file = { name: 'minutes.pdf', type: 'application/pdf', arrayBuffer: async () => plain.buffer };
         const p = ftA.sendFileChunked(file, 'bob', { seal: (u8, meta) => a.sealFile(viewAtAlice, u8, meta, { echo: false }) });
@@ -249,7 +249,7 @@ describe('chunked files', () => {
         expect(offer.mime_type).toBe(SEALED_FILE_MIME);
         expect(offer.e2e_v).toBe(1);
         expect(hasPlain(offer, 'minutes')).toBe(false);
-        ftA.handleFileAccept({ file_id: offer.file_id });
+        ftA.handleFileAccept({ from_webid: 'bob', file_id: offer.file_id });
         await p;
         const chunks = sent.filter(s => s.cmd === 'file_chunk');
         expect(chunks.length).toBe(offer.total_chunks);
@@ -266,8 +266,8 @@ describe('chunked files', () => {
         expect(offerEv._sealedFile.filename).toBe('minutes.pdf');
         ftB.handleFileOffer(offerEv);
         expect(bobSent[0].cmd).toBe('file_accept');
-        for (const c of chunks) ftB.handleFileChunk({ file_id: c.file_id, seq: c.seq, data: c.data });
-        await ftB.handleFileComplete({ file_id: offer.file_id });
+        for (const c of chunks) ftB.handleFileChunk({ from_webid: 'alice', file_id: c.file_id, seq: c.seq, data: c.data });
+        await ftB.handleFileComplete({ from_webid: 'alice', file_id: offer.file_id });
         expect(rendered.file.filename).toBe('minutes.pdf');
         expect(rendered.file.mime_type).toBe('application/pdf');
         expect(Buffer.from(rendered.file.data_b64, 'base64').equals(Buffer.from(plain))).toBe(true);

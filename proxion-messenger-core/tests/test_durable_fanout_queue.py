@@ -40,13 +40,14 @@ def test_schema_65_upgrade_preserves_existing_data(tmp_path):
     old.close()
     with sqlite3.connect(path) as conn:
         conn.execute("DROP TABLE pending_device_fanout")
+        conn.execute("DROP TABLE committed_device_fanout")
         conn.execute("UPDATE schema_version SET version=65")
     upgraded = LocalStore(path)
     try:
         assert enqueue(upgraded)
         assert upgraded.get_messages("thread")[0]["message_id"] == "existing"
         with upgraded._conn() as conn:
-            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 66
+            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 67
     finally:
         upgraded.close()
 

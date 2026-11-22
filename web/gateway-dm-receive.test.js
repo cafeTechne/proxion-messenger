@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { createDmReceiptStore } from './dm-receipts.js';
-import { createGatewayDmReceiver, gatewayDmEnvelope, isGatewayDmReceive } from './gateway-dm-receive.js';
+import { createGatewayDmReceiver, gatewayDmEnvelope, gatewayReceiveCommit, isGatewayDmReceive } from './gateway-dm-receive.js';
 
 const event = { type: 'message', from_webid: 'alice', message_id: 'm1', thread_id: 'thread',
     content: 'cipher', nonce: 'nonce', ratchet_pub: 'ratchet', msg_num: 0, e2e: true };
@@ -167,4 +167,66 @@ it('does not display or finalize a delayed decrypt after same-account reauthenti
     expect(await pending).toBe(false);
     expect(h.delivered).toEqual([]); expect(h.history.size).toBe(0); expect(h.journal.size).toBe(1);
     await engine.recover(); expect(h.delivered).toHaveLength(1); expect(h.journal.size).toBe(0);
+});
+
+
+describe('durable gateway commit acknowledgements', () => {
+    const fanout = { type: 'dm_fanout', from_webid: 'alice', message_id: 'm1', to_device_id: 'device',
+        payload: { e2e: true, content: 'cipher', nonce: 'n' },
+        receive_commit: { v: 1, queue_id: 7, envelope_digest: 'a'.repeat(64) } };
+    it('sends no ack while history fails, then reacks a duplicate without decrypting', async () => {
+        const h = harness(), sendCommit = vi.fn(async command => {
+            await h.engine().confirmCommit({ ...command, type: 'dm_receive_committed' }); return true;
+        });
+        h.options.sendCommit = sendCommit;
+        h.persistMessage.mockResolvedValueOnce(false);
+        const reader = h.engine();
+        expect(await reader.receive(fanout)).toBe(false); expect(sendCommit).not.toHaveBeenCalled();
+        await reader.recover(); expect(sendCommit).toHaveBeenCalledWith(expect.objectContaining(gatewayReceiveCommit(fanout)));
+        expect(h.journal.size).toBe(0);
+        await h.engine().receive(fanout);
+        expect(sendCommit).toHaveBeenCalledTimes(2);
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(1);
+    });
+    it('retains the recovery journal if the commit write is interrupted', async () => {
+        const h = harness(); h.options.sendCommit = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+        expect(await h.engine().receive(fanout)).toBe(false);
+        expect(h.journal.size).toBe(1);
+        await h.engine().recover(); expect(h.journal.size).toBe(0);
+        expect(h.options.sendCommit).toHaveBeenCalledTimes(3);
+    });
+    it('commits consumption evidence with history disabled while the receive recovery copy still exists', async () => {
+        const h = harness(); h.options.persistMessage = vi.fn(async () => true); // explicit no-history policy
+        h.options.sendCommit = vi.fn(async command => {
+            expect(h.journal.size).toBe(1);
+            expect(await h.receipts.has('bob/device', command.receive_id)).toBe(true);
+            return true;
+        });
+        expect(await h.engine().receive(fanout)).toBe(true);
+        expect(h.history.size).toBe(0); expect(h.journal.size).toBe(0);
+        expect(await h.receipts.hasSpace('bob/device')).toBe(true); // default cap has room, receipt remains protected
+        expect(await h.receipts.pendingCommits('bob/device')).toHaveLength(1);
+    });
+    it('protects an unconfirmed receipt from eviction until the exact server reply', async () => {
+        const h = harness(); h.options.receipts = createDmReceiptStore(new IDBFactory(), { max: 1 });
+        h.options.sendCommit = vi.fn(() => true);
+        const reader = h.engine(); expect(await reader.receive(fanout)).toBe(true);
+        const command = h.options.sendCommit.mock.calls[0][0];
+        expect(await h.options.receipts.hasSpace('bob/device')).toBe(false);
+        expect(await reader.confirmCommit({ ...command, envelope_digest: 'b'.repeat(64) })).toBe(false);
+        expect(await h.options.receipts.hasSpace('bob/device')).toBe(false);
+        expect(await h.engine().confirmCommit({ ...command, type: 'dm_receive_committed' })).toBe(true);
+        expect(await h.options.receipts.hasSpace('bob/device')).toBe(true);
+    });
+    it('does not ack an old account after asynchronous persistence', async () => {
+        const h = harness(); h.options.sendCommit = vi.fn();
+        h.persistMessage.mockImplementation(async () => { h.scope('replacement'); return true; });
+        expect(await h.engine().receive(fanout)).toBe(false);
+        expect(h.options.sendCommit).not.toHaveBeenCalled(); expect(h.journal.size).toBe(1);
+    });
+    it('rejects unversioned, malformed and non-fanout tokens', () => {
+        expect(gatewayReceiveCommit(event)).toBeNull();
+        expect(gatewayReceiveCommit({ ...fanout, receive_commit: { ...fanout.receive_commit, queue_id: -1 } })).toBeNull();
+        expect(gatewayReceiveCommit({ ...fanout, receive_commit: { ...fanout.receive_commit, v: 2 } })).toBeNull();
+    });
 });

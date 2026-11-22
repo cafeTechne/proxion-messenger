@@ -474,7 +474,7 @@ export function createConnection({
             // Register with this client's own DID (always — every user has one)
             // Include x25519_pub so peers learn our E2E key when we reconnect
             // Include display_name so the gateway has it immediately (avoids a separate set_identity before auth)
-            const _regPayload = {cmd: "register", did: getClientDid()};
+            const _regPayload = {cmd: "register", did: getClientDid(), dm_commit_v: 1};
             const _storedName = localStorage.getItem("proxion_display_name");
             if (_storedName) _regPayload.display_name = _storedName;
             const _e2ePub = myX25519PubB64u();

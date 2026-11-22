@@ -67,7 +67,7 @@ export function createDmReceiptStore(dbApi = globalThis.indexedDB, { max = MAX_D
                     .map(({ fingerprint, url }) => ({ fingerprint, url })));
             };
         }),
-        remember: (scope, fingerprint, url = null) => operation(scope, 'readwrite', (store, done) => {
+        remember: (scope, fingerprint, url = null, commit = null) => operation(scope, 'readwrite', (store, done) => {
             const rowKey = key(scope, fingerprint);
             const request = store.index('scope').getAll(scope);
             request.onsuccess = () => {
@@ -78,7 +78,21 @@ export function createDmReceiptStore(dbApi = globalThis.indexedDB, { max = MAX_D
                     store.delete(oldest.key);
                 }
                 const knownUrl = receiptUrl(url) || receiptUrl(rows.find(row => row.key === rowKey)?.url);
-                store.put({ key: rowKey, scope, fingerprint, acknowledged: false, at: Date.now(), ...(knownUrl ? { url: knownUrl } : {}) }); done(true);
+                store.put({ key: rowKey, scope, fingerprint, acknowledged: false, at: Date.now(), ...(knownUrl ? { url: knownUrl } : {}), ...(commit ? { commit: structuredClone(commit) } : {}) }); done(true);
+            };
+        }),
+        pendingCommits: scope => operation(scope, 'readonly', (store, done) => {
+            const request = store.index('scope').getAll(scope);
+            request.onsuccess = () => done(request.result.filter(row => !row.acknowledged && row.commit)
+                .map(row => row.commit));
+        }),
+        confirmCommit: (scope, fingerprint, event) => operation(scope, 'readwrite', (store, done) => {
+            const request = store.get(key(scope, fingerprint));
+            request.onsuccess = () => {
+                const row = request.result, commit = row?.commit;
+                if (!commit || event.v !== 1 || ['queue_id', 'from_webid', 'message_id', 'envelope_digest', 'receive_id']
+                    .some(field => commit[field] !== event[field])) { done(false); return; }
+                store.put({ ...row, acknowledged: true, at: Date.now() }); done(true);
             };
         }),
         acknowledge: (scope, fingerprint) => operation(scope, 'readwrite', (store, done) => {

@@ -872,6 +872,8 @@ class SecurityStoreMixin(object):
             return {}
         counts: dict = {}
         with self._conn() as conn:
+            counts["committed_device_fanout"] = conn.execute(
+                "DELETE FROM committed_device_fanout WHERE to_webid=? OR from_webid=?", (webid, webid)).rowcount
             counts["pending_device_fanout"] = conn.execute(
                 "DELETE FROM pending_device_fanout WHERE to_webid=? OR from_webid=?", (webid, webid)).rowcount
             threads = [r[0] for r in conn.execute(

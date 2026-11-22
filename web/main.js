@@ -550,6 +550,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // instance because voice's deps reference media.stopScreenShare and
         // media.state.isSharing; media's getVoiceState is a deferred getter, so the
         // forward reference to `voice` is only resolved at runtime (no TDZ).
+        let _dmCommitV = 0;
         const _dmReceipts = createDmReceiptStore();
         const _gatewayReceives = createGatewayDmReceiver({
             e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives }, receipts: _dmReceipts,
@@ -557,6 +558,13 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             getScope: () => JSON.stringify(['gateway', selfWebId || clientDid, clientDid, e2eScopedKey('')]),
             isActive: () => !!clientDid && tabLock.isLeader() && transport.mode !== 'web',
             persistMessage: dmHistorySave, handleEvent: message => handleEvent(message), isSealedPlain,
+            sendCommit: command => {
+                if (_dmCommitV !== 1 || !socket || socket.readyState !== WebSocket.OPEN) return false;
+                socket.send(JSON.stringify(command)); return true;
+            },
+            requestReplay: () => {
+                if (_dmCommitV === 1 && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ cmd: 'dm_receive_recover', v: 1 }));
+            },
             toMessage: event => {
                 const p = event.payload || {}, fanout = event.type === 'dm_fanout';
                 if (!fanout) {
@@ -594,6 +602,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             sendRecording: (blob, durationMs, target) => {
                 if (_isPodRoomView(target.view)) return _roomMedia.send(blob, { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs }, target);
                 if (_isPodDmView(target.view)) return _dmMedia.send(blob, { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs }, target);
+                if (['dm', 'local_dm'].includes(target.view.type) && secondary.mustSeal(target.view)) {
+                    return sendAttachmentFile(new File([blob], 'voice.webm', { type: 'audio/webm' }), { target });
+                }
                 return null;
             },
         });
@@ -1207,7 +1218,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             forceReconnect, connect, flushPending, shutdown: stopConnection,
         } = createConnection({
             wsUrl: WS_URL,
-            getSocket: () => socket, setSocket: (s) => { socket = _withPodRooms(s); },
+            getSocket: () => socket, setSocket: (s) => { _dmCommitV = 0; socket = _withPodRooms(s); },
             getClientDid: () => clientDid,
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
             isActive: () => tabLock.isLeader(),
@@ -2887,6 +2898,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     console.warn('[Proxion] Auth failed:', event.reason);
                     break;
                 case "registered":
+                    _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
                     _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;
@@ -4146,6 +4158,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // device-key cache so sends self-sync to it (E5 slice 2).
                     if (socket) socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: selfWebId }));
                     break;
+                case "dm_receive_committed":
+                    _gatewayReceives.confirmCommit(event).catch(err => console.warn('[gateway-dm] commit receipt:', err)); break;
                 case "send_dm_fanout_ack":
                     // Fanout has no self-echo; confirm the optimistic send on ack.
                     _confirmDmSend(event.message_id, { kind: 'fanout', delivered: event.delivered });
@@ -6592,7 +6606,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         // Chunked file transfer (R39) lives in filetransfer.js (R40 extraction).
         const fileTransfer = createFileTransfer({
-            sendCmd, showToast, renderMessage,
+            sendCmd, showToast, renderMessage, persistMessage: dmHistorySave,
+            getContext: () => JSON.stringify([selfWebId, clientDid, authContext().epoch, tabLock.isLeader()]),
             getActiveView: () => activeView,
             // A chunked file names its sender by did (cross-gateway: the peer's
             // gateway did, which is what the contact is keyed by).
@@ -7800,7 +7815,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (podStep && podStep.style.display !== 'none') obGoto(5);
             if (socket?.readyState === WebSocket.OPEN) {
                 const displayName = localStorage.getItem('proxion_display_name') || '';
-                socket.send(JSON.stringify({ cmd: 'register', webid: webId, display_name: displayName }));
+                socket.send(JSON.stringify({ cmd: 'register', webid: webId, display_name: displayName, dm_commit_v: 1 }));
             }
             // Non-blocking pod sync — contacts, invites, and thread indexes
             syncFromPod().catch(() => {});

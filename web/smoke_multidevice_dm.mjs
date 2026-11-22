@@ -139,7 +139,7 @@ try {
   const [A, B] = [await startGateway('acct-a'), await startGateway('acct-b')];
   browser = await puppeteer.launch({
     executablePath: CHROME, headless: 'new',
-    args: ['--ignore-certificate-errors', '--no-sandbox', '--disable-gpu'],
+    args: ['--ignore-certificate-errors', '--no-sandbox', '--disable-gpu', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
   });
 
   // Separate browser contexts: A-primary and A-device are the SAME origin
@@ -277,6 +277,18 @@ try {
       pending: (await pendingDmReceives()).filter(row => row.content === text).length };
   }, MSG);
   if (!recovery.failures || recovery.pending !== 1) throw Error('fanout encrypted recovery missing: ' + JSON.stringify(recovery));
+  if (A.queued(apDid, adDid) !== 1) throw Error('socket write removed fanout before durable client commit');
+  await A.restart(); await online(ap);
+  if (A.queued(apDid, adDid) !== 1) throw Error('gateway restart lost uncommitted live delivery');
+  const commitFault = await ad.evaluateOnNewDocument(() => {
+    window.__holdDmCommit = true; window.__lostDmCommits = 0;
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (wire) {
+      let frame; try { frame = JSON.parse(wire); } catch { /* other frame */ }
+      if (frame?.cmd === 'dm_receive_commit' && window.__holdDmCommit) { window.__lostDmCommits++; return; }
+      return send.call(this, wire);
+    };
+  });
   await ad.reload({ waitUntil: 'load', timeout: 20000 });
   await ad.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
   await online(ad);
@@ -287,7 +299,16 @@ try {
     return (await pendingDmReceives()).filter(row => row.content === text).length;
   }, MSG);
   if (remaining) throw Error('fanout recovery was not cleaned after reload');
-  console.log('  ✓ device fanout history failure recovers after reload without another socket delivery');
+  if (A.queued(apDid, adDid) !== 1 || !await ad.evaluate(() => window.__lostDmCommits)) throw Error('lost commit did not retain gateway replay');
+  await ad.reload({ waitUntil: 'load', timeout: 20000 }); await online(ad);
+  await openFirstDm(ad, 'committed receipt replay');
+  await ad.evaluate(() => { window.__holdDmCommit = false; });
+  await ad.removeScriptToEvaluateOnNewDocument(commitFault.identifier);
+  for (let attempt = 0; attempt < 100 && A.queued(apDid, adDid) !== 0; attempt++) await sleep(100);
+  if (A.queued(apDid, adDid) !== 0) throw Error('receipt replay did not acknowledge after lost commit');
+  const recoveredCount = await ad.evaluate(async text => (await (await import('./dmhistory.js')).dmHistorySearch(text)).filter(row => row.content === text).length, MSG);
+  if (recoveredCount !== 1) throw Error('lost commit replay duplicated or lost readable history');
+  console.log('  ✓ device fanout history failure survives gateway SIGKILL and recipient reload until durable commit');
 
   // ── E5 slice 2: A-primary SENDS a DM to B; it must self-sync to A-device ──
   // (Self-sync targets our own account on our own gateway, so it works even
@@ -311,6 +332,42 @@ try {
       console.error(`  · B feed tail: "${bFeed}"`);
     });
   if (process.exitCode) throw new Error('stop');
+
+  // Exercise the real native sealed chunk path, including receiver history.
+  step = 'native-chunk-history';
+  const nativeName = 'native-history-' + Date.now() + '.txt';
+  const nativeHash = await ap.evaluate(async name => {
+    const bytes = new Uint8Array(600 * 1024);
+    for (let index = 0; index < bytes.length; index++) bytes[index] = 65 + index % 26;
+    const data = new DataTransfer(); data.items.add(new File([bytes], name, { type: 'text/plain' }));
+    const input = document.getElementById('file-input'); input.files = data.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x => x.toString(16).padStart(2, '0')).join('');
+  }, nativeName);
+  await ap.waitForSelector('#file-confirm-modal', { visible: true, timeout: 10000 });
+  await ap.click('#file-confirm-ok');
+  await b.waitForFunction(async name => (await (await import('./dmhistory.js')).dmHistorySearch(name)).length === 1,
+    { timeout: 30000, polling: 250 }, nativeName);
+  await b.reload({ waitUntil: 'load' }); await online(b); await openFirstDm(b, 'native file history');
+  const restoredFile = await b.evaluate(async name => {
+    const history = await import('./dmhistory.js'), rows = await history.dmHistorySearch(name);
+    const record = rows[0] && await history.dmHistoryGet(rows[0].message_id);
+    const bytes = Uint8Array.from(atob(record?.file?.data_b64 || ''), c => c.charCodeAt(0));
+    return { count: rows.length, bytes: bytes.length,
+      hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x => x.toString(16).padStart(2, '0')).join('') };
+  }, nativeName);
+  if (restoredFile.count !== 1 || restoredFile.bytes !== 600 * 1024 || restoredFile.hash !== nativeHash) throw Error('native file history lost/corrupted bytes: ' + JSON.stringify(restoredFile));
+  console.log('  ✓ native sealed chunk file commits exact bytes before receipt and survives receiver reload');
+
+  step = 'native-voice-history';
+  await ap.bringToFront();
+  const mic = await ap.$('#voice-record-btn'), micBox = await mic.boundingBox();
+  if (!micBox) throw Error('native voice control unavailable');
+  await ap.mouse.move(micBox.x + micBox.width / 2, micBox.y + micBox.height / 2);
+  await ap.mouse.down(); await sleep(1500); await ap.mouse.up();
+  await b.waitForFunction(async () => (await (await import('./dmhistory.js')).dmHistorySearch('voice.webm')).some(row => row.file?.mime_type === 'audio/webm'),
+    { timeout: 20000, polling: 250 });
+  console.log('  ✓ native DM voice records and sends through the sealed attachment route');
 
   // E5 slice 2: A-primary's SENT message self-synced to A-device. Check A-device's
   // local plaintext store (robust to which thread is active).
@@ -431,7 +488,8 @@ try {
     await ad.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
     await online(ad); await openFirstDm(ad, route + ' recovered device');
     await ad.waitForFunction(text => document.getElementById('message-feed')?.textContent.includes(text), { timeout: 20000 }, text);
-    if (A.queued(apDid, adDid) !== 0) throw Error(route + ': delivered row was not removed');
+    for (let attempt = 0; attempt < 50 && A.queued(apDid, adDid) !== 0; attempt++) await sleep(100);
+    if (A.queued(apDid, adDid) !== 0) throw Error(route + ': committed row was not removed');
     await ad.reload({ waitUntil: 'networkidle2' }); await online(ad); await openFirstDm(ad, route + ' history');
     const count = await ad.evaluate(async text => (await (await import('./dmhistory.js')).dmHistorySearch(text)).filter(row => row.content === text).length, text);
     if (count !== 1) throw Error(route + ': recovery did not retain one exact plaintext message');
