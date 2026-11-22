@@ -242,18 +242,23 @@ class NativeMediaMixin:
             return "409 Conflict", '{"error":"native_media_header_mismatch"}'
         return self._native_response(data, "native_media_custody", header_committed=row["header_committed"], committed=row["committed"])
 
-    def _native_ready(self, owner, expected_pub):
+    def _native_ready(self, owner, expected_pub, *, chunks=False):
         pub = self._store.get_x25519_pub(owner) if self._store else None
         if not isinstance(pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", pub):
             return False, None
         sockets = self._device_sockets(owner, owner)
-        supported = any(self._native_capable(ws) and (self._session_meta.get(ws) or {}).get("native_media_pub") == pub for ws in sockets)
+        capable = self._native_chunks_capable if chunks else self._native_capable
+        supported = any(capable(ws) and (self._session_meta.get(ws) or {}).get("native_media_pub") == pub for ws in sockets)
         return supported and pub == expected_pub, pub if supported else None
 
     async def _handle_native_media_capability(self, ws, data):
         if not self._native_capable(ws) or not self._native_storage_writable():
             return
         request_id, expected_pub = data.get("request_id"), data.get("expected_pub")
+        chunks = "native_chunks_v" in data
+        if chunks and (type(data["native_chunks_v"]) is not int or data["native_chunks_v"] != 1 or not self._native_chunks_capable(ws)):
+            return
+        extra = {"native_chunks_v": 1} if chunks else {}
         if (not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id)
                 or not isinstance(expected_pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", expected_pub)):
             return
@@ -266,30 +271,32 @@ class NativeMediaMixin:
             supported, pub = False, None
             if not self._is_blocked_for(peer, owner) and not self._is_blocked_for(owner, peer):
                 if self._sockets_for_exact(peer):
-                    supported, pub = self._native_ready(peer, expected_pub)
+                    supported, pub = self._native_ready(peer, expected_pub, chunks=chunks)
                 else:
                     target = self._resolve_peer_gateway(peer)
                     if target and self._is_owner_account(ws, owner):
                         proof = await self._native_exchange(target, peer, {"content_type": "native_media_query",
-                            "operation": "capability", "request_id": request_id, "expected_pub": expected_pub}, "native_media_query_result")
+                            "operation": "capability", "request_id": request_id, "expected_pub": expected_pub, **extra}, "native_media_query_result")
                         if proof and proof.get("header_commit_supported") is True and type(proof.get("supported")) is bool:
                             pub = proof.get("peer_pub")
                             if pub is not None and (not isinstance(pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", pub)):
                                 pub = None
-                            supported = proof["supported"] and pub == expected_pub
+                            supported = (proof["supported"] and pub == expected_pub
+                                         and (not chunks or type(proof.get("native_chunks_v")) is int and proof["native_chunks_v"] == 1))
             live = self._session_meta.get(ws) or {}
             current_thread = next((t for t in self._store.get_dm_threads(owner_webid=owner) if t["thread_id"] == data.get("cert_id")), None)
             if (not self._native_storage_writable() or self._store.is_cert_revoked(f"device:{owner}")
                     or self._client_webids.get(ws) != owner or live.get("session_id") != session
-                    or not self._native_capable(ws) or not current_thread or current_thread["peer_webid"] != peer):
+                    or not self._native_capable(ws) or (chunks and not self._native_chunks_capable(ws))
+                    or not current_thread or current_thread["peer_webid"] != peer):
                 return
             await ws.send(json.dumps({"type": "native_media_capability_result", "v": 1,
                 "request_id": request_id, "peer_webid": peer, "expected_pub": expected_pub,
-                "supported": bool(supported), "peer_pub": pub}))
+                "supported": bool(supported), "peer_pub": pub, **extra}))
         if not self._schedule_native_task(("capability", id(ws), request_id), respond):
             await ws.send(json.dumps({"type": "native_media_capability_result", "v": 1,
                 "request_id": request_id, "peer_webid": peer, "expected_pub": expected_pub,
-                "supported": False, "peer_pub": None}))
+                "supported": False, "peer_pub": None, **extra}))
 
     async def _handle_native_media_query_relay(self, data):
         if not self._native_storage_writable() or data.get("to_webid") != self._own_gateway_did():
@@ -303,7 +310,10 @@ class NativeMediaMixin:
                 return "400 Bad Request", '{"error":"invalid_native_query"}'
             if not owner or self._is_blocked_for(owner, sender) or self._store.is_revoked(sender):
                 return "200 OK", '{"status":"received"}'
-            ready, pub = self._native_ready(owner, expected_pub)
+            chunks = "native_chunks_v" in data
+            if chunks and (type(data["native_chunks_v"]) is not int or data["native_chunks_v"] != 1):
+                return "400 Bad Request", '{"error":"invalid_native_query"}'
+            ready, pub = self._native_ready(owner, expected_pub, chunks=chunks)
             return self._native_response(data, "native_media_query_result", header_commit_supported=True, supported=ready, peer_pub=pub)
         if data.get("operation") == "receipt":
             message, digest, header = data.get("message_id"), data.get("media_digest"), data.get("header_digest")

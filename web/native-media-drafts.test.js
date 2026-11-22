@@ -142,3 +142,36 @@ describe('native media key and receive-hold binding', () => {
         expect(() => createNativeMediaPreparation({ ...h.options, holdForReceive: true })).toThrow('peer key binding');
     });
 });
+
+describe('opt-in native chunk draft storage bounds', () => {
+    it('admits large sources only under an explicit size policy and retains exact bytes on reopen', async () => {
+        const db = new IDBFactory();
+        const large = createNativeMediaStore(db, { maxCipherBytes: 25 * 1024 * 1024 });
+        const source = { scope: 'account', id: 'large', blob: new Blob([new Uint8Array(600 * 1024).fill(65)]) };
+        expect(() => createNativeMediaStore(db).insert(source)).toThrow('Invalid native');
+        await large.insert(source);
+        const reopened = await createNativeMediaStore(db, { maxCipherBytes: 25 * 1024 * 1024 }).get(source.scope, source.id);
+        expect(reopened.stage).toBe('source'); expect(reopened.blob.size).toBe(source.blob.size);
+        expect(new Uint8Array(await reopened.blob.arrayBuffer())).toEqual(new Uint8Array(await source.blob.arrayBuffer()));
+        expect(() => large.insert({ ...source, id: 'too-large', blob: new Blob([new Uint8Array(25 * 1024 * 1024)]) })).toThrow('Invalid native');
+    });
+    it('atomically reserves a shared byte budget per account without eviction', async () => {
+        const db = new IDBFactory(), store = createNativeMediaStore(db, { maxCipherBytes: 25 * 1024 * 1024 });
+        const blob = new Blob([new Uint8Array(17 * 1024 * 1024)]);
+        const results = await Promise.allSettled(['one', 'two'].map(id => store.insert({ scope: 'account', id, blob })));
+        expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+        expect(results.find(result => result.status === 'rejected').reason.message).toContain('byte limit');
+        expect(await store.list('account')).toHaveLength(1);
+        await store.insert({ scope: 'other', id: 'three', blob });
+        expect(await store.list('other')).toHaveLength(1);
+        const retained = (await store.list('account'))[0];
+        await store.cancelSource('account', retained.id, retained.revision);
+        await store.insert({ scope: 'account', id: 'replacement', blob });
+        expect((await store.list('account'))[0].id).toBe('replacement');
+    });
+    it('rejects invalid size policies', () => {
+        for (const maxCipherBytes of [0, 16, true, NaN, 1.5, 25 * 1024 * 1024 + 1]) {
+            expect(() => createNativeMediaStore(new IDBFactory(), { maxCipherBytes })).toThrow('size policy');
+        }
+    });
+});

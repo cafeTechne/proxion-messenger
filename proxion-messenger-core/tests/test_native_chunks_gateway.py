@@ -266,3 +266,79 @@ async def test_download_window_stops_if_recipient_blocks_sender_between_parts(tm
     retained = gw._store.get_native_media('did:key:alice', 'file')
     assert retained['status'] == 'blocked' and not retained['committed']
     gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_chunk_preflight_requires_both_opted_in_primary_sessions(tmp_path):
+    import asyncio
+    gw = gateway(tmp_path, 'chunk-capability')
+    caller, receiver = socket(gw, 'did:key:alice'), socket(gw, 'did:key:bob')
+    pub = 'A' * 43
+    gw._store.save_dm_thread('thread', 'did:key:bob', owner_webid='did:key:alice')
+    gw._store.save_x25519_pub('did:key:bob', pub)
+    gw._session_meta[receiver]['native_media_pub'] = pub
+    data = {'cert_id': 'thread', 'request_id': 'chunk-query', 'expected_pub': pub, 'native_chunks_v': 1}
+    await gw._handle_native_media_capability(caller, data)
+    caller.send.assert_not_called()
+    gw._session_meta[caller]['native_chunks_v'] = 1
+    await gw._handle_native_media_capability(caller, data)
+    await asyncio.gather(*list(gw._native_media_tasks.values()))
+    assert not json.loads(caller.send.call_args.args[0])['supported']
+    gw._session_meta[receiver]['native_chunks_v'] = 1
+    await gw._handle_native_media_capability(caller, data)
+    await asyncio.gather(*list(gw._native_media_tasks.values()))
+    result = json.loads(caller.send.call_args.args[0])
+    assert result['supported'] and result['native_chunks_v'] == 1 and result['peer_pub'] == pub
+    gw._session_meta[receiver]['native_media_pub'] = 'B' * 43
+    await gw._handle_native_media_capability(caller, data)
+    await asyncio.gather(*list(gw._native_media_tasks.values()))
+    assert not json.loads(caller.send.call_args.args[0])['supported']
+    await gw._stop_native_media(); gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_signed_cross_gateway_chunk_preflight_does_not_accept_inline_only_receiver(tmp_path, monkeypatch):
+    import asyncio
+    source, target = paired(tmp_path)
+    caller = socket(source, 'did:key:alice'); receiver = socket(target, 'did:key:bob')
+    pub = 'A' * 43
+    source._session_meta[caller]['native_chunks_v'] = 1
+    source._store.save_dm_thread('thread', target._own_gateway_did(), owner_webid='did:key:alice')
+    target._store.save_x25519_pub('did:key:bob', pub); target._session_meta[receiver]['native_media_pub'] = pub
+    monkeypatch.setattr(source, '_resolve_peer_gateway', lambda _: 'https://peer.example')
+    monkeypatch.setattr(source, '_is_owner_account', lambda *args: True)
+    async def route(method, url, **kwargs):
+        status, body = await target._handle_relay_post(kwargs['body'], client_ip='127.0.0.1')
+        return int(status.split()[0]), {}, body.encode()
+    monkeypatch.setattr('proxion_messenger_core.network.async_safe_request', route)
+    data = {'cert_id': 'thread', 'request_id': 'chunk-query', 'expected_pub': pub, 'native_chunks_v': 1}
+    for enabled in (False, True):
+        target._session_meta[receiver]['native_chunks_v'] = int(enabled)
+        await source._handle_native_media_capability(caller, data)
+        await asyncio.gather(*list(source._native_media_tasks.values()))
+        result = json.loads(caller.send.call_args.args[0])
+        assert result['supported'] is enabled and result['native_chunks_v'] == 1
+    await source._stop_native_media(); await target._stop_native_media()
+    source._store.close(); target._store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('version', [None, True, 2, 1])
+async def test_authenticated_chunk_registration_preserves_strict_opt_in(tmp_path, monkeypatch, version):
+    from proxion_messenger_core.persist import AgentState
+    from proxion_messenger_core.didkey import pub_key_to_did
+    monkeypatch.setenv('PROXION_REQUIRE_AUTH', '1')
+    gw = gateway(tmp_path, 'chunk-auth')
+    client = AgentState.generate(); owner = pub_key_to_did(client.identity_pub_bytes)
+    ws = socket(gw, owner, modern=False); ws.remote_address = ('127.0.0.1', 1234)
+    await gw._handle_register(ws, {'did': owner, 'native_media_v': 1, 'native_chunks_v': version, 'x25519_pub': 'A' * 43})
+    nonce = gw._pending_auth[ws]['nonce']
+    signature = base64.urlsafe_b64encode(client.identity_key.sign(nonce.encode())).rstrip(b'=').decode()
+    await gw._handle_auth_response(ws, {'signature': signature})
+    enabled = type(version) is int and version == 1
+    assert gw._native_chunks_capable(ws) is enabled
+    registered = next(json.loads(call.args[0]) for call in ws.send.call_args_list
+                      if json.loads(call.args[0]).get('type') == 'registered')
+    assert 'native_chunks_v' not in registered  # Browser dispatch/journeys are still staged.
+    assert gw._native_ready(owner, 'A' * 43, chunks=True)[0] is enabled
+    await gw._stop_native_media(); gw._store.close()

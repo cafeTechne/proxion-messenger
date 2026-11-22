@@ -163,3 +163,30 @@ describe('native media sender evidence boundaries', () => {
         expect(updated.headerCommitted).toBe(true);
     });
 });
+
+describe('native sender chunk upload integration boundary', () => {
+    it('requires exact chunk readiness before spending a large source header', async () => {
+        const h = await harness(); h.options.chunkUpload = vi.fn(async () => true);
+        const sender = h.engine();
+        await sender.enqueue(new Blob([new Uint8Array(100000)]), { type: 'dm', id: 'thread', peerWebid: 'did:key:bob' },
+            { name: 'large.txt', mime: 'text/plain' }, 'large');
+        expect(await sender.retry('large')).toBe(false);
+        expect(h.options.capability.mock.calls[0][0]).toMatchObject({ native_chunks_v: 1 });
+        expect(h.encrypt).not.toHaveBeenCalled(); expect(h.options.chunkUpload).not.toHaveBeenCalled();
+        h.options.capability.mockResolvedValue({ supported: true, peer_pub: peerPub, native_chunks_v: 1 });
+        expect(await sender.retry('large')).toBe(true);
+        const first = h.options.chunkUpload.mock.calls[0];
+        expect(first[0].stage).toBe('sealed'); expect(first[0].prepared.ct.length).toBe(100016);
+        expect(h.options.send).not.toHaveBeenCalled(); expect(h.options.e2e.releaseDmSendHold).not.toHaveBeenCalled();
+        await h.engine().retry('large');
+        expect(h.options.chunkUpload.mock.calls[1][0].hdr).toEqual(first[0].hdr);
+        expect(h.options.chunkUpload.mock.calls[1][0].prepared).toEqual(first[0].prepared);
+        expect(h.encrypt).toHaveBeenCalledTimes(1);
+    });
+    it('keeps small inline files on the existing route when chunk upload is available', async () => {
+        const h = await harness(); h.options.chunkUpload = vi.fn();
+        await h.engine().retry('file-1');
+        expect(h.options.chunkUpload).not.toHaveBeenCalled();
+        expect(h.options.send.mock.calls[0][0].cmd).toBe('send_file');
+    });
+});

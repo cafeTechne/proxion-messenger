@@ -998,7 +998,9 @@ class HttpEndpointsMixin:
         })
         if data.get("content_type") in ("native_inline", "native_media_query"):
             _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"media_digest", "payload", "header_digest", "operation", "request_id", "expected_pub"}
-        elif data.get("content_type") == "native_media_chunks":
+        if data.get("content_type") == "native_media_query":
+            _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"native_chunks_v"}
+        if data.get("content_type") == "native_media_chunks":
             _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"media_digest", "header_digest", "operation", "manifest", "manifest_digest", "seq", "after", "native_chunks_v"}
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:

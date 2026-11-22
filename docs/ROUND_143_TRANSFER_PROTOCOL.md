@@ -175,3 +175,36 @@ focused ESLint and whitespace checks passed. These are recovery component tests,
 not a claim of a live browser chunk journey. Sender upload, existing oversized
 inline adaptation, browser activation, accessible progress/decline and full
 restart journeys remain required before closing 142–143.
+
+### Upload recovery checkpoint (still staged)
+
+Added a bounded direct-socket uploader that sends an immutable manifest followed
+by only gateway-requested 64 KiB ciphertext slices. Begin/part acknowledgements
+bind account/connection epoch, message, preparation/header/manifest digests,
+original recipient key and requested sequence. Lost replies trigger an exact
+manifest retry; the gateway's durable missing list resumes the upload. Concurrent
+starts coalesce and reserve the ten-upload limit before hashing. Account,
+connection and original-key changes invalidate outstanding work. Custody alone
+never deletes the browser source or releases its receive hold.
+
+The native sender now accepts an optional upload adapter and requires explicit
+chunk readiness before preparing a larger source. The live wrapper does not
+supply that adapter yet. Draft storage supports an explicit 25 MiB ciphertext
+policy with an atomic per-account 32 MiB ciphertext reservation; the default
+inline admission limit stays in place until integration. The reservation bounds
+both retained source and prepared copies to roughly twice that ciphertext
+budget, plus metadata. No existing draft is evicted on admission failure.
+
+Authenticated registration preserves strict chunk opt-in through its challenge,
+and preflight can require a chunk-capable original primary locally or through
+an exactly correlated signed remote query. Registration does not yet advertise
+browser chunk support, and the current browser does not request it. Shell cache
+is 311 for the active sender/storage changes.
+
+Validation: 84 backend custody/auth/relay/event-contract checks passed, including
+real 2 MiB and 25 MiB gateway transfers. The frontend suite passed 2,686 checks
+with 64 skipped, followed by seven focused uploader checks covering the final
+concurrency guard. Sender/storage integration tests passed 46 checks. Focused
+ESLint, Ruff, cold-path and whitespace gates passed. This does not close browser
+activation, accepted-inline adaptation, progress/decline UX or live chunk crash
+journeys; 142–143 remain open.

@@ -1,5 +1,6 @@
 import { dmEnvelopeFingerprint } from './dm-receipts.js';
 import { createNativeMediaPreparation } from './native-media-drafts.js';
+import { NATIVE_CHUNK_BYTES } from './native-media-protocol.js';
 
 function b64(bytes) {
     let text = '';
@@ -22,7 +23,7 @@ export async function nativeMediaSendIdentity(row) {
 // The authenticated socket adapter supplies capability and status results.
 // Nothing here interprets a socket write or gateway custody as consumption.
 export function createNativeMediaSender({ secondary, e2e, store, getScope, getGeneration = () => 0,
-    isActive = () => true, getPeerPub, capability, send, persistOwnMessage, onState = () => {},
+    isActive = () => true, getPeerPub, capability, send, persistOwnMessage, chunkUpload = null, onState = () => {},
     onError = err => console.warn('[native-media] send pending:', err) }) {
     let epoch = 0;
     const queues = new Map();
@@ -75,12 +76,13 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
             const peerPub = getPeerPub(row.peer);
             if (!peerPub || (row.peerPub && row.peerPub !== peerPub)) { onState(id, 'key-unavailable'); return false; }
             const current = () => ctx.current() && getPeerPub(row.peer) === peerPub;
+            const chunked = typeof chunkUpload === 'function' && (row.prepared?.ct.length || row.blob.size + 16) > NATIVE_CHUNK_BYTES;
             if (row.stage !== 'sealed') {
                 // A negative or lost preflight leaves the original source and
                 // ratchet position untouched. Never downgrade a prepared draft.
-                const result = await capability({ cert_id: row.view.id, peer_webid: row.peer, expected_pub: peerPub }, current);
+                const result = await capability({ cert_id: row.view.id, peer_webid: row.peer, expected_pub: peerPub, ...(chunked ? { native_chunks_v: 1 } : {}) }, current);
                 if (!current()) return false;
-                if (result?.supported !== true || result.peer_pub !== peerPub) { onState(id, 'peer-unavailable'); return false; }
+                if (result?.supported !== true || result.peer_pub !== peerPub || (chunked && result.native_chunks_v !== 1)) { onState(id, 'peer-unavailable'); return false; }
                 row = await preparation.prepare(id);
             }
             if (!current()) return false;
@@ -88,6 +90,7 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
             if (!current()) return false;
             if (row.committed) return complete(row, identity, current);
             if (row.headerCommitted && !await complete(row, identity, current)) return false;
+            if (chunked) return chunkUpload(row, identity, current);
             const result = await send({ cmd: 'send_file', cert_id: row.view.id, message_id: id,
                 native_media_v: 1, media_digest: identity.mediaDigest, ...row.hdr,
                 filename: 'file', mime_type: 'application/octet-stream',

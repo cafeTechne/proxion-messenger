@@ -157,6 +157,7 @@ class AuthHandlerMixin:
             "delegation_cert": pending.get("delegation_cert"),
             "dm_commit_v": pending.get("dm_commit_v"),
             "native_media_v": pending.get("native_media_v"),
+            "native_chunks_v": pending.get("native_chunks_v"),
             "x25519_pub": pending.get("x25519_pub"),
         })
 
@@ -261,6 +262,7 @@ class AuthHandlerMixin:
                 "delegation_cert": data.get("delegation_cert"),
                 "dm_commit_v": data.get("dm_commit_v"),
                 "native_media_v": data.get("native_media_v"),
+                "native_chunks_v": data.get("native_chunks_v"),
                 "x25519_pub": data.get("x25519_pub"),
             }
             _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
@@ -356,6 +358,7 @@ class AuthHandlerMixin:
             self._session_meta[websocket] = {
                 "dm_commit_v": 1 if data.get("dm_commit_v") == 1 else 0,
                 "native_media_v": 1 if type(data.get("native_media_v")) is int and data["native_media_v"] == 1 else 0,
+                "native_chunks_v": 1 if type(data.get("native_chunks_v")) is int and data["native_chunks_v"] == 1 else 0,
                 "native_media_pub": data.get("x25519_pub"),
                 "session_id": str(_uuid_sess.uuid4()),
                 "connected_at": datetime.now(timezone.utc).isoformat(),

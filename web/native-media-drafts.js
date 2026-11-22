@@ -1,8 +1,10 @@
 import { FILE_MIMES, FILE_TAG_BYTES, prepareSecondaryFile, sanitizeFilename } from './e2e-secondary.js';
 import { dmEnvelopeFingerprint } from './dm-receipts.js';
+import { NATIVE_FILE_BYTES } from './native-media-protocol.js';
 
 export const NATIVE_INLINE_BYTES = 512 * 1024;
 export const NATIVE_MEDIA_DRAFT_LIMIT = 10;
+export const NATIVE_MEDIA_DRAFT_BYTES = 32 * 1024 * 1024;
 const DB_NAME = 'proxion-native-media-v1';
 const fail = message => Error(message);
 const keyFor = (scope, id) => JSON.stringify([scope, id]);
@@ -10,7 +12,8 @@ const keyFor = (scope, id) => JSON.stringify([scope, id]);
 // The source and prepared ciphertext live in IndexedDB, never localStorage.
 // Admission and stage transitions are transactional: a stale scan cannot
 // replace a file key or advance a different account's draft.
-export function createNativeMediaStore(dbApi = globalThis.indexedDB) {
+export function createNativeMediaStore(dbApi = globalThis.indexedDB, { maxCipherBytes = NATIVE_INLINE_BYTES } = {}) {
+    if (!Number.isSafeInteger(maxCipherBytes) || maxCipherBytes < 17 || maxCipherBytes > NATIVE_FILE_BYTES) throw fail('Invalid native media size policy');
     async function operation(mode, work, current) {
         if (!current()) throw fail('Native media context changed');
         const db = await new Promise((resolve, reject) => {
@@ -47,16 +50,19 @@ export function createNativeMediaStore(dbApi = globalThis.indexedDB) {
         insert(source, current = () => true) {
             if (typeof source.scope !== 'string' || !source.scope || source.scope.length > 8192
                 || typeof source.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(source.id) || !(source.blob instanceof Blob)
-                || source.blob.size < 1 || source.blob.size + FILE_TAG_BYTES > NATIVE_INLINE_BYTES) throw fail('Invalid native media draft');
+                || source.blob.size < 1 || source.blob.size + FILE_TAG_BYTES > maxCipherBytes) throw fail('Invalid native media draft');
             return operation('readwrite', (store, done, abort) => {
                 const key = keyFor(source.scope, source.id), prior = store.get(key);
                 prior.onsuccess = () => {
                     if (!current()) { abort('Native media context changed'); return; }
                     if (prior.result) { abort('Native media draft already exists'); return; }
-                    const count = store.index('scope').count(source.scope);
+                    const count = store.index('scope').getAll(source.scope);
                     count.onsuccess = () => {
                         if (!current()) { abort('Native media context changed'); return; }
-                        if (count.result >= NATIVE_MEDIA_DRAFT_LIMIT) { abort('Native media draft limit'); return; }
+                        if (count.result.length >= NATIVE_MEDIA_DRAFT_LIMIT) { abort('Native media draft limit'); return; }
+                        if (count.result.reduce((total, row) => total + row.blob.size + FILE_TAG_BYTES, source.blob.size + FILE_TAG_BYTES) > NATIVE_MEDIA_DRAFT_BYTES) {
+                            abort('Native media byte limit'); return;
+                        }
                         const row = { ...source, key, stage: 'source', revision: 1 };
                         delete row.prepared; delete row.hdr;
                         store.add(row); done(row);

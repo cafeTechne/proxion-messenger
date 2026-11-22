@@ -67,7 +67,7 @@ def _emitted() -> set[str]:
     return out
 
 
-STAGED_WEB_MODULES = {"native-media-inbox.js", "native-media-chunks-receive.js"}
+STAGED_WEB_MODULES = {"native-media-inbox.js", "native-media-chunks-receive.js", "native-media-chunks-send.js"}
 
 
 def _web_source() -> str:
