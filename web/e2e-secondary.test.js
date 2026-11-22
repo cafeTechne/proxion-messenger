@@ -20,7 +20,7 @@ import { initE2E, myX25519PubB64u, cachePeerPub, isE2EEnabled, ratchetEncrypt, r
 import {
     createSecondaryCrypto, createReactionTokens, createSealedOutbox, sealedState, isSealedPlain,
     encryptFile, decryptFile, isReactionToken, SEALED_FILE_NAME, SEALED_FILE_MIME, FILE_TAG_BYTES,
-    UNDECRYPTABLE, encodeSealedPlain,
+    UNDECRYPTABLE, encodeSealedPlain, prepareSecondaryFile, sealSecondary, fileBody, KIND_FILE,
 } from './e2e-secondary.js';
 import { createFileTransfer } from './filetransfer.js';
 import { createEdit } from './edit.js';
@@ -204,7 +204,11 @@ describe('inline files', () => {
 
     it('a decrypted type outside the allowlist is refused', async () => {
         cachePeerPub('bob', bob.pubB64u);
-        const { hdr, ct } = await side('alice').sealFile(viewAtAlice, _enc.encode('<script>'), { name: 'x.html', mime: 'text/html', size: 8 });
+        await expect(side('alice').sealFile(viewAtAlice, _enc.encode('<script>'), { name: 'x.html', mime: 'text/html', size: 8 })).rejects.toThrow('file type');
+        // A malicious older sender can still construct this sealed payload;
+        // receiver validation must independently refuse it.
+        const { ct, key, iv } = await encryptFile(_enc.encode('<script>'));
+        const hdr = await sealSecondary(ratchetEncrypt, 'bob', KIND_FILE, fileBody({ key, iv, name: 'x.html', mime: 'text/html', size: 8 }));
         await become(bob);
         const got = await side('bob').openFileMessage({ type: 'message', from_webid: 'alice', ...hdr,
             file: { data_b64: Buffer.from(ct).toString('base64') } });
@@ -360,5 +364,57 @@ describe('UI modules send sealed fields for DMs', () => {
             sealReaction: async () => { throw new Error('must not be called for rooms'); } });
         r.addEmoji('🔥', 'm1');
         expect(sent[0]).toMatchObject({ cmd: 'add_reaction', room_id: 'r1', emoji: '🔥' });
+    });
+});
+
+describe('durable secondary file preparation', () => {
+    it('reuses the exact file and ratchet header after reopening a prepared file', async () => {
+        const view = { type: 'dm', peerWebid: 'journal-bob', id: 'journal-thread' };
+        cachePeerPub('journal-bob', bob.pubB64u);
+        const prepared = await prepareSecondaryFile(_enc.encode('durable private bytes'), { name: 'private.txt', mime: 'text/plain' });
+        const first = await side('alice').sealPreparedFile(view, prepared, { sendId: 'a'.repeat(64) });
+        await become(alice); cachePeerPub('journal-bob', bob.pubB64u);
+        const reopened = structuredClone(prepared);
+        const retried = await side('alice').sealPreparedFile(view, reopened, { sendId: 'a'.repeat(64) });
+        expect(retried).toEqual(first); expect(retried.hdr.msg_num).toBe(0);
+        expect(JSON.stringify(retried.hdr)).not.toContain('private.txt');
+        await become(bob);
+        const got = await side('bob').openFileMessage({ type: 'message', from_webid: 'journal-alice', ...retried.hdr,
+            file: { data_b64: Buffer.from(retried.ct).toString('base64') } });
+        expect(Buffer.from(got.file.data_b64, 'base64').toString()).toBe('durable private bytes');
+    });
+    it('freezes normalized metadata before asynchronous file encryption', async () => {
+        const meta = { name: '../private.txt', mime: 'TEXT/PLAIN; charset=utf-8', width: -1, height: 10 };
+        const encrypt = crypto.subtle.encrypt.bind(crypto.subtle);
+        const spy = vi.spyOn(crypto.subtle, 'encrypt').mockImplementationOnce(async (...args) => {
+            meta.name = 'replacement.exe'; meta.mime = 'application/x-executable';
+            return encrypt(...args);
+        });
+        try {
+            const prepared = await prepareSecondaryFile(_enc.encode('bytes'), meta);
+            expect(prepared.body.mime).toBe('text/plain');
+            expect(prepared.body.name).not.toContain('replacement');
+            expect(prepared.body.w).toBeUndefined();
+            expect(prepared.body.h).toBeUndefined();
+        } finally { spy.mockRestore(); }
+    });
+    it('refuses a corrupted prepared file before calling the ratchet', async () => {
+        const encrypt = vi.fn();
+        const secondary = createSecondaryCrypto({ encrypt, decrypt: vi.fn(), isKeyed: () => true, isSelf: () => false });
+        const prepared = await prepareSecondaryFile(_enc.encode('kept bytes'), { name: 'a.txt', mime: 'text/plain' });
+        prepared.ct[0] ^= 1;
+        await expect(secondary.sealPreparedFile(viewAtAlice, prepared, { sendId: 'b'.repeat(64) })).rejects.toThrow('prepared file changed');
+        expect(encrypt).not.toHaveBeenCalled();
+    });
+    it('cancels a preparation whose initiating context expires', async () => {
+        let current = true;
+        const encrypt = crypto.subtle.encrypt.bind(crypto.subtle);
+        const spy = vi.spyOn(crypto.subtle, 'encrypt').mockImplementationOnce(async (...args) => {
+            const result = await encrypt(...args); current = false; return result;
+        });
+        try {
+            await expect(prepareSecondaryFile(_enc.encode('expired'), { name: 'a.txt', mime: 'text/plain' },
+                { current: () => current })).rejects.toThrow('context changed');
+        } finally { spy.mockRestore(); }
     });
 });

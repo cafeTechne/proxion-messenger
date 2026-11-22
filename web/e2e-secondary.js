@@ -74,8 +74,9 @@ export function decodeSealedPlain(text, kind) {
 
 // Seal `body` as a `kind` event for peerId. `encrypt` is e2e.js ratchetEncrypt.
 // Throws when encryption fails; callers must then not send at all.
-export async function sealSecondary(encrypt, peerId, kind, body) {
-    const enc = await encrypt(peerId, encodeSealedPlain(kind, body));
+export async function sealSecondary(encrypt, peerId, kind, body, options) {
+    const plain = encodeSealedPlain(kind, body);
+    const enc = await (options ? encrypt(peerId, plain, options) : encrypt(peerId, plain));
     return {
         e2e: true, e2e_v: SEALED_V, content: enc.ciphertext, nonce: enc.nonce,
         msg_num: enc.msgNum, pn: enc.pn, ratchet_pub: enc.ratchetPub,
@@ -259,6 +260,43 @@ export async function decryptFile(ct, keyB64u, ivB64u) {
     }
 }
 
+// Serializable preparation record. Its digest binds the ciphertext and key
+// metadata so a corrupt/replaced draft fails before ratchet advancement.
+async function preparedFileDigest(body, ct) {
+    const metadata = new TextEncoder().encode(JSON.stringify(body));
+    const input = new Uint8Array(metadata.length + 1 + ct.length);
+    input.set(metadata); input.set(ct, metadata.length + 1);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', input));
+    return b64uEnc(digest);
+}
+export async function validatePreparedFile(prepared) {
+    if (prepared?.version !== 1 || !(prepared.ct instanceof Uint8Array)) throw new SealedError('invalid prepared file');
+    const meta = checkFileBody(prepared.body);
+    if (b64uDec(meta.key).length !== 32 || b64uDec(meta.iv).length !== 12
+            || prepared.ct.length !== meta.size + FILE_TAG_BYTES
+            || prepared.digest !== await preparedFileDigest(prepared.body, prepared.ct)) throw new SealedError('prepared file changed');
+    return prepared;
+}
+function fileEcho(bytes, body) {
+    const meta = checkFileBody(body);
+    return { filename: meta.filename, mime_type: meta.mime_type, size: bytes.length, data_b64: u8ToB64(bytes),
+        ...(meta.width ? { width: meta.width, height: meta.height } : {}), ...(meta.spoiler ? { spoiler: true } : {}) };
+}
+export async function prepareSecondaryFile(bytes, meta, { current = () => true } = {}) {
+    if (!(bytes instanceof Uint8Array) || !current()) throw new SealedError('file context changed');
+    // Validate metadata before generating any keys. The real key replaces these
+    // placeholders only after the file encryption completes.
+    const normalized = checkFileBody(fileBody({ ...meta, key: 'A'.repeat(43), iv: 'A'.repeat(16), size: bytes.length }));
+    const frozenMeta = { name: normalized.filename, mime: normalized.mime_type, size: bytes.length,
+        width: normalized.width, height: normalized.height, spoiler: normalized.spoiler };
+    const encrypted = await encryptFile(bytes);
+    if (!current()) throw new SealedError('file context changed');
+    const body = fileBody({ ...frozenMeta, key: encrypted.key, iv: encrypted.iv });
+    const prepared = { version: 1, body, ct: encrypted.ct, digest: await preparedFileDigest(body, encrypted.ct) };
+    if (!current()) throw new SealedError('file context changed');
+    return prepared;
+}
+
 // Body of a sealed file message.
 export function fileBody({ key, iv, name, mime, size, width, height, spoiler }) {
     const b = { key, iv, name, mime, size };
@@ -361,20 +399,33 @@ export function createSecondaryCrypto({ encrypt, decrypt, isKeyed, isSelf, token
         return tokens.findOwn(messageId, emoji) || emoji;
     }
 
-    // Encrypt file bytes and seal the key and metadata. Returns {hdr, ct}.
-    // `echo` keeps the plaintext for the gateway echo of an inline send.
-    async function sealFile(view, u8, meta, { echo = true } = {}) {
+    // File encryption can be persisted before spending a ratchet key. Reopen
+    // that exact prepared object after a crash; never generate a replacement key.
+    async function sealPreparedFile(view, prepared, { sendId, current = () => true, echo = false } = {}) {
         const peer = sealPeer(view);
         if (!peer) return null;
-        const { ct, key, iv } = await encryptFile(u8);
-        const hdr = await sealSecondary(encrypt, peer, KIND_FILE, fileBody({ key, iv, ...meta }));
+        if (!current()) throw new SealedError('file context changed');
+        await validatePreparedFile(prepared);
+        if (!current()) throw new SealedError('file context changed');
+        const options = sendId === undefined ? { current } : { sendId, current };
+        const hdr = await sealSecondary(encrypt, peer, KIND_FILE, prepared.body, options);
+        if (!current()) throw new SealedError('file context changed');
         if (echo) {
-            const file = { filename: sanitizeFilename(meta.name), mime_type: meta.mime, size: u8.length, data_b64: u8ToB64(u8) };
-            if (Number.isInteger(meta.width) && Number.isInteger(meta.height)) { file.width = meta.width; file.height = meta.height; }
-            if (meta.spoiler === true) file.spoiler = true;
-            outbox.put(hdr, { file });
+            const bytes = await openFileBytes(prepared.ct, checkFileBody(prepared.body));
+            if (!current()) throw new SealedError('file context changed');
+            outbox.put(hdr, { file: fileEcho(bytes, prepared.body) });
         }
-        return { hdr, ct };
+        return { hdr, ct: prepared.ct };
+    }
+
+    // Existing callers keep the live-send API; durable callers persist the
+    // prepared file first and use sealPreparedFile with a stable send id.
+    async function sealFile(view, u8, meta, { echo = true, current = () => true, sendId } = {}) {
+        if (!sealPeer(view)) return null;
+        const prepared = await prepareSecondaryFile(u8, meta, { current });
+        const sealed = await sealPreparedFile(view, prepared, { echo: false, current, sendId });
+        if (echo && sealed) outbox.put(sealed.hdr, { file: fileEcho(u8, prepared.body) });
+        return sealed;
     }
 
     // Receive side. Each open* returns the event to apply (plaintext in place
@@ -454,7 +505,7 @@ export function createSecondaryCrypto({ encrypt, decrypt, isKeyed, isSelf, token
     }
 
     return {
-        peerFor, mustSeal, sealEdit, sealReaction, reactionWireEmoji, sealFile,
+        peerFor, mustSeal, sealEdit, sealReaction, reactionWireEmoji, sealFile, sealPreparedFile,
         openEdit, openReaction, translateReaction, openFileMessage, openFileOffer,
         outbox,
     };

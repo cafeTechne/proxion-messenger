@@ -1,6 +1,6 @@
 # Planned rounds 141–145
 
-Status: Round 141 complete; Rounds 142–145 planned after the audited completion
+Status: Round 141 complete; Round 142 in progress; Rounds 143–145 planned after the audited completion
 of Rounds 136–140. Earlier rounds
 remain closed; retained limitations become new bounded work, not additions to
 closed rounds. This tracked file is authoritative; ignored root-level plan
@@ -72,7 +72,27 @@ new cryptography or automatic reauthoring of old prepared messages.
 
 ## Round 142: Durable native gateway inline DM media
 
-Status: planned. Depends on 140–141.
+Status: in progress. Depends on 140–141.
+
+Preparation checkpoint (2026-11-21): `native-media-drafts.js` now provides
+transactional IndexedDB source/prepared/header stages, ten bounded inline drafts
+per account/device scope, stable ratchet send-journal ids, and generation guards.
+Secondary file preparation validates and freezes metadata before encryption;
+reopening a prepared file reuses the exact file ciphertext and ratchet header.
+This internal component is not connected to the live native send path yet.
+
+The gateway audit found that native inline sends replace client message ids,
+echo before delivery acceptance, and save only a summary in message history.
+Do not use that echo to release a durable draft. Next: stable ids and conflicting
+retry rejection, durable gateway acceptance/replay, receiver/history recovery,
+then attachment/voice routing and pending UI. Existing gateway socket delivery
+is not evidence of a durable recipient commit (Round 145).
+
+Validation at this checkpoint: 2,589 frontend checks verified; 64 optional
+integration checks skipped. Two subprocess checks blocked by sandbox restrictions
+passed when rerun with subprocess access. Focused preparation/secondary/chunk
+coverage passes (57 checks), and ESLint/whitespace checks pass. No server schema
+or cryptographic protocol changes; shell cache v305. Round 142 remains open.
 
 ### Problem and result
 
