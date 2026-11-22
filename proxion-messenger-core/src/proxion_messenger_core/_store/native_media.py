@@ -28,7 +28,8 @@ class NativeMediaStoreMixin:
         event = json.loads(row["event_json"]) if row["event_json"] else None
         header_digest = row["header_digest"] or (cls._native_header_digest(event) if event else None)
         return {"header_digest": header_digest, "header_committed": bool(row["header_committed"]),
-                "transport": row["transport"], "cipher_digest": row["cipher_digest"],
+                "transport": row["transport"], "adapted_inline": bool(row["chunk_identity_digest"]),
+                "cipher_digest": row["cipher_digest"],
                 "total_bytes": row["total_bytes"], "chunk_count": row["chunk_count"],
                 "custody_complete": bool(row["custody_complete"]), "manifest_digest": row["manifest_digest"],
                 "recipient_pub": row["recipient_pub"],
@@ -92,7 +93,8 @@ class NativeMediaStoreMixin:
             row = conn.execute("SELECT * FROM native_media WHERE from_webid=? AND message_id=?",
                                (sender, message_id)).fetchone()
             if row:
-                if row["transport"] != "inline" or row["envelope_digest"] != digest or row["status"] == "blocked":
+                if ((row["transport"] != "inline" and not row["chunk_identity_digest"])
+                        or row["envelope_digest"] != digest or row["status"] == "blocked"):
                     return None
                 if not row["header_digest"]:
                     conn.execute("UPDATE native_media SET header_digest=? WHERE queue_id=?", (header_digest, row["queue_id"]))

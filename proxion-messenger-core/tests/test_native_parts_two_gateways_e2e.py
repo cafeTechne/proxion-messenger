@@ -55,3 +55,40 @@ async def test_native_custody_parts_cross_real_gateways_without_using_the_genera
         assert source._store.get_native_media_part('alice', 'file', row['manifest_digest'], 0) is None
     finally:
         source_handle.stop(); target_handle.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('peer_has_inline_custody', [False, True])
+async def test_oversized_accepted_inline_crosses_real_http_as_exact_parts(tmp_path, monkeypatch, peer_has_inline_custody):
+    from test_native_media_custody import payload
+    from test_native_media_parts import manifest
+    monkeypatch.setenv('PROXION_REQUIRE_AUTH', '0')
+    monkeypatch.setenv('PROXION_ALLOW_PRIVATE_RELAY', '1')
+    monkeypatch.setenv('PROXION_ALLOW_INSECURE_FEDERATION', '1')
+    source, source_handle = launch(tmp_path, 'inline-source')
+    target, target_handle = launch(tmp_path, 'inline-target')
+    try:
+        source_did, target_did = source._own_gateway_did(), target._own_gateway_did()
+        target._store.save_relationship({'certificate_id': 'contact', 'subject': 'ab' * 32,
+            'created_at': 0, 'expires_at': 2**31-1}, peer_did=source_did, owner_webid=target_did)
+        raw = b'A' * (400 * 1024)
+        original = source._store.accept_native_media('alice', 'old-file', target_did, 'thread', 'A' * 43, payload(raw))
+        prior = None
+        if peer_has_inline_custody:
+            prior = target._store.accept_native_media(source_did, 'old-file', target_did, source_did,
+                'A' * 43, payload(raw), incoming=True)
+        adapted = source._store.begin_native_media_chunks('alice', 'old-file', target_did, 'thread', 'A' * 43, manifest(raw))
+        monkeypatch.setattr(source, '_resolve_peer_gateway', lambda _: f'http://127.0.0.1:{target_handle.http_port}')
+        await source._deliver_native_media(adapted)
+        outgoing = source._store.get_native_media('alice', 'old-file')
+        received = target._store.get_native_media(source_did, 'old-file')
+        assert outgoing['forwarded'] and not outgoing['committed']
+        assert outgoing['envelope_digest'] == original['envelope_digest']
+        assert received['custody_complete'] and not received['committed']
+        if prior: assert received['envelope_digest'] == prior['envelope_digest']
+        assembled = b''.join(target._store.get_native_media_part(source_did, 'old-file', received['manifest_digest'], seq)['data']
+                             for seq in range(received['chunk_count']))
+        assert assembled == raw
+        assert source._store.get_native_media_part('alice', 'old-file', outgoing['manifest_digest'], 0) is None
+    finally:
+        source_handle.stop(); target_handle.stop()

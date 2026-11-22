@@ -208,3 +208,38 @@ concurrency guard. Sender/storage integration tests passed 46 checks. Focused
 ESLint, Ruff, cold-path and whitespace gates passed. This does not close browser
 activation, accepted-inline adaptation, progress/decline UX or live chunk crash
 journeys; 142–143 remain open.
+
+### Accepted-inline adaptation checkpoint
+
+Schema 71 adds a separate chunk identity digest so adapting an already accepted
+inline envelope preserves its original queue id, envelope/receipt digest,
+timestamp, route and header progress. Adaptation checks the supplied manifest
+against the actual retained ciphertext and exact original header before slicing
+those bytes atomically. A conflicting route, direction, media digest, header,
+size/hash or subsequent recipient key cannot replace custody. A failed part
+insertion rolls back the conversion and preserves the original inline bytes.
+Exact retries through either transport keep the same accepted identity.
+
+When old inline bytes have already been released, the source reports its exact
+existing progress instead of inventing chunk custody. For adapted transfers,
+signed peer progress can reconcile an original inline receive that completed
+before migration. Header-only progress does not free file bytes. Pending peer
+inline custody can itself adapt without a second ciphertext upload; old full
+receipts retain their original identity and do not acquire an invented manifest.
+
+Validation: 100 custody/migration/fanout/gateway checks passed, followed by 59
+focused checks including rollback and schema 70-to-71 preservation. Four real
+HTTP gateway cases passed: the existing 2 MiB/25 MiB transport checks plus a
+400 KiB accepted-inline transfer to both a fresh peer and one with existing
+inline custody. Hash/byte equality and original receipt tokens were checked.
+Ruff, cold-path and whitespace checks passed. This closes the backend adaptation
+implementation gap; browser activation, progress/decline controls and live chunk
+restart journeys are still required before 142–143 closeout.
+
+The complete backend run passed 4,834 checks with 15 skips; two Node-backed
+policy/specification checks failed because that invocation omitted the available
+Node wrapper from PATH. Both corresponding suites passed on recheck with the
+correct Python/Node PATH (seven checks). The previously intermittent friend
+acceptance case passed in the broad run. Repeat the complete integration gates
+with the correct environment after browser activation; this is not a claim that
+that future integration is validated.

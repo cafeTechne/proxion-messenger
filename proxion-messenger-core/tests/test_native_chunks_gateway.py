@@ -342,3 +342,70 @@ async def test_authenticated_chunk_registration_preserves_strict_opt_in(tmp_path
     assert 'native_chunks_v' not in registered  # Browser dispatch/journeys are still staged.
     assert gw._native_ready(owner, 'A' * 43, chunks=True)[0] is enabled
     await gw._stop_native_media(); gw._store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('already_committed', [False, True])
+async def test_adapted_inline_reconciles_exact_old_peer_custody_or_completion(tmp_path, monkeypatch, already_committed):
+    from test_native_media_custody import payload
+    source, target = paired(tmp_path)
+    owner, recipient = 'did:key:alice', target._own_gateway_did()
+    raw = b'A' * CHUNK + b'B' * 17
+    original = source._store.accept_native_media(owner, 'old-file', recipient, 'thread', 'A' * 43, payload(raw))
+    incoming = target._store.accept_native_media(source._own_gateway_did(), 'old-file', 'did:key:bob',
+        source._own_gateway_did(), 'A' * 43, payload(raw), incoming=True)
+    if already_committed:
+        assert target._store.commit_native_media('did:key:bob', incoming['queue_id'], source._own_gateway_did(),
+            'old-file', incoming['envelope_digest'])
+    else:
+        assert target._store.commit_native_media_header('did:key:bob', incoming['queue_id'], source._own_gateway_did(),
+            'old-file', incoming['envelope_digest'])
+    adapted = source._store.begin_native_media_chunks(owner, 'old-file', recipient, 'thread', 'A' * 43, manifest(raw))
+    operations = []
+    async def route(method, url, **kwargs):
+        packet = json.loads(kwargs['body']); operations.append((packet['content_type'], packet['operation']))
+        assert len(kwargs['body']) <= 131072
+        status, body = await target._handle_relay_post(kwargs['body'], client_ip='127.0.0.1')
+        return int(status.split()[0]), {}, body.encode()
+    monkeypatch.setattr(source, '_resolve_peer_gateway', lambda _: 'https://peer.example')
+    monkeypatch.setattr('proxion_messenger_core.network.async_safe_request', route)
+    await source._deliver_native_chunk_media(adapted)
+    outgoing = source._store.get_native_media(owner, 'old-file')
+    assert outgoing['envelope_digest'] == original['envelope_digest'] and outgoing['header_committed']
+    assert source._store.get_native_media_part(owner, 'old-file', adapted['manifest_digest'], 0) is None
+    retained = target._store.get_native_media(source._own_gateway_did(), 'old-file')
+    assert retained['envelope_digest'] == incoming['envelope_digest']
+    if already_committed:
+        assert outgoing['committed'] and retained['committed'] and retained['transport'] == 'inline'
+        assert operations == [('native_media_query', 'receipt')]
+    else:
+        assert outgoing['forwarded'] and not outgoing['committed']
+        assert retained['transport'] == 'chunks' and retained['custody_complete'] and retained['header_committed']
+        assert operations == [('native_media_query', 'receipt'), ('native_media_chunks', 'begin')]
+        assert b''.join(target._store.get_native_media_part(source._own_gateway_did(), 'old-file', retained['manifest_digest'], seq)['data']
+                        for seq in range(2)) == raw
+    await source._stop_native_media(); await target._stop_native_media()
+    source._store.close(); target._store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('forwarded', [False, True])
+async def test_source_without_old_inline_bytes_returns_original_progress_not_invented_chunk_custody(tmp_path, monkeypatch, forwarded):
+    from test_native_media_custody import payload
+    gw = gateway(tmp_path, 'old-progress')
+    owner, peer = 'did:key:alice', 'did:key:bob'
+    receiver = socket(gw, owner); gw._session_meta[receiver]['native_chunks_v'] = 1
+    gw._store.save_dm_thread('thread', peer, owner_webid=owner)
+    original = gw._store.accept_native_media(owner, 'old-file', peer, 'thread', 'A' * 43, payload())
+    assert gw._store.commit_native_media(peer, original['queue_id'], owner, 'old-file', original['envelope_digest'], forwarded=forwarded)
+    monkeypatch.setattr(gw, '_schedule_native_media', lambda row: None)
+    await gw._handle_native_media_begin(receiver, {'v': 1, 'cert_id': 'thread', 'message_id': 'old-file',
+        'media_digest': 'A' * 43, 'manifest': manifest()})
+    result = json.loads(receiver.send.call_args.args[0])
+    assert result['type'] == 'native_media_status' and result['status'] == ('forwarded' if forwarded else 'committed')
+    assert gw._store.get_native_media(owner, 'old-file')['transport'] == 'inline'
+    receiver.send.reset_mock()
+    await gw._handle_native_media_begin(receiver, {'v': 1, 'cert_id': 'thread', 'message_id': 'old-file',
+        'media_digest': 'B' * 43, 'manifest': manifest()})
+    assert json.loads(receiver.send.call_args.args[0])['type'] == 'error'
+    gw._store.close()

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import binascii
 import json
 import re
 import time
@@ -53,7 +55,10 @@ class NativeChunkStoreMixin:
                 return None
             row = conn.execute('SELECT * FROM native_media WHERE from_webid=? AND message_id=?', (sender, message_id)).fetchone()
             if row:
-                if row['transport'] != 'chunks' or row['envelope_digest'] != digest or row['status'] == 'blocked':
+                if row['transport'] == 'inline':
+                    return self._adapt_native_inline(conn, row, recipient, thread_id, media_digest, manifest, manifest_digest, digest, incoming)
+                if (row['transport'] != 'chunks' or (row['chunk_identity_digest'] or row['envelope_digest']) != digest
+                        or row['status'] == 'blocked'):
                     return None
                 return self._native_media_row(row)
             if conn.execute('SELECT COUNT(*) FROM native_media').fetchone()[0] >= self.MAX_NATIVE_MEDIA_RECEIPTS:
@@ -79,6 +84,44 @@ class NativeChunkStoreMixin:
                  self._native_header_digest(manifest), manifest['cipher_digest'], manifest['size'], manifest['chunk_count'], manifest_digest, manifest['recipient_pub']))
             row = conn.execute('SELECT * FROM native_media WHERE queue_id=?', (cur.lastrowid,)).fetchone()
         return self._native_media_row(row)
+
+    def _adapt_native_inline(self, conn, row, recipient, thread_id, media_digest, manifest, manifest_digest, digest, incoming):
+        """Slice already accepted bytes atomically, preserving the original token.
+
+        Missing historical ciphertext cannot be reconstructed from an opaque
+        media digest. Completed/forwarded inline receipts use signed progress
+        reconciliation instead of inventing a manifest for discarded bytes.
+        """
+        from ..command_validation import SEALED_KEYS
+        if (row['status'] != 'pending' or not row['event_json'] or row['to_webid'] != recipient
+                or row['media_digest'] != media_digest or bool(row['incoming']) != bool(incoming)):
+            return None
+        try:
+            event = json.loads(row['event_json'])
+            raw = base64.b64decode(event['file']['data_b64'], validate=True)
+            if (event['thread_id'] != thread_id or any(event[key] != manifest[key] for key in SEALED_KEYS)
+                    or event['file']['size'] != manifest['size'] or len(raw) != manifest['size']
+                    or hashlib.sha256(raw).hexdigest() != manifest['cipher_digest']):
+                return None
+        except (KeyError, TypeError, ValueError, binascii.Error):
+            return None
+        offer = {key: value for key, value in event.items() if key not in {*SEALED_KEYS, 'file', 'native_media_v'}}
+        offer.update(type='native_media_offer', native_chunks_v=1, **manifest)
+        wire = json.dumps(offer, sort_keys=True, separators=(',', ':'), allow_nan=False)
+        reserved = len(raw) + manifest['chunk_count'] * 128 + len(wire.encode()) + sum(
+            len(value.encode()) for value in (row['from_webid'], recipient, row['message_id'], media_digest))
+        total = conn.execute('SELECT COALESCE(SUM(byte_count),0) FROM native_media').fetchone()[0]
+        if total - row['byte_count'] + reserved > self.MAX_NATIVE_MEDIA_BYTES:
+            return None
+        conn.execute("""UPDATE native_media SET transport='chunks',event_json=?,byte_count=?,cipher_digest=?,
+            total_bytes=?,chunk_count=?,custody_complete=1,manifest_digest=?,recipient_pub=?,chunk_identity_digest=?
+            WHERE queue_id=?""", (wire, reserved, manifest['cipher_digest'], len(raw), manifest['chunk_count'],
+            manifest_digest, manifest['recipient_pub'], digest, row['queue_id']))
+        for seq, offset in enumerate(range(0, len(raw), self.NATIVE_CHUNK_BYTES)):
+            part = raw[offset:offset + self.NATIVE_CHUNK_BYTES]
+            conn.execute('INSERT INTO native_media_parts(queue_id,seq,data,digest) VALUES(?,?,?,?)',
+                         (row['queue_id'], seq, part, hashlib.sha256(part).hexdigest()))
+        return self._native_media_row(conn.execute('SELECT * FROM native_media WHERE queue_id=?', (row['queue_id'],)).fetchone())
 
     @staticmethod
     def _native_chunk_policy_blocked(conn, sender, recipient):

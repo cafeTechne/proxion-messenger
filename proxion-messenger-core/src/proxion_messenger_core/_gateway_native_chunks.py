@@ -34,6 +34,17 @@ class NativeChunkGatewayMixin:
         if row['incoming']:
             return
         target = self._resolve_peer_gateway(peer)
+        if target and row['adapted_inline']:
+            progress = await self._query_native_receipt(target, row)
+            if progress and self._native_storage_writable():
+                if progress['committed']:
+                    # The peer may have finished the original inline envelope
+                    # before transport adaptation. Its exact signed client
+                    # receipt is stronger than another custody handoff.
+                    self._store.commit_native_media(peer, row['queue_id'], sender, row['message_id'], row['envelope_digest'])
+                    return
+                if progress['header_committed']:
+                    self._store.commit_native_media_header(peer, row['queue_id'], sender, row['message_id'], row['envelope_digest'])
         proof = await self._relay_native_chunks(target, row) if target else None
         if proof and self._native_storage_writable():
             if self._store.commit_native_media(peer, row['queue_id'], sender, row['message_id'], row['envelope_digest'], forwarded=True):
@@ -126,6 +137,19 @@ class NativeChunkGatewayMixin:
             return
         peer = thread['peer_webid']
         if self._resolve_peer_gateway(peer) and not self._sockets_for_exact(peer) and not self._is_owner_account(ws, owner):
+            return
+        message_id = data.get('message_id')
+        if not isinstance(message_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', message_id):
+            return
+        prior = self._store.get_native_media(owner, message_id)
+        canonical = self._store.validate_native_manifest(data.get('manifest'))
+        if (prior and prior['transport'] == 'inline' and prior['status'] in ('forwarded', 'committed')
+                and prior['to_webid'] == peer and prior['media_digest'] == data.get('media_digest') and canonical
+                and prior['header_digest'] == self._store._native_header_digest(data['manifest'])):
+            # Do not invent ciphertext evidence after an old custody handoff.
+            await ws.send(json.dumps(self._native_status(prior)))
+            if prior['forwarded']:
+                self._schedule_native_media(prior)
             return
         row = self._store.begin_native_media_chunks(owner, data.get('message_id'), peer, thread['thread_id'],
             data.get('media_digest'), data.get('manifest'), self._name_for(ws, owner))

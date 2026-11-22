@@ -196,6 +196,12 @@ adaptation, progress/decline controls and live large-file fault journeys remain
 open. See [the implementation contract](ROUND_143_TRANSFER_PROTOCOL.md); no
 chunk browser recovery or 142–143 completion is claimed at this checkpoint.
 
+Accepted-inline checkpoint (2026-11-22): schema 71 now preserves original
+inline receipt identity during exact-byte chunk adaptation and reconciles signed
+old peer completion. Component upload/download recovery and strict preflight
+are tested. Browser activation, progress/decline UX and live chunk restart
+journeys remain open; this adds no scope to the round.
+
 ### Problem and result
 
 The existing file_offer/file_chunk/file_complete route buffers live transfer

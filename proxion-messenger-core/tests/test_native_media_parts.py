@@ -200,7 +200,7 @@ def test_schema_69_upgrade_preserves_inline_bytes_without_inventing_chunk_eviden
     with sqlite3.connect(path) as conn:
         conn.execute('DROP TRIGGER native_media_clear_parts'); conn.execute('DROP TRIGGER native_media_delete_parts')
         conn.execute('DROP TABLE native_media_parts')
-        for field in ['transport', 'cipher_digest', 'total_bytes', 'chunk_count', 'custody_complete', 'manifest_digest', 'recipient_pub']:
+        for field in ['transport', 'cipher_digest', 'total_bytes', 'chunk_count', 'custody_complete', 'manifest_digest', 'recipient_pub', 'chunk_identity_digest']:
             conn.execute('ALTER TABLE native_media DROP COLUMN ' + field)
         conn.execute('UPDATE schema_version SET version=69')
     upgraded = LocalStore(path)
@@ -208,7 +208,109 @@ def test_schema_69_upgrade_preserves_inline_bytes_without_inventing_chunk_eviden
         restored = upgraded.get_native_media('alice', 'm')
         assert restored['event'] == original['event'] and restored['transport'] == 'inline'
         assert restored['custody_complete'] and restored['manifest_digest'] is None and restored['cipher_digest'] is None
-        assert not begin(upgraded, message='m')  # existing inline identity cannot be replaced
+        adapted = begin(upgraded, message='m')  # Explicit exact bytes, never invented by migration.
+        assert adapted['envelope_digest'] == original['envelope_digest']
+        assert upgraded.get_native_media_part('alice', 'm', adapted['manifest_digest'], 0)['data'] == b'opaque ciphertext bytes'
         assert begin(upgraded, message='new')
+    finally:
+        upgraded.close()
+
+
+def test_inline_adaptation_preserves_original_identity_header_progress_and_ciphertext(tmp_path):
+    from test_native_media_custody import accept, payload
+    path = str(tmp_path / 'adapt.db'); db = LocalStore(path)
+    raw = b'A' * CHUNK + b'B' * 17
+    original = accept(db, body=payload(raw))
+    args = ('bob', original['queue_id'], 'alice', 'm', original['envelope_digest'])
+    assert db.commit_native_media_header(*args)
+    adapted = begin(db, raw, message='m')
+    assert adapted['adapted_inline'] and adapted['custody_complete'] and adapted['header_committed']
+    assert not adapted['committed'] and not adapted['forwarded']
+    assert adapted['queue_id'] == original['queue_id'] and adapted['envelope_digest'] == original['envelope_digest']
+    assert adapted['event']['timestamp'] == original['event']['timestamp']
+    assert adapted['header_digest'] == original['header_digest']
+    assert b''.join(db.get_native_media_part('alice', 'm', adapted['manifest_digest'], seq)['data'] for seq in range(2)) == raw
+    assert accept(db, body=payload(raw)) == adapted  # Exact old API retry does not downgrade transport.
+    db.close(); db = LocalStore(path)
+    try:
+        assert begin(db, raw, message='m') == adapted
+        assert db.commit_native_media(*args)  # Original receipt token remains valid.
+        assert db.get_native_media_part('alice', 'm', adapted['manifest_digest'], 0) is None
+        assert begin(db, raw, message='m')['committed']
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize('change', ['recipient', 'thread', 'digest', 'header', 'bytes', 'direction'])
+def test_inline_adaptation_rejects_conflicts_without_mutating_original_custody(store, change):
+    from test_native_media_custody import accept, payload
+    raw = b'A' * CHUNK + b'B' * 17
+    original = accept(store, body=payload(raw)); meta = manifest(raw)
+    kwargs = {'sender': 'alice', 'message_id': 'm', 'recipient': 'bob', 'thread_id': 'thread',
+              'media_digest': 'A' * 43, 'manifest': meta}
+    if change == 'recipient': kwargs['recipient'] = 'foreign'
+    if change == 'thread': kwargs['thread_id'] = 'other'
+    if change == 'digest': kwargs['media_digest'] = 'B' * 43
+    if change == 'header': meta['msg_num'] += 1
+    if change == 'bytes': kwargs['manifest'] = manifest(b'Z' * len(raw))
+    if change == 'direction': kwargs['incoming'] = True
+    assert not store.begin_native_media_chunks(**kwargs)
+    assert store.get_native_media('alice', 'm') == original
+    with store._conn() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM native_media_parts').fetchone()[0] == 0
+
+
+def test_completed_inline_cannot_acquire_invented_manifest_or_recipient_key(store):
+    from test_native_media_custody import accept
+    original = accept(store)
+    assert store.commit_native_media('bob', original['queue_id'], 'alice', 'm', original['envelope_digest'])
+    assert not begin(store, message='m')
+    assert store.get_native_media('alice', 'm')['transport'] == 'inline'
+
+
+def test_adaptation_pins_manifest_key_and_respects_reduced_shared_budget(store):
+    from test_native_media_custody import accept, payload
+    raw = b'A' * CHUNK + b'B' * 17
+    original = accept(store, body=payload(raw)); store.MAX_NATIVE_MEDIA_BYTES = 1
+    assert not begin(store, raw, message='m')
+    assert store.get_native_media('alice', 'm') == original
+    store.MAX_NATIVE_MEDIA_BYTES = 32 * 1024 * 1024
+    adapted = begin(store, raw, message='m'); assert adapted
+    changed = manifest(raw); changed['recipient_pub'] = 'B' * 43
+    assert not begin(store, raw, message='m', meta=changed)
+    assert store.get_native_media('alice', 'm') == adapted
+
+
+def test_failed_part_insertion_rolls_back_the_entire_inline_adaptation(store):
+    from test_native_media_custody import accept, payload
+    raw = b'A' * CHUNK + b'B' * 17
+    original = accept(store, body=payload(raw))
+    with store._conn() as conn:
+        conn.execute("""CREATE TRIGGER fail_adaptation BEFORE INSERT ON native_media_parts
+            WHEN NEW.seq=1 BEGIN SELECT RAISE(ABORT, 'injected part failure'); END""")
+    with pytest.raises(sqlite3.IntegrityError, match='injected part failure'):
+        begin(store, raw, message='m')
+    assert store.get_native_media('alice', 'm') == original
+    with store._conn() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM native_media_parts').fetchone()[0] == 0
+        conn.execute('DROP TRIGGER fail_adaptation')
+    assert begin(store, raw, message='m')['adapted_inline']
+
+
+def test_schema_70_chunk_upgrade_preserves_exact_manifest_parts_and_receipt(tmp_path):
+    path = str(tmp_path / 'v70.db'); old = LocalStore(path)
+    raw = b'A' * CHUNK + b'B' * 17
+    original = begin(old, raw)
+    for seq in range(2): assert put(old, original, seq, raw[seq * CHUNK:(seq + 1) * CHUNK])
+    original = old.get_native_media('alice', 'file'); old.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute('ALTER TABLE native_media DROP COLUMN chunk_identity_digest')
+        conn.execute('UPDATE schema_version SET version=70')
+    upgraded = LocalStore(path)
+    try:
+        assert upgraded.get_native_media('alice', 'file') == original
+        assert begin(upgraded, raw) == original
+        assert upgraded.get_native_media_part('alice', 'file', original['manifest_digest'], 1)['data'] == raw[CHUNK:]
+        assert upgraded.commit_native_media('bob', original['queue_id'], 'alice', 'file', original['envelope_digest'])
     finally:
         upgraded.close()
