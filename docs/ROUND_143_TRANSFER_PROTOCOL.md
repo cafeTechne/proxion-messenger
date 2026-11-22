@@ -1,8 +1,8 @@
 # Round 143 implementation contract
 
-Status: gateway custody and local history foundation implemented and tested;
-browser chunk negotiation, sender/receiver resume and live large-file journeys
-remain open. The chunk upload/relay protocol is still staged. This implements
+Status: primary browser chunk negotiation, sender/receiver resume, Blob history
+and accessible progress/retry are integrated. Round 143 remains open for
+recipient-decline handling and final policy/closeout evidence. This implements
 the existing Round 143 scope, rather than adding another round.
 
 ## Preserve the existing boundaries
@@ -243,3 +243,48 @@ correct Python/Node PATH (seven checks). The previously intermittent friend
 acceptance case passed in the broad run. Repeat the complete integration gates
 with the correct environment after browser activation; this is not a claim that
 that future integration is validated.
+
+
+### Primary browser integration checkpoint
+
+Primary connections with local history and the original X25519 key now request
+and negotiate chunk version 1. The browser dispatches manifest/part responses,
+recovers scoped upload/download state and uses bounded Blob history before full
+receive acknowledgement. Files above 64 KiB use chunk transport when supported;
+inline-only connections keep the existing small-file route and cannot spend a
+larger saved source header. The legacy large-file route shows its weaker reload
+boundary explicitly. Existing accepted inline files can reuse their exact
+ciphertext/header through the new upload adapter. Linked/pod connections do not
+claim this primary-only protocol.
+
+Pending sends shows labelled progress and retry for both directions, including
+an admitted incoming manifest whose header has not yet been consumed. Inspection
+keeps durable incoming progress visible while disconnected and deduplicates its
+receive-journal row. Only unspent sources offer cancellation. Shell cache 313
+includes the active chunk modules; gateway event-contract exclusions have been
+removed for the three implemented browser events.
+
+The maximum-size browser experiment exposed two integration issues that are now
+fixed: native part/fetch frames use the gateway's existing file budget rather
+than the general command pacer, and native retry frames never enter the generic
+reconnect queue. A Blob-history transaction that has already aborted can fail
+closed without an uncaught second abort. Regression tests cover both cases.
+
+Live browser evidence: 600 KiB file history and voice, preserved inline
+prepared-write/history/lost-commit crashes, plus 2 MiB and maximum-size native
+file journeys. The latter use 25 MiB ciphertext (25 MiB minus 16 bytes of
+plaintext, preserving the existing AES-GCM cap). Each larger journey verifies a
+source/gateway restart after three upload parts, recipient/gateway restart after
+eight durable download parts, failed Blob history, subsequent text decryptability,
+lost full commit, final restart of both browsers/gateways, and one exact readable
+history file per primary. Source ciphertext/header hashes remain unchanged and
+durable upload prefixes are not resent. This is actual browser recovery evidence,
+not solely gateway custody.
+
+Validation: complete backend suite 4,840 passed, 15 skipped; final pacing/native
+registration/event-contract subset 34 passed. Complete frontend suite 2,694
+passed, 64 skipped. ESLint, Ruff, cold-path, whitespace and translation checks
+pass (1,217 canonical keys, 15 existing fallback warnings). Recipient decline,
+remaining policy/final acceptance checks and an explicit browser journey for
+previously accepted oversized inline custody remain open; neither 142 nor 143
+is closed by this checkpoint.

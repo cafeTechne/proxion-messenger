@@ -1217,5 +1217,8 @@
   "nativeMedia.blocked": "Delivery was blocked or revoked. The prepared file is retained; it cannot be safely cancelled.",
   "nativeMedia.connectionRequired": "Reconnect a supported primary connection with local DM history enabled to resume this saved file.",
   "nativeMedia.receivingPending": "Received file waiting for verification or local storage. Enable local DM history or free space, then retry.",
-  "nativeMedia.storageUnavailable": "Some saved file state could not be read. Other pending sends remain available. Restore storage access or close older tabs, then reload and retry."
+  "nativeMedia.storageUnavailable": "Some saved file state could not be read. Other pending sends remain available. Restore storage access or close older tabs, then reload and retry.",
+  "nativeMedia.uploading": "Uploading saved file",
+  "nativeMedia.progressLabel": "File transfer progress",
+  "nativeMedia.progress": "{percent}% transferred"
 }

@@ -191,7 +191,7 @@ export async function dmHistorySave(msg, opts = {}) {
                             delete record.file.data_b64; delete record.file.unavailable;
                         }
                         tx.objectStore(STORE).put(record);
-                    } catch { tx.abort(); }
+                    } catch { try { tx.abort(); } catch { /* Transaction already settled. */ } }
                 };
             } else tx.objectStore(STORE).put(record);
             tx.oncomplete = resolve;
@@ -226,7 +226,7 @@ export async function dmHistorySaveFile(msg, blob, { current = () => true } = {}
             let accepted = false;
             tx.oncomplete = () => resolve(accepted && current());
             tx.onabort = tx.onerror = () => resolve(false);
-            const safe = work => { try { if (!current()) tx.abort(); else work(); } catch { tx.abort(); } };
+            const safe = work => { try { if (!current()) tx.abort(); else work(); } catch { try { tx.abort(); } catch { /* Transaction already settled. */ } } };
             const prior = files.get(msg.message_id);
             prior.onsuccess = () => safe(() => {
                 const existing = prior.result;

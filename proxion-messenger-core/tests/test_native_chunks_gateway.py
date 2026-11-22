@@ -339,7 +339,7 @@ async def test_authenticated_chunk_registration_preserves_strict_opt_in(tmp_path
     assert gw._native_chunks_capable(ws) is enabled
     registered = next(json.loads(call.args[0]) for call in ws.send.call_args_list
                       if json.loads(call.args[0]).get('type') == 'registered')
-    assert 'native_chunks_v' not in registered  # Browser dispatch/journeys are still staged.
+    assert registered.get('native_chunks_v') == (1 if enabled else None)
     assert gw._native_ready(owner, 'A' * 43, chunks=True)[0] is enabled
     await gw._stop_native_media(); gw._store.close()
 

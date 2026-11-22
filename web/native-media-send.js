@@ -1,5 +1,5 @@
 import { dmEnvelopeFingerprint } from './dm-receipts.js';
-import { createNativeMediaPreparation } from './native-media-drafts.js';
+import { createNativeMediaPreparation, NATIVE_INLINE_BYTES } from './native-media-drafts.js';
 import { NATIVE_CHUNK_BYTES } from './native-media-protocol.js';
 
 function b64(bytes) {
@@ -23,7 +23,7 @@ export async function nativeMediaSendIdentity(row) {
 // The authenticated socket adapter supplies capability and status results.
 // Nothing here interprets a socket write or gateway custody as consumption.
 export function createNativeMediaSender({ secondary, e2e, store, getScope, getGeneration = () => 0,
-    isActive = () => true, getPeerPub, capability, send, persistOwnMessage, chunkUpload = null, onState = () => {},
+    isActive = () => true, getPeerPub, capability, send, persistOwnMessage, chunkUpload = null, chunkUploadEnabled = () => true, onState = () => {},
     onError = err => console.warn('[native-media] send pending:', err) }) {
     let epoch = 0;
     const queues = new Map();
@@ -76,7 +76,9 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
             const peerPub = getPeerPub(row.peer);
             if (!peerPub || (row.peerPub && row.peerPub !== peerPub)) { onState(id, 'key-unavailable'); return false; }
             const current = () => ctx.current() && getPeerPub(row.peer) === peerPub;
-            const chunked = typeof chunkUpload === 'function' && (row.prepared?.ct.length || row.blob.size + 16) > NATIVE_CHUNK_BYTES;
+            const size = row.prepared?.ct.length || row.blob.size + 16;
+            const chunked = typeof chunkUpload === 'function' && chunkUploadEnabled() && size > NATIVE_CHUNK_BYTES;
+            if (size > NATIVE_INLINE_BYTES && !chunked && !row.committed) { onState(id, 'peer-unavailable'); return false; }
             if (row.stage !== 'sealed') {
                 // A negative or lost preflight leaves the original source and
                 // ratchet position untouched. Never downgrade a prepared draft.

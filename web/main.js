@@ -132,7 +132,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
+import { dmHistorySave, dmHistorySaveFile, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
 import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
@@ -873,7 +873,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend },
             receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
-            getPeerPub: cachedPeerPub, send: command => sendCmd(command.cmd, command),
+            getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, send: command => sendCmd(command.cmd, command),
+            persistFile: (message, blob, current) => dmHistoryEnabled() ? dmHistorySaveFile(message, blob, { current }) : false,
             persistMessage: (message, current) => dmHistoryEnabled() ? dmHistorySave(message, { requireFile: true, current }) : false,
             handleEvent,
             toMessage: event => ({ type: 'message', source: 'local_dm', local: true,
@@ -892,7 +893,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         data_b64: _u8ToB64(bytes), spoiler: row.metadata.spoiler,
                         ...(row.metadata.width ? { width: row.metadata.width, height: row.metadata.height } : {}) },
                     _persistDm: true, _dmHistoryManaged: true };
-                if (await dmHistorySave(message, { requireFile: true, current }) === false || !current()) return false;
+                const saved = row.blob.size + FILE_TAG_BYTES > 65536
+                    ? await dmHistorySaveFile(message, row.blob, { current })
+                    : await dmHistorySave(message, { requireFile: true, current });
+                if (saved === false || !current()) return false;
                 handleEvent(message); return true;
             },
         });
@@ -2937,7 +2941,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     break;
                 case "registered":
                     _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
-                    _nativeMedia.start(event.native_media_v);
+                    _nativeMedia.start(event.native_media_v, event.native_chunks_v);
                     _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;
@@ -6901,12 +6905,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             }
             const sealFile = secondary.mustSeal(view);
             const inlineMax = inlineFileLimit(view.type, sealFile ? FILE_TAG_BYTES : 0);
-            if (file.size > inlineMax) {
+            if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) { showToast(t('file.tooLarge')); return; }
+            if (file.size > inlineMax && !(sealFile && _nativeMedia.chunksAvailable())) {
                 const isDm = view.type === "dm" || view.type === "local_dm";
                 const peerWebid = view.peerWebid || "";
                 if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) { showToast(t('file.tooLarge')); return; }
                 if (!isDm) { showToast(t('file.roomTooLarge', { mb: ROOM_FILE_MB })); return; }
                 if (!peerWebid) { showToast(t('file.largeDmOnly')); return; }
+                if (sealFile) showToast(t('nativeMedia.legacy'), 'warning');
                 const xferOpts = { isCurrent: target.current, ...(sealFile ? { seal: (u8, meta) => secondary.sealFile(view, u8, meta, { echo: false }) } : {}) };
                 fileTransfer.sendFileChunked(file, peerWebid, xferOpts).catch(err => {
                     console.warn("chunked send failed", err);

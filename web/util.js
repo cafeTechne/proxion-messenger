@@ -346,9 +346,9 @@ export function formatFileSize(bytes) {
 
 // Uint8Array <-> base64 (used by chunked file transfer)
 export function u8ToB64(u8) {
-    let s = "";
-    for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
-    return btoa(s);
+    const pieces = [];
+    for (let i = 0; i < u8.length; i += 32768) pieces.push(String.fromCharCode(...u8.subarray(i, i + 32768)));
+    return btoa(pieces.join(""));
 }
 
 export function b64ToU8(b64) {

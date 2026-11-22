@@ -20,8 +20,6 @@ WEB = ROOT / "web"
 # admin, security and recovery commands the browser does not send, and the
 # sender-key / session protocol the web client does not implement.
 NOT_FOR_WEB = {
-    # Round 143 staged upload protocol; no current browser opt-in/dispatch.
-    "native_media_parts", "native_media_offer", "native_media_chunk",
     "access_grants_policy_state", "ack", "ack_delivered_ok", "ack_read_ok",
     "admin_action_confirmed", "admin_action_requested", "attachment_key", "audit_logs",
     "catch_up_ack_ok", "catch_up_batch", "checksum_mismatch_acked",
@@ -67,14 +65,10 @@ def _emitted() -> set[str]:
     return out
 
 
-STAGED_WEB_MODULES = {"native-media-inbox.js", "native-media-chunks-receive.js", "native-media-chunks-send.js"}
-
-
 def _web_source() -> str:
     return "".join(
         p.read_text(encoding="utf-8") for p in WEB.glob("*.js")
         if not p.name.endswith(".test.js") and not p.name.startswith("smoke")
-        and p.name not in STAGED_WEB_MODULES
     )
 
 
@@ -102,9 +96,3 @@ def test_list_has_no_stale_entries():
     web, emitted = _web_source(), _emitted()
     stale = sorted(t for t in NOT_FOR_WEB if t not in emitted or _known_to_web(t, web))
     assert not stale, f"remove from NOT_FOR_WEB (no longer sent, or now handled): {stale}"
-
-
-def test_staged_modules_are_not_loaded_by_the_browser():
-    active = _web_source() + "".join(p.read_text(encoding="utf-8") for p in WEB.glob("*.html"))
-    for name in STAGED_WEB_MODULES:
-        assert name not in active, f"{name} is live; remove staged event exclusions"

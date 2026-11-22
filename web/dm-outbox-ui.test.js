@@ -58,3 +58,17 @@ it('offers manual review for an older unbound actor without retrying its saved c
     await h.ui.refresh(); expect(h.el('rows').innerHTML).toContain('data-outbox-action="unknown"');
     await h.click('unknown'); expect(h.reviewUnknown).toHaveBeenCalledWith('one'); expect(h.outbox.send).not.toHaveBeenCalled();
 });
+
+it('shows labelled, bounded transfer progress with retry and no prepared cancellation', async () => {
+    const h = fixture();
+    h.outbox.inspect.mockResolvedValue([{ id: 'native:file', peer: 'bob', state: 'nativeUpload',
+        canCancel: false, canRetry: true, progress: { received: 3, total: 8 } }]);
+    await h.ui.refresh();
+    expect(h.el('rows').innerHTML).toContain('<progress value="3" max="8" aria-label="nativeMedia.progressLabel">');
+    expect(h.el('rows').innerHTML).toContain('data-outbox-action="retry"');
+    expect(h.el('rows').innerHTML).not.toContain('data-outbox-action="cancel"');
+    for (const progress of [{ received: '<img src=x>', total: 8 }, { received: 9, total: 8 }, { received: 1, total: 401 }]) {
+        h.outbox.inspect.mockResolvedValue([{ id: 'native:file', state: 'nativeUpload', progress }]);
+        await h.ui.refresh(); expect(h.el('rows').innerHTML).not.toContain('<progress');
+    }
+});

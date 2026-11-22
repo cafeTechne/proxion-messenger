@@ -45,7 +45,7 @@ export function createNativeChunkUploader({ send, getScope, getGeneration = () =
             || existing.identity.headerDigest !== identity.headerDigest)) throw Error('Conflicting native upload');
         const entry = { row, identity, manifest, manifestDigest, current, deadline: 0, busy: false };
         uploads.set(key, entry);
-        onState(row.id, 'uploading');
+        onState(row.id, 'uploading', { received: 0, total: manifest.chunk_count });
         return transmit(entry, { cmd: 'native_media_begin', v: 1, cert_id: row.view.id,
             message_id: row.id, media_digest: identity.mediaDigest, manifest }, 'begin');
     }
@@ -82,6 +82,7 @@ export function createNativeChunkUploader({ send, getScope, getGeneration = () =
             if (event.custody_complete) {
                 uploads.delete(key); onState(entry.row.id, event.header_committed ? 'file-pending' : 'header-pending'); return true;
             }
+            onState(entry.row.id, 'uploading', { received: Math.min(...event.missing), total: entry.manifest.chunk_count });
             const seq = event.missing[0], bytes = entry.row.prepared.ct.subarray(seq * NATIVE_CHUNK_BYTES, (seq + 1) * NATIVE_CHUNK_BYTES);
             return await transmit(entry, { cmd: 'native_media_part', v: 1, message_id: entry.row.id,
                 manifest_digest: entry.manifestDigest, seq, data_b64: b64(bytes) }, seq);

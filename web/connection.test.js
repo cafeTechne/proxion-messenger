@@ -73,7 +73,7 @@ describe('connect', () => {
     ws.readyState = FakeWS.OPEN;
     await ws.onopen();
     const register = ws.sent.find(m => m.cmd === 'register');
-    expect(register).toMatchObject({ did: 'did:key:zSelf', x25519_pub: 'MYX25519PUB', native_media_v: 1 });
+    expect(register).toMatchObject({ did: 'did:key:zSelf', x25519_pub: 'MYX25519PUB', native_media_v: 1, native_chunks_v: 1 });
     // Queued command must NOT be sent yet — it would hit the gateway before we're
     // registered and be dropped as "Not registered".
     expect(ws.sent.find(m => m.cmd === 'queued_thing')).toBeFalsy();
@@ -539,4 +539,26 @@ describe('catchUpUnread (badges do not double on reconnect)', () => {
     expect(catchUpUnread(5, 3)).toBe(5);
     expect(catchUpUnread(undefined, 2)).toBe(2);
   });
+});
+
+it('native ciphertext parts and bounded fetches bypass only the general command pacer', () => {
+    const out = [], pacer = createSendPacer({ send: wire => out.push(JSON.parse(wire)), limit: 1,
+        schedule: () => 1, cancel: () => {} });
+    pacer.push(JSON.stringify({ cmd: 'native_media_begin', message_id: 'file' }));
+    pacer.push(JSON.stringify({ cmd: 'native_media_part', message_id: 'file', seq: 0, data_b64: 'ciphertext' }));
+    pacer.push(JSON.stringify({ cmd: 'native_media_fetch', message_id: 'file', sequences: [0] }));
+    pacer.push(JSON.stringify({ cmd: 'native_media_recover', message_ids: ['file'] }));
+    expect(out.map(frame => frame.cmd)).toEqual(['native_media_begin', 'native_media_part', 'native_media_fetch']);
+    expect(pacer.takeHeld().map(wire => JSON.parse(wire).cmd)).toEqual(['native_media_recover']);
+});
+
+it('leaves native recovery frames to their durable protocol when a paced socket closes', async () => {
+    const c = make(); c.connect(); const ws = await openCurrent();
+    for (let i = 0; i < PACE_LIMIT; i++) ws.send(JSON.stringify({ cmd: 'typing' }));
+    for (const cmd of ['native_media_begin', 'native_media_capability', 'native_media_commit', 'native_media_header_commit', 'native_media_recover']) {
+        ws.send(JSON.stringify({ cmd, message_id: 'old-connection-file' }));
+    }
+    ws.send(JSON.stringify({ cmd: 'native_media_part', message_id: 'old-connection-file', data_b64: 'ciphertext', seq: 0 }));
+    dropCurrent();
+    expect(c.state._pendingOnConnect).toEqual([]);
 });

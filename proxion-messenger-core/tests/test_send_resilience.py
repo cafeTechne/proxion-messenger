@@ -123,4 +123,4 @@ def _js_set(name):
 def test_client_pacer_exemptions_match_the_gateway():
     unpaced = _js_set("UNPACED_CMDS")
     signal = set(ProxionGateway._SIGNAL_RATE_COMMANDS)
-    assert unpaced == {"ping", "pong", "file_chunk"} | signal | set(SNAPSHOT_READ_COMMANDS)
+    assert unpaced == {"ping", "pong", "file_chunk", "native_media_part", "native_media_fetch"} | signal | set(SNAPSHOT_READ_COMMANDS)

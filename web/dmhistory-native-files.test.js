@@ -163,4 +163,17 @@ describe('durable native file history', () => {
         await history.dmHistoryDelete('large-0');
         expect(await history.dmHistorySaveFile(message('large-5', blob.size), blob)).toBe(true);
     }, 20000);
+    it('fails closed without an uncaught abort when Blob storage has already aborted the transaction', async () => {
+        const put = IDBObjectStore.prototype.put;
+        const fault = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (...args) {
+            if (this.name === 'native_files') { this.transaction.abort(); return; }
+            return put.apply(this, args);
+        });
+        const blob = new Blob(['file bytes']), msg = message('aborted-blob', blob.size);
+        expect(await history.dmHistorySaveFile(msg, blob)).toBe(false);
+        expect(await raw('messages')).toEqual([]); expect(await raw('native_files')).toEqual([]);
+        fault.mockRestore();
+        expect(await history.dmHistorySaveFile(msg, blob)).toBe(true);
+    });
+
 });

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { createNativeMedia } from './native-media.js';
 import { createNativeMediaStore } from './native-media-drafts.js';
+import { createNativeMediaInbox } from './native-media-inbox.js';
+import { dmEnvelopeFingerprint } from './dm-receipts.js';
 import { createDmReceiptStore } from './dm-receipts.js';
 import { createSecondaryCrypto } from './e2e-secondary.js';
 
@@ -10,9 +12,9 @@ const instances = [];
 afterEach(() => { for (const engine of instances.splice(0)) engine.stop(); });
 function harness(overrides = {}) {
     let scope = 'alice', generation = 0;
-    const db = new IDBFactory(), store = createNativeMediaStore(db), sent = [], errors = [];
+    const db = new IDBFactory(), store = createNativeMediaStore(db, { maxCipherBytes: 25 * 1024 * 1024 }), sent = [], errors = [];
     const encrypt = vi.fn(async () => ({ ciphertext: 'header', nonce: 'nonce', ratchetPub: 'ratchet', msgNum: 0, pn: 0 }));
-    const options = { store, receipts: createDmReceiptStore(db), getScope: () => scope,
+    const options = { store, inbox: createNativeMediaInbox(db), receipts: createDmReceiptStore(db), getScope: () => scope,
         getGeneration: () => generation, isActive: () => true, getPeerPub: () => pub,
         secondary: createSecondaryCrypto({ encrypt, isKeyed: () => true, isSelf: () => false }),
         e2e: { pendingDmReceives: vi.fn(async () => []), releaseDmSendHold: vi.fn(async () => true), finishDmSend: vi.fn(async () => true) },
@@ -113,4 +115,64 @@ describe('native media live socket lifecycle', () => {
         expect(await h.engine.cancel('file-1')).toBe(false);
         expect((await h.store.get('alice', 'file-1')).stage).toBe('sealed');
     });
+});
+
+
+describe('native chunk socket integration', () => {
+    it('negotiates the original peer key and complete chunk capability before uploading durable large bytes', async () => {
+        const h = harness({ getOwnPub: () => pub, persistFile: vi.fn(async () => true) });
+        h.engine.start(1, 1); await h.engine.recover();
+        await h.engine.sender.enqueue(new Blob([new Uint8Array(2 * 1024 * 1024)]), view,
+            { name: 'large.txt', mime: 'text/plain' }, 'large');
+        const retry = h.engine.sender.retry('large');
+        await vi.waitFor(() => expect(h.sent.some(command => command.cmd === 'native_media_capability')).toBe(true));
+        const request = h.sent.find(command => command.cmd === 'native_media_capability');
+        expect(request.native_chunks_v).toBe(1);
+        await h.engine.handleEvent(h.reply(request)); await h.settle(); expect(h.encrypt).not.toHaveBeenCalled();
+        await h.engine.handleEvent({ ...h.reply(request), native_chunks_v: 1 }); expect(await retry).toBe(true);
+        const begin = h.sent.find(command => command.cmd === 'native_media_begin');
+        expect(begin.manifest.size).toBe(2 * 1024 * 1024 + 16);
+        expect(h.sent.some(command => command.cmd === 'send_file')).toBe(false);
+        const row = await h.store.get('alice', 'large');
+        const { nativeMediaSendIdentity } = await import('./native-media-send.js'), identity = await nativeMediaSendIdentity(row);
+        await h.engine.handleEvent({ type: 'native_media_parts', v: 1, message_id: 'large',
+            media_digest: identity.mediaDigest, header_digest: identity.headerDigest,
+            manifest_digest: await dmEnvelopeFingerprint(begin.manifest), recipient_pub: pub,
+            custody_complete: false, header_committed: false, committed: false, missing: [0, 1, 2] });
+        expect(h.sent.at(-1)).toMatchObject({ cmd: 'native_media_part', message_id: 'large', seq: 0 });
+        expect(h.sent.at(-1).data_b64.length).toBeLessThanOrEqual(87384);
+        expect(h.options.e2e.releaseDmSendHold).not.toHaveBeenCalled();
+        expect((await h.store.get('alice', 'large')).committed).toBeUndefined();
+        h.engine.stop();
+        expect(await h.engine.handleEvent({ type: 'native_media_parts' })).toBe(false);
+    });
+    it('does not prepare a large draft when the negotiated connection supports only inline media', async () => {
+        const h = harness({ getOwnPub: () => pub, persistFile: vi.fn(async () => true) });
+        h.engine.start(1); await h.engine.recover();
+        await h.engine.sender.enqueue(new Blob([new Uint8Array(600000)]), view,
+            { name: 'waiting.txt', mime: 'text/plain' }, 'large');
+        expect(h.engine.chunksAvailable()).toBe(false);
+        expect(await h.engine.sender.retry('large')).toBe(false);
+        expect(h.encrypt).not.toHaveBeenCalled();
+        expect(h.sent.some(command => command.cmd === 'native_media_begin' || command.cmd === 'send_file')).toBe(false);
+        expect((await h.store.get('alice', 'large')).stage).toBe('source');
+    });
+});
+
+it('inspects durable chunk progress before header consumption and keeps it visible while disconnected', async () => {
+    const h = harness({ getOwnPub: () => pub, persistFile: vi.fn(async () => true) });
+    h.engine.start(1, 1); await h.engine.recover();
+    const manifest = { e2e: true, e2e_v: 1, content: 'header', nonce: 'nonce', ratchet_pub: pub, msg_num: 0, pn: 0,
+        size: 100016, cipher_digest: 'a'.repeat(64), chunk_count: 2, recipient_pub: pub };
+    const offer = { ...manifest, type: 'native_media_offer', native_chunks_v: 1, from_webid: 'did:key:bob', message_id: 'incoming',
+        manifest_digest: await dmEnvelopeFingerprint(manifest), native_commit: { v: 1, queue_id: 1, envelope_digest: 'b'.repeat(64) } };
+    await h.options.inbox.begin('alice', offer);
+    await h.options.inbox.begin('other', { ...offer, message_id: 'foreign' });
+    h.options.e2e.pendingDmReceives.mockResolvedValue([{ receiveId: 'header', peerId: 'did:key:bob',
+        data: { scope: 'alice', commit: { message_id: 'incoming' } } }]);
+    const pending = await h.engine.inspect();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ state: 'nativeIncoming', peer: 'did:key:bob', progress: { received: 0, total: 2 }, canCancel: false, canRetry: true });
+    h.engine.stop();
+    expect((await h.engine.inspect())[0]).toMatchObject({ state: 'nativeConnection', progress: { received: 0, total: 2 }, canCancel: false, canRetry: false });
 });

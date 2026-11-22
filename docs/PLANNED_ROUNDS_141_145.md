@@ -202,6 +202,12 @@ old peer completion. Component upload/download recovery and strict preflight
 are tested. Browser activation, progress/decline UX and live chunk restart
 journeys remain open; this adds no scope to the round.
 
+Browser integration checkpoint (2026-11-22): primary chunk negotiation, upload/
+download recovery, Blob history and labelled progress/retry are connected. Real
+2 MiB and maximum-size journeys pass partial upload/download gateway/browser
+restarts, history failure and lost final receipt with exact hashes. Recipient
+decline and final acceptance evidence remain open; see the transfer contract.
+
 ### Problem and result
 
 The existing file_offer/file_chunk/file_complete route buffers live transfer
