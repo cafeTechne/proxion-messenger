@@ -1,7 +1,9 @@
 # Round 143 implementation contract
 
-Status: design checkpoint; implementation and validation remain open. This
-implements the existing Round 143 scope, rather than adding another round.
+Status: gateway custody and local history foundation implemented and tested;
+browser chunk negotiation, sender/receiver resume and live large-file journeys
+remain open. The chunk upload/relay protocol is still staged. This implements
+the existing Round 143 scope, rather than adding another round.
 
 ## Preserve the existing boundaries
 
@@ -85,3 +87,65 @@ reuse and subsequent text decryptability. Validate real cross-gateway small
 inline, oversized-HTTP inline, 2 MiB and 25 MiB transfers with byte hashes and
 one readable history/download result after reload. Close 142–143 only when the
 supported paths and their actual limits have this evidence.
+
+## Implementation checkpoint (2026-11-22)
+
+Schema 70 extends the native custody parent with manifest, original recipient
+public key, ciphertext digest/size/count and a separate complete-custody bit.
+`native_media_parts` stores immutable 64 KiB BLOB parts. Full declared bytes and
+bounded part metadata are reserved at manifest admission in the shared 32 MiB
+budget. Duplicate parts return the original state; conflicting parts are refused.
+The final ordered ciphertext digest must verify before complete custody or a
+full/header commit is permitted. Missing-part reads are bounded. Policy cleanup
+and parent deletion clear parts transactionally; blocking removes pending
+native bytes in both directions without fabricating delivery evidence.
+
+The staged upload handlers are `native_media_begin` and `native_media_part`.
+They require an explicitly opted-in primary session, a healthy durable store,
+an owned thread and applicable owner/federation authority. Part responses follow
+the database commit. The signed `native_media_chunks` relay binds the manifest,
+part identity and exact request. It resumes missing parts after a lost response
+and gateway restart, uses the existing file count/byte rate budgets and refuses
+unrelated signers before allocating per-signer byte accounting. Only a complete
+peer custody proof can release source gateway parts. Full/header client commits
+also require the original recipient public key for chunk records.
+
+This version is **not advertised or requested by the current browser**. Auth
+registration does not yet enable `native_chunks_v`, and the normal native drain
+intentionally skips these staged records. The existing inline recovery protocol
+remains active. Next: negotiate chunk support, adapt retained oversized inline
+envelopes without changing their identity, wire the bounded browser inbox and
+source upload/drain, add durable missing-part/finalization recovery and accessible
+progress/decline controls, then validate the complete browser journeys above.
+
+Local DM history now upgrades from version 1 to 2 without replacing messages.
+Its `native_files` store and message reference commit atomically via
+`dmHistorySaveFile`. It accepts files through 25 MiB, with a 128 MiB/64-file local
+cache bound, and refuses full storage rather than evicting accepted files. The
+ordinary 8 MiB base64 retention limit is unchanged. Reads verify the original
+message/sender, byte size and digest, and recheck account/deletion state after
+asynchronous Blob reads. Search/pairing exports omit the bytes and local-only
+reference. Message/thread/expiry/cap/clear deletions remove associated Blobs in
+the same transaction. Exact finalization retry preserves later edits. A history
+no-op or a just-written file evicted by retention cannot issue a native full
+receive commit.
+
+The large-file history API is tested but is not yet the active chunk receive
+path. Current inline file/voice recovery now checks actual retained history
+before full acknowledgement. Incoming unfinished files appear in Pending sends
+with a retry action and no unsafe cancellation. Native inspection no longer
+disables normal pending sends on pod/linked/legacy connections or when one
+native storage provider is inaccessible. Shell cache is 309.
+
+Validation: 83 focused backend protocol/fanout/migration checks pass. Two real
+HTTP gateways transfer 2 MiB and 25 MiB ciphertext with exact hashes and signed
+complete custody, using the existing relay limits. This is gateway-custody
+evidence, not browser resume evidence. Frontend: 2,663 passed, 64 skipped; the
+new large-file history suite has 17 checks. ESLint, Ruff, cold-path, whitespace
+and translation gates pass. The complete multi-device browser journey still
+passes inline/voice/history and all preserved fanout crash/restart cases.
+
+The broad backend run passed 4,813 checks with one friend-accept HTTP timeout,
+one skipped and 14 deselected. That timeout did not reproduce in nine lifecycle
+checks alone or in 49 checks including the same preceding legacy file tests.
+It is not marked fixed; recheck the complete suite at final integration.

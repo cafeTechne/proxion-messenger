@@ -1214,5 +1214,8 @@
   "nativeMedia.keyChanged": "The recipient’s original key is unavailable or changed. The prepared file is retained.",
   "nativeMedia.saved": "File saved for delivery. You can review it in Pending sends.",
   "nativeMedia.legacy": "This connection uses live file delivery. Reload recovery is unavailable.",
-  "nativeMedia.blocked": "Delivery was blocked or revoked. The prepared file is retained; it cannot be safely cancelled."
+  "nativeMedia.blocked": "Delivery was blocked or revoked. The prepared file is retained; it cannot be safely cancelled.",
+  "nativeMedia.connectionRequired": "Reconnect a supported primary connection with local DM history enabled to resume this saved file.",
+  "nativeMedia.receivingPending": "Received file waiting for verification or local storage. Enable local DM history or free space, then retry.",
+  "nativeMedia.storageUnavailable": "Some saved file state could not be read. Other pending sends remain available. Restore storage access or close older tabs, then reload and retry."
 }

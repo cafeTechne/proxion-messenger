@@ -20,6 +20,8 @@ WEB = ROOT / "web"
 # admin, security and recovery commands the browser does not send, and the
 # sender-key / session protocol the web client does not implement.
 NOT_FOR_WEB = {
+    # Round 143 staged upload protocol; no current browser opt-in/dispatch.
+    "native_media_parts",
     "access_grants_policy_state", "ack", "ack_delivered_ok", "ack_read_ok",
     "admin_action_confirmed", "admin_action_requested", "attachment_key", "audit_logs",
     "catch_up_ack_ok", "catch_up_batch", "checksum_mismatch_acked",

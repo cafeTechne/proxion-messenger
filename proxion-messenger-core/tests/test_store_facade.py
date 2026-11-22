@@ -47,4 +47,4 @@ def test_schema_version_intact():
     import sqlite3
     s = _store()
     v = sqlite3.connect(s.db_path).execute("SELECT version FROM schema_version").fetchone()[0]
-    assert v == LocalStore._SCHEMA_VERSION == 69  # 69 = native header-consumption evidence
+    assert v == LocalStore._SCHEMA_VERSION == 70  # 70 = durable native ciphertext parts

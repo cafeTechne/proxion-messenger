@@ -27,6 +27,7 @@ from ._gateway_rooms import RoomHandlerMixin, _MAX_DISAPPEAR_MS
 from ._gateway_http import HttpEndpointsMixin
 from ._gateway_dm import DmHandlerMixin
 from ._gateway_native_media import NativeMediaMixin
+from ._gateway_native_chunks import NativeChunkGatewayMixin
 from ._gateway_auth import AuthHandlerMixin
 from ._gateway_misc import MiscHandlerMixin
 from ._gateway_podbridge import PodBridgeMixin
@@ -125,7 +126,7 @@ def invite_issuer_did(invite: dict) -> str:
         return ""
 
 
-class ProxionGateway(NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, OwnerMixin, HttpEndpointsMixin):
+class ProxionGateway(NativeChunkGatewayMixin, NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, OwnerMixin, HttpEndpointsMixin):
     def __init__(
         self,
         agent: AgentState,
@@ -1356,10 +1357,14 @@ class ProxionGateway(NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, Mai
             if not self._check_signal_rate_limit(websocket):
                 await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited"}))
                 return
-        elif cmd == "file_chunk":
+        elif cmd in ("file_chunk", "native_media_part"):
             if not self._check_file_chunk_rate_limit(websocket):
-                await websocket.send(json.dumps({"type": "file_send_failed", "file_id": data.get("file_id", ""),
-                                                 "reason": "rate_limited"}))
+                if cmd == "native_media_part":
+                    await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited",
+                        "cmd": cmd, "seq": data.get("seq"), **_mid}))
+                else:
+                    await websocket.send(json.dumps({"type": "file_send_failed", "file_id": data.get("file_id", ""),
+                                                     "reason": "rate_limited"}))
                 return
         # Pod bridge: its own budget, enforced in the handlers (_gateway_podbridge),
         # which answer a refused pod_fetch with its req_id so the client fails fast.
@@ -1699,6 +1704,10 @@ class ProxionGateway(NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, Mai
                 await self._handle_get_peer_device_keys(websocket, data)
             elif cmd == "native_media_capability":
                 await self._handle_native_media_capability(websocket, data)
+            elif cmd == "native_media_begin":
+                await self._handle_native_media_begin(websocket, data)
+            elif cmd == "native_media_part":
+                await self._handle_native_media_part(websocket, data)
             elif cmd == "native_media_header_commit":
                 await self._handle_native_media_commit(websocket, data, header_only=True)
             elif cmd == "native_media_commit":

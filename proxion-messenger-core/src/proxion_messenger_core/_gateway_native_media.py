@@ -103,6 +103,8 @@ class NativeMediaMixin:
         if not latest or latest["queue_id"] != row["queue_id"]:
             return
         row = latest
+        if row["transport"] != "inline":
+            return  # Round 143 chunk delivery is not negotiated/activated yet.
         peer, sender = row["to_webid"], row["from_webid"]
         if (self._is_blocked_for(peer, sender) or self._is_blocked_for(sender, peer)
                 or self._store.is_cert_revoked(f"device:{sender}") or self._store.is_cert_revoked(f"device:{peer}")):
@@ -170,7 +172,7 @@ class NativeMediaMixin:
                     or proof.get("content_type") != response_type or proof.get("from_webid") != peer
                     or proof.get("relay_sig_did") != peer or proof.get("to_webid") != self._own_gateway_did()
                     or proof.get("request_digest") != hashlib.sha256(body).hexdigest()
-                    or any(proof.get(key) != payload[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub") if key in payload)
+                    or any(proof.get(key) != payload[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v") if key in payload)
                     or not verify_relay_envelope(proof)):
                 return None
             return proof
@@ -183,7 +185,7 @@ class NativeMediaMixin:
         import secrets
         proof = {"content_type": response_type, "v": 1,
                  "from_webid": self._own_gateway_did(), "to_webid": data["from_webid"],
-                 **{key: data[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub") if key in data},
+                 **{key: data[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v") if key in data},
                  "request_digest": hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
                  "relay_sig_did": self._own_gateway_did(),
                  "relay_ts": datetime.now(timezone.utc).isoformat(), "relay_nonce": secrets.token_hex(16), **fields}
@@ -326,6 +328,11 @@ class NativeMediaMixin:
                 or not re.fullmatch(r"[a-f0-9]{64}", receive_id)
                 or not re.fullmatch(r"[a-f0-9]{64}", digest)
                 or not 0 < len(sender) <= 2048 or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", message)):
+            return
+        row = self._store.get_native_media(sender, message)
+        if (row and row['transport'] == 'chunks'
+                and (not self._native_chunks_capable(ws)
+                     or (self._session_meta.get(ws) or {}).get('native_media_pub') != row['recipient_pub'])):
             return
         commit = self._store.commit_native_media_header if header_only else self._store.commit_native_media
         if commit(owner, data.get("queue_id"), sender, message, digest):

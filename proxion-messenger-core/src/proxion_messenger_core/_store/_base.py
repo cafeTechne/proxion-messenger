@@ -254,7 +254,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 69
+    _SCHEMA_VERSION = 70
     _integrity_ok: bool = True
     _migration_error: str = ""
     def _init_db(self) -> None:
@@ -1693,6 +1693,28 @@ class _StoreBase(object):
                 "ALTER TABLE native_media ADD COLUMN header_digest TEXT",
                 "ALTER TABLE native_media ADD COLUMN header_committed INTEGER NOT NULL DEFAULT 0",
                 "UPDATE native_media SET header_committed=1 WHERE status='committed'",
+            ],
+            # 70: bounded, immutable native ciphertext parts. Reserve their full
+            # declared size at manifest admission in the existing custody budget.
+            [
+                "ALTER TABLE native_media ADD COLUMN transport TEXT NOT NULL DEFAULT 'inline'",
+                "ALTER TABLE native_media ADD COLUMN cipher_digest TEXT",
+                "ALTER TABLE native_media ADD COLUMN total_bytes INTEGER",
+                "ALTER TABLE native_media ADD COLUMN chunk_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE native_media ADD COLUMN custody_complete INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE native_media ADD COLUMN manifest_digest TEXT",
+                "ALTER TABLE native_media ADD COLUMN recipient_pub TEXT",
+                """CREATE TABLE IF NOT EXISTS native_media_parts (
+                    queue_id INTEGER NOT NULL, seq INTEGER NOT NULL,
+                    data BLOB NOT NULL, digest TEXT NOT NULL,
+                    PRIMARY KEY(queue_id,seq)
+                )""",
+                """CREATE TRIGGER IF NOT EXISTS native_media_clear_parts
+                    AFTER UPDATE OF event_json ON native_media WHEN NEW.event_json IS NULL
+                    BEGIN DELETE FROM native_media_parts WHERE queue_id=NEW.queue_id; END""",
+                """CREATE TRIGGER IF NOT EXISTS native_media_delete_parts
+                    AFTER DELETE ON native_media
+                    BEGIN DELETE FROM native_media_parts WHERE queue_id=OLD.queue_id; END""",
             ],
         ]
 

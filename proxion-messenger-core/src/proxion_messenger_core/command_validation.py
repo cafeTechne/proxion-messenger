@@ -126,7 +126,7 @@ _OPTIONAL_PATH_IDS: dict[str, frozenset] = {
 # and a failed DB integrity check all block these (except TEARDOWN_COMMANDS).
 MUTATING_COMMANDS: frozenset[str] = frozenset({
     # messages and content
-    "send_dm", "send_room", "local_dm", "sealed_dm", "send_dm_fanout", "dm_receive_commit", "native_media_commit", "native_media_header_commit", "native_media_recover",
+    "send_dm", "send_room", "local_dm", "sealed_dm", "send_dm_fanout", "dm_receive_commit", "native_media_commit", "native_media_header_commit", "native_media_recover", "native_media_begin", "native_media_part",
     "edit_message", "edit_local_message", "delete_local_message", "forward_message",
     "send_file", "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
     "file_received",

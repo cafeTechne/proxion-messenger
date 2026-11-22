@@ -21,6 +21,7 @@ from ._store.messages import MessageStoreMixin
 from ._store.rooms import RoomStoreMixin
 from ._store.dms import DmStoreMixin
 from ._store.native_media import NativeMediaStoreMixin
+from ._store.native_chunks import NativeChunkStoreMixin
 from ._store.federation import FederationStoreMixin
 from ._store.devices import DeviceStoreMixin
 from ._store.identity import IdentityStoreMixin
@@ -32,6 +33,7 @@ class LocalStore(
     RoomStoreMixin,
     DmStoreMixin,
     NativeMediaStoreMixin,
+    NativeChunkStoreMixin,
     FederationStoreMixin,
     DeviceStoreMixin,
     IdentityStoreMixin,

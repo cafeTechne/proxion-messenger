@@ -74,6 +74,7 @@ export function createNativeMediaReceiver({ e2e, receipts, getScope, getGenerati
             // Construct the small metadata explicitly; never persist a spread
             // of the socket event or a caller-supplied message containing bytes.
             const data = { transport: 'native-media', scope: ctx.scope, commit };
+            if (typeof event.timestamp === 'string' && event.timestamp.length <= 64) data.timestamp = event.timestamp;
             const content = await e2e.ratchetDecrypt(event.from_webid, event.content, event.nonce,
                 event.msg_num, event.ratchet_pub, event.pn, { receiveId: headerId, receiveData: data, current: ctx.current });
             if (!ctx.current()) return false;
@@ -88,7 +89,7 @@ export function createNativeMediaReceiver({ e2e, receipts, getScope, getGenerati
                     data_b64: b64(plain), spoiler: meta.spoiler,
                     ...(meta.width ? { width: meta.width, height: meta.height } : {}) },
                 _persistDm: true, _dmHistoryManaged: true };
-            if (await persistMessage(opened) === false || !ctx.current()) return false;
+            if (await persistMessage(opened, ctx.current) === false || !ctx.current()) return false;
             if (!await receipts.remember(ctx.receiptScope, receiveId, null, commit) || !ctx.current()) return false;
             if (await sendCommit(commit) === false || !ctx.current()) return false;
             if (!await e2e.finishDmReceive(event.from_webid, headerId, ctx.current) || !ctx.current()) return false;

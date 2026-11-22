@@ -28,6 +28,10 @@ class NativeMediaStoreMixin:
         event = json.loads(row["event_json"]) if row["event_json"] else None
         header_digest = row["header_digest"] or (cls._native_header_digest(event) if event else None)
         return {"header_digest": header_digest, "header_committed": bool(row["header_committed"]),
+                "transport": row["transport"], "cipher_digest": row["cipher_digest"],
+                "total_bytes": row["total_bytes"], "chunk_count": row["chunk_count"],
+                "custody_complete": bool(row["custody_complete"]), "manifest_digest": row["manifest_digest"],
+                "recipient_pub": row["recipient_pub"],
                 "queue_id": row["queue_id"], "from_webid": row["from_webid"],
                 "message_id": row["message_id"], "to_webid": row["to_webid"],
                 "media_digest": row["media_digest"], "envelope_digest": row["envelope_digest"],
@@ -79,8 +83,8 @@ class NativeMediaStoreMixin:
         with self._conn() as conn:
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
-            if conn.execute("SELECT 1 FROM blocks WHERE owner_webid=? AND blocked_webid=?",
-                            (recipient, sender)).fetchone():
+            if conn.execute("SELECT 1 FROM blocks WHERE (owner_webid=? AND blocked_webid=?) OR (owner_webid=? AND blocked_webid=?)",
+                            (recipient, sender, sender, recipient)).fetchone():
                 return None
             if conn.execute("SELECT 1 FROM revocations WHERE cert_id IN (?,?)",
                             (f"device:{sender}", f"device:{recipient}")).fetchone():
@@ -88,7 +92,7 @@ class NativeMediaStoreMixin:
             row = conn.execute("SELECT * FROM native_media WHERE from_webid=? AND message_id=?",
                                (sender, message_id)).fetchone()
             if row:
-                if row["envelope_digest"] != digest or row["status"] == "blocked":
+                if row["transport"] != "inline" or row["envelope_digest"] != digest or row["status"] == "blocked":
                     return None
                 if not row["header_digest"]:
                     conn.execute("UPDATE native_media SET header_digest=? WHERE queue_id=?", (header_digest, row["queue_id"]))
@@ -138,7 +142,7 @@ class NativeMediaStoreMixin:
         with self._conn() as conn:
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT status,event_json,header_digest FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=? AND message_id=? AND envelope_digest=? AND status IN ('pending','committed','forwarded')",
+            row = conn.execute("SELECT status,event_json,header_digest FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=? AND message_id=? AND envelope_digest=? AND custody_complete=1 AND status IN ('pending','committed','forwarded')",
                                (queue_id, owner, sender, message_id, digest)).fetchone()
             if not row:
                 return False
@@ -151,7 +155,7 @@ class NativeMediaStoreMixin:
         if type(queue_id) is not int or queue_id < 1:
             return False
         with self._conn() as conn:
-            row = conn.execute("SELECT event_json,header_digest FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=? AND message_id=? AND envelope_digest=? AND status IN ('pending','committed','forwarded')",
+            row = conn.execute("SELECT event_json,header_digest FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=? AND message_id=? AND envelope_digest=? AND custody_complete=1 AND status IN ('pending','committed','forwarded')",
                                (queue_id, owner, sender, message_id, digest)).fetchone()
             if not row:
                 return False

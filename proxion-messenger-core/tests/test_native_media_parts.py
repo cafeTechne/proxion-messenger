@@ -1,0 +1,214 @@
+"""Native partial custody must never look like a complete accepted file."""
+import hashlib
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
+from proxion_messenger_core.local_store import LocalStore
+
+
+CHUNK = 64 * 1024
+
+
+def manifest(raw=b'opaque ciphertext bytes'):
+    return {'e2e': True, 'e2e_v': 1, 'content': 'Y2lwaGVy', 'nonce': 'A' * 16,
+            'ratchet_pub': 'A' * 43, 'msg_num': 0, 'pn': 0,
+            'size': len(raw), 'cipher_digest': hashlib.sha256(raw).hexdigest(),
+            'chunk_count': (len(raw) + CHUNK - 1) // CHUNK, 'recipient_pub': 'A' * 43}
+
+
+def begin(store, raw=b'opaque ciphertext bytes', *, message='file', sender='alice', recipient='bob', incoming=False, meta=None):
+    return store.begin_native_media_chunks(sender, message, recipient, 'thread', 'A' * 43,
+                                           meta if meta is not None else manifest(raw), incoming=incoming)
+
+
+def put(store, row, seq, raw):
+    return store.put_native_media_part(row['from_webid'], row['message_id'], row['manifest_digest'], seq, raw)
+
+
+@pytest.fixture
+def store(tmp_path):
+    db = LocalStore(str(tmp_path / 'parts.db'))
+    yield db
+    db.close()
+
+
+def test_manifest_is_durable_but_not_full_custody_or_commit(tmp_path):
+    path = str(tmp_path / 'restart.db')
+    db = LocalStore(path)
+    first = begin(db, b'X' * (CHUNK * 2 + 17))
+    assert first['transport'] == 'chunks' and not first['custody_complete']
+    assert first['event']['type'] == 'native_media_offer'
+    assert first['event']['chunk_count'] == 3
+    args = ('bob', first['queue_id'], 'alice', 'file', first['envelope_digest'])
+    assert not db.commit_native_media(*args)
+    assert not db.commit_native_media(*args, forwarded=True)
+    assert not db.commit_native_media_header(*args)
+    with sqlite3.connect(path) as external:
+        complete, reserved = external.execute('SELECT custody_complete,byte_count FROM native_media').fetchone()
+        assert complete == 0 and reserved > CHUNK * 2 + 17
+        assert external.execute('SELECT COUNT(*) FROM native_media_parts').fetchone()[0] == 0
+    assert put(db, first, 1, b'X' * CHUNK)
+    db.close(); db = LocalStore(path)
+    try:
+        assert begin(db, b'X' * (CHUNK * 2 + 17)) == first
+        assert db.native_media_missing_parts('alice', 'file', first['manifest_digest']) == [0, 2]
+        assert db.get_native_media_part('alice', 'file', first['manifest_digest'], 1)['data'] == b'X' * CHUNK
+    finally:
+        db.close()
+
+
+def test_exact_parts_are_idempotent_and_full_ordered_hash_precedes_custody(store):
+    raw = b'A' * CHUNK + b'B' * CHUNK + b'C' * 17
+    row = begin(store, raw)
+    assert put(store, row, 2, raw[CHUNK * 2:])
+    assert put(store, row, 1, raw[CHUNK:CHUNK * 2])
+    assert put(store, row, 1, raw[CHUNK:CHUNK * 2])
+    assert not put(store, row, 1, b'Z' * CHUNK)
+    assert not put(store, row, 0, b'Z' * CHUNK)  # would complete the wrong digest
+    assert store.native_media_missing_parts('alice', 'file', row['manifest_digest']) == [0]
+    assert store.get_native_media_part('alice', 'file', row['manifest_digest'], 1)['data'] == b'B' * CHUNK
+    complete = put(store, row, 0, raw[:CHUNK])
+    assert complete['custody_complete'] and not complete['header_committed'] and not complete['committed']
+    args = ('bob', row['queue_id'], 'alice', 'file', row['envelope_digest'])
+    assert store.commit_native_media_header(*args)
+    assert store.get_native_media_part('alice', 'file', row['manifest_digest'], 0)
+    assert store.commit_native_media(*args)
+    with store._conn() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM native_media_parts').fetchone()[0] == 0
+        assert conn.execute('SELECT byte_count FROM native_media').fetchone()[0] == 0
+    assert not put(store, row, 0, raw[:CHUNK])
+    retried = begin(store, raw)
+    assert retried['custody_complete'] and retried['committed'] and retried['event'] is None
+    assert not begin(store, raw, meta={**manifest(raw), 'msg_num': 1})
+
+
+@pytest.mark.parametrize('size', [2 * 1024 * 1024, 25 * 1024 * 1024])
+def test_full_sized_ciphertext_survives_mid_transfer_restart(tmp_path, size):
+    raw = b''.join(bytes([seq % 251]) * min(CHUNK, size - seq * CHUNK) for seq in range((size + CHUNK - 1) // CHUNK))
+    path = str(tmp_path / 'large.db'); db = LocalStore(path)
+    try:
+        row = begin(db, raw)
+        assert row and not row['custody_complete']
+        for seq in range(row['chunk_count']):
+            if seq == row['chunk_count'] // 2:
+                db.close(); db = LocalStore(path)
+                assert db.native_media_missing_parts('alice', 'file', row['manifest_digest'])[0] == seq
+            accepted = put(db, row, seq, raw[seq * CHUNK:(seq + 1) * CHUNK])
+            assert accepted['custody_complete'] == (seq == row['chunk_count'] - 1)
+        db.close(); db = LocalStore(path)
+        digest = hashlib.sha256()
+        for seq in range(row['chunk_count']):
+            digest.update(db.get_native_media_part('alice', 'file', row['manifest_digest'], seq)['data'])
+        assert digest.hexdigest() == manifest(raw)['cipher_digest']
+        assert begin(db, raw)['custody_complete']
+        additional = begin(db, b'X' * (25 * 1024 * 1024), message='additional')
+        assert bool(additional) == (size == 2 * 1024 * 1024)
+        if additional:
+            assert not begin(db, b'X' * (25 * 1024 * 1024), message='over-budget')
+    finally:
+        db.close()
+
+
+def test_no_foreign_manifest_or_sequence_can_replace_partial_bytes(store):
+    raw = b'X' * (CHUNK + 17); row = begin(store, raw)
+    assert not store.put_native_media_part('foreign', 'file', row['manifest_digest'], 0, raw[:CHUNK])
+    assert not store.put_native_media_part('alice', 'file', 'f' * 64, 0, raw[:CHUNK])
+    for seq, data in [(True, raw[:CHUNK]), (-1, raw[:CHUNK]), (2, b'X' * 17), (0, b'X' * 17), (1, b'X' * CHUNK)]:
+        assert not put(store, row, seq, data)
+    assert store.native_media_missing_parts('alice', 'file', row['manifest_digest']) == [0, 1]
+    assert not begin(store, raw, recipient='other')
+    assert not begin(store, raw, incoming=True)
+    assert not begin(store, raw, meta={**manifest(raw), 'cipher_digest': 'f' * 64})
+
+
+def test_parts_reserve_the_existing_global_budget_and_share_it_with_inline(store):
+    raw = b'X' * (2 * CHUNK + 17)
+    row = begin(store, raw)
+    with store._conn() as conn:
+        reserved = conn.execute('SELECT byte_count FROM native_media').fetchone()[0]
+    assert reserved > len(raw)
+    store.MAX_NATIVE_MEDIA_BYTES = reserved + 100
+    assert not begin(store, message='other')
+    from test_native_media_custody import accept
+    assert not accept(store, message='inline')
+    # Capacity changes never prevent exact accepted retries or reserved parts.
+    store.MAX_NATIVE_MEDIA_BYTES = 1
+    assert begin(store, raw) == row
+    assert put(store, row, 0, raw[:CHUNK])
+    with store._conn() as conn:
+        assert conn.execute('SELECT byte_count FROM native_media').fetchone()[0] == reserved
+
+
+def test_concurrent_manifest_admission_never_exceeds_source_limit(store):
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        rows = list(pool.map(lambda index: begin(store, message=str(index)), range(15)))
+    assert sum(row is not None for row in rows) == 10
+    assert len(store.pending_native_media('bob')) == 10
+    with store._conn() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM native_media_parts').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('action', ['recipient block', 'sender block', 'sender revoke', 'recipient revoke', 'account deletion'])
+def test_policy_cleanup_purges_parts_and_keeps_no_fake_delivery(store, action):
+    raw = b'X' * (CHUNK + 17); row = begin(store, raw)
+    assert put(store, row, 0, raw[:CHUNK])
+    if action == 'recipient block': store.set_block('bob', 'alice', True)
+    elif action == 'sender block': store.set_block('alice', 'bob', True)
+    elif action == 'sender revoke': store.mark_revoked('device:alice', 'alice')
+    elif action == 'recipient revoke': store.mark_revoked('device:bob', 'bob')
+    else: store.delete_account_data('alice')
+    with store._conn() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM native_media_parts').fetchone()[0] == 0
+        assert conn.execute('SELECT COALESCE(SUM(byte_count),0) FROM native_media').fetchone()[0] == 0
+    assert not put(store, row, 1, raw[CHUNK:])
+    remaining = store.get_native_media('alice', 'file')
+    if action != 'account deletion':
+        assert remaining['status'] == 'blocked' and not remaining['committed'] and not remaining['header_committed']
+    else:
+        assert remaining is None
+
+
+def test_forwarding_keeps_only_full_custody_receipt_not_header_consumption(store):
+    raw = b'X' * 17; row = begin(store, raw); assert put(store, row, 0, raw)
+    assert store.commit_native_media('bob', row['queue_id'], 'alice', 'file', row['envelope_digest'], forwarded=True)
+    forwarded = begin(store, raw)
+    assert forwarded['forwarded'] and forwarded['custody_complete'] and not forwarded['header_committed']
+    with store._conn() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM native_media_parts').fetchone()[0] == 0
+
+
+def test_missing_part_batches_are_bounded_and_reject_invalid_arguments(store):
+    row = begin(store, b'X' * (CHUNK * 20))
+    assert store.native_media_missing_parts('alice', 'file', row['manifest_digest']) == list(range(8))
+    assert store.native_media_missing_parts('alice', 'file', row['manifest_digest'], after=7, limit=8) == list(range(8, 16))
+    for opts in [{'limit': 17}, {'limit': True}, {'after': -2}, {'after': False}]:
+        with pytest.raises(ValueError): store.native_media_missing_parts('alice', 'file', row['manifest_digest'], **opts)
+
+
+@pytest.mark.parametrize('field,value', [('size', True), ('size', 0), ('size', 25 * 1024 * 1024 + 1),
+    ('chunk_count', True), ('chunk_count', 2), ('cipher_digest', 'A' * 64), ('e2e_v', True), ('extra', 'bad')])
+def test_invalid_manifests_never_reserve_storage(store, field, value):
+    assert not begin(store, meta={**manifest(), field: value})
+    assert store.pending_native_media('bob') == []
+
+
+def test_schema_69_upgrade_preserves_inline_bytes_without_inventing_chunk_evidence(tmp_path):
+    from test_native_media_custody import accept
+    path = str(tmp_path / 'upgrade.db'); old = LocalStore(path); original = accept(old); old.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute('DROP TRIGGER native_media_clear_parts'); conn.execute('DROP TRIGGER native_media_delete_parts')
+        conn.execute('DROP TABLE native_media_parts')
+        for field in ['transport', 'cipher_digest', 'total_bytes', 'chunk_count', 'custody_complete', 'manifest_digest', 'recipient_pub']:
+            conn.execute('ALTER TABLE native_media DROP COLUMN ' + field)
+        conn.execute('UPDATE schema_version SET version=69')
+    upgraded = LocalStore(path)
+    try:
+        restored = upgraded.get_native_media('alice', 'm')
+        assert restored['event'] == original['event'] and restored['transport'] == 'inline'
+        assert restored['custody_complete'] and restored['manifest_digest'] is None and restored['cipher_digest'] is None
+        assert not begin(upgraded, message='m')  # existing inline identity cannot be replaced
+        assert begin(upgraded, message='new')
+    finally:
+        upgraded.close()

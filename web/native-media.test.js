@@ -29,6 +29,26 @@ function harness(overrides = {}) {
 }
 
 describe('native media live socket lifecycle', () => {
+    it('reports inaccessible native storage without rejecting other pending-send providers', async () => {
+        const h = harness(); h.engine.start(1); await h.engine.recover();
+        vi.spyOn(h.store, 'list').mockRejectedValueOnce(Error('native storage blocked'));
+        expect(await h.engine.inspect()).toEqual([{ id: 'native-in:storage', peer: '', state: 'nativeStorage', canCancel: false, canRetry: true }]);
+        expect(h.errors).toHaveLength(1);
+    });
+    it('shows received files waiting on verification/history only in the original account with retry and no cancellation', async () => {
+        const h = harness(); h.engine.start(1); await h.engine.recover();
+        h.options.e2e.pendingDmReceives.mockResolvedValue([
+            { receiveId: 'a'.repeat(64), peerId: 'did:key:bob', data: { scope: 'alice', timestamp: '2026-11-22T00:00:00Z' } },
+            { receiveId: 'b'.repeat(64), peerId: 'did:key:other', data: { scope: 'other' } },
+        ]);
+        expect(await h.engine.inspect()).toEqual([{ id: 'native-in:' + 'a'.repeat(64), peer: 'did:key:bob',
+            timestamp: '2026-11-22T00:00:00Z', canCancel: false, canRetry: true, state: 'nativeIncoming' }]);
+    });
+    it('does not make a linked or pod outbox unavailable when native media is inactive', async () => {
+        const h = harness({ isActive: () => false });
+        expect(await h.engine.inspect()).toEqual([]);
+        expect(h.options.e2e.pendingDmReceives).not.toHaveBeenCalled();
+    });
     it('replays on return to the foreground and removes the listener when stopped', async () => {
         const listeners = new Set(), doc = { hidden: true,
             addEventListener: vi.fn((type, listener) => listeners.add(listener)),
@@ -41,6 +61,7 @@ describe('native media live socket lifecycle', () => {
     });
     it('allows safe unspent source cancellation while the transport is no longer negotiated', async () => {
         const h = harness(); h.engine.start(1); await h.engine.recover(); await h.enqueue(); h.engine.stop();
+        expect((await h.engine.inspect())[0]).toMatchObject({ state: 'nativeConnection', canCancel: true, canRetry: false });
         expect(await h.engine.cancel('file-1')).toBe(true);
         expect(await h.store.list('alice')).toEqual([]); expect(h.encrypt).not.toHaveBeenCalled();
     });

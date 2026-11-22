@@ -184,6 +184,18 @@ resumability: persistent chunk storage, negotiation and replay-safe header/histo
 commit remain open. No legacy socket/chunk acknowledgement is relabeled as a
 durable file receipt.
 
+Custody/history checkpoint (2026-11-22): schema 70 and a staged signed-part
+protocol now preserve bounded manifests/parts across gateway restart, reject
+conflicts and reserve complete capacity before admission. Real gateways transfer
+2 MiB/25 MiB ciphertext with exact hashes and complete custody proofs. Local
+history v2 adds atomic bounded Blob/reference storage and privacy/retention
+checks. Frontend: 2,663 passed; focused backend protocol/fanout subset: 83 passed.
+The complete backend run had one non-reproduced friend-accept timeout; final
+integration must recheck it. Browser chunk opt-in/resume, oversized-inline
+adaptation, progress/decline controls and live large-file fault journeys remain
+open. See [the implementation contract](ROUND_143_TRANSFER_PROTOCOL.md); no
+chunk browser recovery or 142–143 completion is claimed at this checkpoint.
+
 ### Problem and result
 
 The existing file_offer/file_chunk/file_complete route buffers live transfer

@@ -81,12 +81,27 @@ export function createNativeMedia({ secondary, e2e, receipts, getScope, getGener
             return false;
         },
         async inspect() {
-            const rows = await sender.list();
-            return rows.map(row => ({ id: 'native:' + row.id, peer: row.peer, timestamp: row.timestamp,
-                state: row.committed ? 'nativeHistory' : row.blocked ? 'nativeBlocked' : row.peerPub && getPeerPub(row.peer) !== row.peerPub ? 'nativeKey'
+            // Legacy, linked and pod connections must not disable their normal
+            // outbox just because native media is not negotiated. Read retained
+            // primary drafts locally even while that protocol is disconnected.
+            if (!isActive()) return [];
+            const scope = getScope(), stamp = generation();
+            const current = () => isActive() && scope === getScope() && stamp === generation();
+            let rows = [], receiving = [], unavailable = false;
+            try { rows = await store.list(scope, current); }
+            catch (err) { if (!current()) return []; unavailable = true; onError(err); }
+            try { receiving = await e2e.pendingDmReceives({ transport: 'native-media' }); }
+            catch (err) { if (!current()) return []; unavailable = true; onError(err); }
+            if (!current()) return [];
+            return [...rows.map(row => ({ id: 'native:' + row.id, peer: row.peer, timestamp: row.timestamp,
+                state: !active() ? 'nativeConnection' : row.committed ? 'nativeHistory' : row.blocked ? 'nativeBlocked' : row.peerPub && getPeerPub(row.peer) !== row.peerPub ? 'nativeKey'
                     : row.headerCommitted ? 'nativeFile' : row.stage === 'sealed' || states.get(row.id) === 'header-pending' ? 'nativeHeader'
                         : states.get(row.id) === 'peer-unavailable' ? 'nativePeer' : 'nativeWaiting',
-                canCancel: row.stage === 'source', canRetry: !row.blocked }));
+                canCancel: row.stage === 'source', canRetry: active() && !row.blocked })),
+                ...receiving.filter(row => row.data.scope === scope).map(row => ({ id: 'native-in:' + row.receiveId,
+                    peer: row.peerId, timestamp: row.data.timestamp, canCancel: false, canRetry: active(),
+                    state: active() ? 'nativeIncoming' : 'nativeConnection' })),
+                ...(unavailable ? [{ id: 'native-in:storage', peer: '', state: 'nativeStorage', canCancel: false, canRetry: true }] : [])];
         },
         async cancel(id) {
             if (!isActive()) return false;

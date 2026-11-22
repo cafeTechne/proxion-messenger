@@ -127,7 +127,7 @@ def test_schema_67_upgrade_preserves_fanout(tmp_path):
         assert accept(upgraded)
         assert upgraded.pending_device_fanout('b', 'd')[0]['payload']['content'] == 'cipher'
         with upgraded._conn() as conn:
-            assert conn.execute('SELECT version FROM schema_version').fetchone()[0] == 69
+            assert conn.execute('SELECT version FROM schema_version').fetchone()[0] == 70
     finally:
         upgraded.close()
 

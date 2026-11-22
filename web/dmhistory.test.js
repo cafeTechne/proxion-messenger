@@ -15,6 +15,7 @@ import {
   dmHistorySetEnabled, dmHistoryEnabled, planEviction,
   dmHistoryExportRecent, dmHistoryImport, dmHistoryDeleteBefore,
   dmHistorySetDelivery, dmHistoryUndelivered,
+  dmHistorySaveFile,
 } from './dmhistory.js';
 
 beforeEach(async () => {
@@ -61,12 +62,15 @@ describe('per-thread retention cap', () => {
   it('never keeps more than MAX_PER_THREAD, evicting oldest first', async () => {
     // MAX_PER_THREAD is 2000; write 2003 and assert the 3 oldest are gone.
     for (let i = 0; i < 2003; i++) {
-      await dmHistorySave({
+      const msg = {
         message_id: `m${String(i).padStart(5, '0')}`,
         thread_id: 'cap',
         content: `msg ${i}`,
         timestamp: new Date(1700000000000 + i * 1000).toISOString(),
-      });
+      };
+      if (i === 0) expect(await dmHistorySaveFile({ ...msg, from_webid: 'did:key:alice',
+        file: { filename: 'retained.txt', mime_type: 'text/plain', size: 1 } }, new Blob(['x']))).toBe(true);
+      else await dmHistorySave(msg);
     }
     const rows = await dmHistoryLoad('cap', 0);
     expect(rows.length).toBe(2000);
@@ -75,6 +79,20 @@ describe('per-thread retention cap', () => {
     expect(ids.has('m00000')).toBe(false);
     expect(ids.has('m00002')).toBe(false);
     expect(ids.has('m02002')).toBe(true);
+    const blob = await new Promise(resolve => {
+      const request = indexedDB.open('proxion-dm-history', 2);
+      request.onsuccess = () => {
+        const db = request.result, get = db.transaction('native_files').objectStore('native_files').get('m00000');
+        get.onsuccess = () => { db.close(); resolve(get.result); };
+      };
+    });
+    expect(blob).toBeUndefined();
+    expect(await dmHistorySaveFile({ message_id: 'older-file', thread_id: 'cap', from_webid: 'did:key:alice',
+      timestamp: '2000-01-01T00:00:00.000Z', content: 'older file',
+      file: { filename: 'older.txt', mime_type: 'text/plain', size: 1 } }, new Blob(['x']))).toBe(false);
+    expect(await dmHistorySave({ message_id: 'older-inline-file', thread_id: 'cap', from_webid: 'did:key:alice',
+      timestamp: '2000-01-01T00:00:00.000Z', content: 'older inline file',
+      file: { filename: 'older.txt', mime_type: 'text/plain', size: 1, data_b64: 'eA==' } }, { requireFile: true })).toBe(false);
   }, 60000);
 });
 

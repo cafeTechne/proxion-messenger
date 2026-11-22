@@ -85,7 +85,8 @@ def _relay_body_is_file_chunk(body: bytes) -> bool:
         d = json.loads(body)
     except Exception:
         return False
-    return isinstance(d, dict) and d.get("content_type") == "file_chunk"
+    return isinstance(d, dict) and (d.get("content_type") == "file_chunk"
+        or d.get("content_type") == "native_media_chunks" and d.get("operation") == "part")
 
 
 _PREFLIGHT_HEADER_CHARS = frozenset(
@@ -939,7 +940,8 @@ class HttpEndpointsMixin:
         self._prune_relay_rate_limiter(now)
         # File chunks count against their own per-IP bucket (a max-size file is
         # ~400 of them) plus a per-gateway byte budget once the signer is known.
-        _is_chunk = isinstance(data, dict) and data.get("content_type") == "file_chunk"
+        _is_chunk = (isinstance(data, dict) and (data.get("content_type") == "file_chunk"
+            or data.get("content_type") == "native_media_chunks" and data.get("operation") == "part"))
         _rl_key, _rl_cap = ((client_ip + "|file", FILE_RELAY_CHUNKS_PER_MIN) if _is_chunk
                             else (client_ip, 60))
         bucket = self._relay_rate_limiter.setdefault(_rl_key, deque())
@@ -996,6 +998,8 @@ class HttpEndpointsMixin:
         })
         if data.get("content_type") in ("native_inline", "native_media_query"):
             _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"media_digest", "payload", "header_digest", "operation", "request_id", "expected_pub"}
+        elif data.get("content_type") == "native_media_chunks":
+            _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"media_digest", "header_digest", "operation", "manifest", "manifest_digest", "seq", "after", "native_chunks_v"}
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
             return "400 Bad Request", '{"error":"unknown_relay_fields"}'
@@ -1022,7 +1026,7 @@ class HttpEndpointsMixin:
         #     participate in the channel, else it could inject a fake peer.
         _SELF_SIGNED_TYPES = (
             "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer",
-            "voice_signal", "contact_removed", "native_inline", "native_media_query")
+            "voice_signal", "contact_removed", "native_inline", "native_media_query", "native_media_chunks")
         _MEMBER_SIGNED_TYPES = (
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
             "room_emoji", "room_update",
@@ -1119,7 +1123,12 @@ class HttpEndpointsMixin:
                 _env_pin = self._store.get_peer_gateway_pin(_signer)
                 if _env_pin and _env_pin.get("pinned_gateway_url") != _env_origin:
                     self._record_peer_gateway(_signer, _env_origin, proven=True)
-            if _ct == "file_chunk" and not self._file_relay_bytes_ok(_signer, data.get("data"), now):
+            if (_ct == "native_media_chunks" and data.get("operation") == "part"
+                    and not self._native_chunk_relay_owner(_from)):
+                return "200 OK", '{"status":"received"}'
+            if ((_ct == "file_chunk" and not self._file_relay_bytes_ok(_signer, data.get("data"), now))
+                    or (_ct == "native_media_chunks" and data.get("operation") == "part"
+                        and not self._file_relay_bytes_ok(_signer, data.get("data_b64"), now))):
                 return "429 Too Many Requests", '{"error":"rate limit exceeded"}'
 
         # ── Voice signal relay — ephemeral, delivered immediately, not queued ──
@@ -1184,6 +1193,8 @@ class HttpEndpointsMixin:
             return await self._handle_native_inline_relay(data)
         if data.get("content_type") == "native_media_query":
             return await self._handle_native_media_query_relay(data)
+        if data.get("content_type") == "native_media_chunks":
+            return await self._handle_native_chunks_relay(data)
 
         # ── Chunked file transfer relay (cross-gateway) ──
         if data.get("content_type") in (

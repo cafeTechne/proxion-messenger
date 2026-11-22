@@ -20,6 +20,9 @@ import { accountDbName } from './auth.js';
 // simply never read once an account is signed in — they map to a different name.
 const DB_NAME = 'proxion-dm-history';
 const STORE = 'messages';
+const FILE_STORE = 'native_files';
+export const MAX_NATIVE_HISTORY_BYTES = 128 * 1024 * 1024;
+export const MAX_NATIVE_HISTORY_FILES = 64;
 let _dbPromise = null;
 let _openName = null;
 
@@ -45,15 +48,23 @@ function _open() {
     _openName = name;
     _dbPromise = new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') { reject(new Error('no-indexeddb')); return; }
-        const req = indexedDB.open(name, 1);
+        let blocked = false;
+        const req = indexedDB.open(name, 2);
         req.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(STORE)) {
                 const os = db.createObjectStore(STORE, { keyPath: 'message_id' });
                 os.createIndex('thread_id', 'thread_id', { unique: false });
             }
+            if (!db.objectStoreNames.contains(FILE_STORE)) db.createObjectStore(FILE_STORE, { keyPath: 'message_id' }).createIndex('size', 'size');
         };
-        req.onsuccess = (e) => resolve(e.target.result);
+        req.onblocked = () => { blocked = true; reject(new Error('history-upgrade-blocked')); };
+        req.onsuccess = (e) => {
+            const db = e.target.result;
+            if (blocked) { db.close(); return; }
+            db.onversionchange = () => { db.close(); if (_openName === name) _dbPromise = null; };
+            resolve(db);
+        };
         req.onerror = (e) => reject(e.target.error);
     }).catch((err) => { _dbPromise = null; throw err; });
     return _dbPromise;
@@ -76,7 +87,9 @@ export function fileForRecord(file) {
     if (Number.isInteger(file.width) && Number.isInteger(file.height)) { out.width = file.width; out.height = file.height; }
     if (file.spoiler === true) out.spoiler = true;
     if (typeof file._podHash === 'string' && /^[a-f0-9]{64}$/.test(file._podHash)) out._podHash = file._podHash;
-    if (typeof file.data_b64 === 'string' && (file.data_b64 || out.size === 0) && file.data_b64.length <= MAX_FILE_B64) {
+    if (typeof file._nativeAsset === 'string' && file._nativeAsset.length > 0 && file._nativeAsset.length <= 4096) {
+        out._nativeAsset = file._nativeAsset;
+    } else if (typeof file.data_b64 === 'string' && (file.data_b64 || out.size === 0) && file.data_b64.length <= MAX_FILE_B64) {
         out.data_b64 = file.data_b64;
     } else {
         out.unavailable = true;
@@ -87,7 +100,7 @@ export function fileForRecord(file) {
 // A record without its file bytes (pure), for the pairing hand-off.
 export function stripFileBytes(rec) {
     if (!rec || !rec.file) return rec;
-    const { data_b64: _drop, ...meta } = rec.file;
+    const { data_b64: _drop, _nativeAsset: _asset, ...meta } = rec.file;
     return { ...rec, file: { ...meta, unavailable: true } };
 }
 
@@ -126,6 +139,25 @@ export function applyLocalRecord(existing, rec) {
     return changed;
 }
 
+function _recordForMessage(msg, opts = {}) {
+    return {
+        message_id: msg.message_id,
+        thread_id: msg.thread_id,
+        from_webid: msg.from_webid || '',
+        from_display_name: msg.from_display_name || '',
+        content: msg.content != null ? String(msg.content) : '',
+        timestamp: msg.timestamp || new Date().toISOString(),
+        reply_to_id: msg.reply_to_id || null,
+        ...(msg.sender_verified === true ? { sender_verified: true } : {}),
+        ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
+        ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
+        ...(msg.file ? { file: fileForRecord(msg.file) } : {}),
+        ...(opts.delivery ? { delivery: opts.delivery } : {}),
+        ...(opts.outbox ? { outbox_id: msg.message_id } : {}),
+    };
+}
+
+
 // Persist one DM message's PLAINTEXT. `msg` must have message_id, thread_id,
 // content (plaintext), from_webid, timestamp; reply_to_id/from_display_name
 // optional. Silently no-ops if the record isn't a usable DM message or IDB fails.
@@ -136,36 +168,143 @@ export function applyLocalRecord(existing, rec) {
 // opts.delivery ('pending') marks our own just-sent DM as not yet delivered; it
 // is taken only from this argument, never from the message itself.
 export async function dmHistorySave(msg, opts = {}) {
-    if (!_enabled) return true;
-    if (!msg || !msg.message_id || !msg.thread_id) return true;
+    if (!_enabled) return !opts.requireFile;
+    if (!msg || !msg.message_id || !msg.thread_id) return !opts.requireFile;
     // Never persist ciphertext or undecryptable placeholders.
-    if (msg.e2e) return true;
-    if (msg.content === '[could not decrypt]' || msg.content === '[decryption error]') return true;
+    if (msg.e2e) return !opts.requireFile;
+    if (msg.content === '[could not decrypt]' || msg.content === '[decryption error]') return !opts.requireFile;
+    const name = accountDbName(DB_NAME);
+    const current = () => name === accountDbName(DB_NAME) && (!opts.current || opts.current()) && (!opts.requireFile || _enabled);
     try {
         const db = await _open();
+        if (!current()) return false;
         await new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE, 'readwrite');
-            tx.objectStore(STORE).put({
-                message_id: msg.message_id,
-                thread_id: msg.thread_id,
-                from_webid: msg.from_webid || '',
-                from_display_name: msg.from_display_name || '',
-                content: msg.content != null ? String(msg.content) : '',
-                timestamp: msg.timestamp || new Date().toISOString(),
-                reply_to_id: msg.reply_to_id || null,
-                ...(msg.sender_verified === true ? { sender_verified: true } : {}),
-                ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
-                ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
-                ...(msg.file ? { file: fileForRecord(msg.file) } : {}),
-                ...(opts.delivery ? { delivery: opts.delivery } : {}),
-                ...(opts.outbox ? { outbox_id: msg.message_id } : {}),
-            });
+            const tx = db.transaction(msg.file ? [STORE, FILE_STORE] : STORE, 'readwrite');
+            const record = _recordForMessage(msg, opts);
+            if (msg.file) {
+                const cached = tx.objectStore(FILE_STORE).get(msg.message_id);
+                cached.onsuccess = () => {
+                    try {
+                        if (!current()) { tx.abort(); return; }
+                        if (cached.result?.from_webid === msg.from_webid && cached.result.size === record.file?.size) {
+                            record.file._nativeAsset = msg.message_id;
+                            delete record.file.data_b64; delete record.file.unavailable;
+                        }
+                        tx.objectStore(STORE).put(record);
+                    } catch { tx.abort(); }
+                };
+            } else tx.objectStore(STORE).put(record);
             tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
+            tx.onabort = tx.onerror = () => reject(tx.error);
         });
         await _enforceCap(db, msg.thread_id);
-        return true;
+        if (!current()) return false;
+        return opts.requireFile ? await _retainedFile(db, msg, current) : true;
     } catch (_) { return false; /* best-effort cache; report failure to callers that care */ }
+}
+
+// Native chunk finalization needs actual bytes beyond the ordinary 8 MiB
+// base64 retention cap. Commit the Blob and its history reference together.
+// A disabled/full/failed store is not a full-file receive commit.
+export async function dmHistorySaveFile(msg, blob, { current = () => true } = {}) {
+    if (!_enabled || !current() || !(blob instanceof Blob) || blob.size < 1 || blob.size > 25 * 1024 * 1024
+        || typeof msg?.message_id !== 'string' || !msg.message_id || msg.message_id.length > 4096
+        || typeof msg.thread_id !== 'string' || !msg.thread_id || msg.thread_id.length > 4096
+        || typeof msg.from_webid !== 'string' || !msg.from_webid || msg.from_webid.length > 2048
+        || msg.e2e === true || !msg.file || msg.file.size !== blob.size) return false;
+    const name = accountDbName(DB_NAME), callerCurrent = current;
+    current = () => _enabled && name === accountDbName(DB_NAME) && callerCurrent();
+    try {
+        const bytes = await blob.arrayBuffer();
+        if (!current()) return false;
+        const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        if (!current()) return false;
+        const db = await _open();
+        if (!current()) return false;
+        const saved = await new Promise(resolve => {
+            const tx = db.transaction([STORE, FILE_STORE], 'readwrite'), files = tx.objectStore(FILE_STORE);
+            let accepted = false;
+            tx.oncomplete = () => resolve(accepted && current());
+            tx.onabort = tx.onerror = () => resolve(false);
+            const safe = work => { try { if (!current()) tx.abort(); else work(); } catch { tx.abort(); } };
+            const prior = files.get(msg.message_id);
+            prior.onsuccess = () => safe(() => {
+                const existing = prior.result;
+                if (existing && (existing.digest !== digest || existing.from_webid !== msg.from_webid || existing.size !== blob.size)) { tx.abort(); return; }
+                let size = blob.size, count = 1;
+                const cursor = files.index('size').openKeyCursor();
+                cursor.onsuccess = () => safe(() => {
+                    const row = cursor.result;
+                    if (row) {
+                        if (row.primaryKey !== msg.message_id) { size += row.key; count++; }
+                        if (size > MAX_NATIVE_HISTORY_BYTES || count > MAX_NATIVE_HISTORY_FILES) { tx.abort(); return; }
+                        row.continue(); return;
+                    }
+                    const messages = tx.objectStore(STORE), old = messages.get(msg.message_id);
+                    old.onsuccess = () => safe(() => {
+                        if (old.result && old.result.from_webid !== msg.from_webid) { tx.abort(); return; }
+                        if (!existing) files.put({ message_id: msg.message_id, from_webid: msg.from_webid, size: blob.size, digest, blob });
+                        // Retrying a completed file must not overwrite later edits.
+                        if (!existing || old.result?.file?._nativeAsset !== msg.message_id) {
+                            messages.put(_recordForMessage({ ...msg, file: { ...msg.file, _nativeAsset: msg.message_id } }));
+                        }
+                        accepted = true;
+                    });
+                });
+            });
+        });
+        if (!saved || !current()) return false;
+        await _enforceCap(db, msg.thread_id);
+        return current() && await _retainedFile(db, msg, current, digest);
+    } catch { return false; }
+}
+
+// Retention or a concurrent clear can remove a just-written message. A native
+// file ACK requires the bytes/reference still to exist, not merely a prior put.
+async function _retainedFile(db, msg, current, digest = null) {
+    return new Promise(resolve => {
+        const tx = db.transaction([STORE, FILE_STORE]), record = tx.objectStore(STORE).get(msg.message_id),
+            asset = tx.objectStore(FILE_STORE).get(msg.message_id);
+        tx.onabort = tx.onerror = () => resolve(false);
+        tx.oncomplete = () => {
+            const file = record.result?.file, known = asset.result;
+            if (!current() || record.result?.from_webid !== msg.from_webid || !file || file.size !== msg.file?.size) { resolve(false); return; }
+            resolve(digest ? file._nativeAsset === msg.message_id && known?.digest === digest && known.from_webid === msg.from_webid
+                && known.blob instanceof Blob && known.blob.size === msg.file.size
+                : typeof file.data_b64 === 'string' && file.data_b64 === msg.file.data_b64);
+        };
+    });
+}
+
+async function _hydrateFile(db, rec, current) {
+    if (!rec?.file?._nativeAsset) return rec;
+    const unavailable = value => ({ ...value, file: { ...value.file, unavailable: true } });
+    try {
+        if (!current()) return null;
+        const row = await new Promise(resolve => {
+            const request = db.transaction(FILE_STORE, 'readonly').objectStore(FILE_STORE).get(rec.file._nativeAsset);
+            request.onsuccess = () => resolve(request.result); request.onerror = () => resolve(null);
+        });
+        if (!current()) return null;
+        if (!row || !(row.blob instanceof Blob) || row.blob.size !== row.size || row.message_id !== rec.message_id || row.from_webid !== rec.from_webid || row.size !== rec.file.size) {
+            return unavailable(rec);
+        }
+        const bytes = new Uint8Array(await row.blob.arrayBuffer());
+        if (!current()) return null;
+        const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        if (!current()) return null;
+        if (digest !== row.digest) return unavailable(rec);
+        const live = await new Promise(resolve => {
+            const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(rec.message_id);
+            request.onsuccess = () => resolve(request.result); request.onerror = () => resolve(null);
+        });
+        if (!current() || !live) return null;
+        if (live.from_webid !== row.from_webid || live.file?._nativeAsset !== row.message_id || live.file.size !== row.size) return unavailable(live);
+        const chunks = [];
+        for (let offset = 0; offset < bytes.length; offset += 32768) chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
+        const file = { ...live.file, data_b64: btoa(chunks.join('')) }; delete file.unavailable;
+        return { ...live, file };
+    } catch { return current() ? unavailable(rec) : null; }
 }
 
 // Given all rows for a thread and a cap, return the message_ids to evict
@@ -197,9 +336,9 @@ async function _enforceCap(db, threadId) {
     const doomed = planEviction(rows, MAX_PER_THREAD);
     if (!doomed.length) return;
     await new Promise((resolve) => {
-        const tx = db.transaction(STORE, 'readwrite');
+        const tx = db.transaction([STORE, FILE_STORE], 'readwrite');
         const os = tx.objectStore(STORE);
-        doomed.forEach((id) => os.delete(id));
+        doomed.forEach((id) => { os.delete(id); tx.objectStore(FILE_STORE).delete(id); });
         tx.oncomplete = resolve;
         tx.onerror = resolve;
     });
@@ -210,8 +349,9 @@ export async function dmHistoryClearAll() {
     try {
         const db = await _open();
         await new Promise((resolve) => {
-            const tx = db.transaction(STORE, 'readwrite');
+            const tx = db.transaction([STORE, FILE_STORE], 'readwrite');
             tx.objectStore(STORE).clear();
+            tx.objectStore(FILE_STORE).clear();
             tx.oncomplete = resolve;
             tx.onerror = resolve;
         });
@@ -221,6 +361,7 @@ export async function dmHistoryClearAll() {
 // Return stored plaintext messages for a thread, oldest-first. [] on any failure.
 export async function dmHistoryLoad(threadId, limit = 500) {
     if (!threadId) return [];
+    const name = accountDbName(DB_NAME), current = () => name === accountDbName(DB_NAME);
     try {
         const db = await _open();
         const rows = await new Promise((resolve, reject) => {
@@ -236,7 +377,9 @@ export async function dmHistoryLoad(threadId, limit = 500) {
             req.onerror = () => reject(req.error);
         });
         rows.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-        return limit ? rows.slice(-limit) : rows;
+        const selected = limit ? rows.slice(-limit) : rows;
+        const hydrated = await Promise.all(selected.map(row => _hydrateFile(db, row, current)));
+        return current() ? hydrated.filter(Boolean) : [];
     } catch (_) {
         return [];
     }
@@ -245,13 +388,15 @@ export async function dmHistoryLoad(threadId, limit = 500) {
 // This device's cached copy of one DM message, or null.
 export async function dmHistoryGet(messageId) {
     if (!messageId) return null;
+    const name = accountDbName(DB_NAME), current = () => name === accountDbName(DB_NAME);
     try {
         const db = await _open();
-        return await new Promise((resolve) => {
+        const rec = await new Promise((resolve) => {
             const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(messageId);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => resolve(null);
         });
+        return current() ? await _hydrateFile(db, rec, current) : null;
     } catch (_) {
         return null;
     }
@@ -340,8 +485,9 @@ export async function dmHistoryDelete(messageId) {
     try {
         const db = await _open();
         await new Promise((resolve) => {
-            const tx = db.transaction(STORE, 'readwrite');
+            const tx = db.transaction([STORE, FILE_STORE], 'readwrite');
             tx.objectStore(STORE).delete(messageId);
+            tx.objectStore(FILE_STORE).delete(messageId);
             tx.oncomplete = resolve;
             tx.onerror = resolve;
         });
@@ -362,13 +508,13 @@ export async function dmHistoryDeleteBefore(threadId, beforeIso, sinceIso = '') 
     try {
         const db = await _open();
         await new Promise((resolve) => {
-            const tx = db.transaction(STORE, 'readwrite');
+            const tx = db.transaction([STORE, FILE_STORE], 'readwrite');
             const os = tx.objectStore(STORE);
             const req = os.index('thread_id').openCursor(IDBKeyRange.only(threadId));
             req.onsuccess = (e) => {
                 const cur = e.target.result;
                 if (cur) {
-                    if (isExpired(cur.value.timestamp, beforeIso, sinceIso)) os.delete(cur.primaryKey);
+                    if (isExpired(cur.value.timestamp, beforeIso, sinceIso)) { os.delete(cur.primaryKey); tx.objectStore(FILE_STORE).delete(cur.primaryKey); }
                     cur.continue();
                 }
             };
@@ -385,12 +531,12 @@ export async function dmHistoryDeleteThread(threadId) {
     try {
         const db = await _open();
         await new Promise((resolve) => {
-            const tx = db.transaction(STORE, 'readwrite');
+            const tx = db.transaction([STORE, FILE_STORE], 'readwrite');
             const os = tx.objectStore(STORE);
             const req = os.index('thread_id').openCursor(IDBKeyRange.only(threadId));
             req.onsuccess = (e) => {
                 const cur = e.target.result;
-                if (cur) { os.delete(cur.primaryKey); cur.continue(); }
+                if (cur) { os.delete(cur.primaryKey); tx.objectStore(FILE_STORE).delete(cur.primaryKey); cur.continue(); }
             };
             tx.oncomplete = resolve;
             tx.onerror = resolve;

@@ -874,7 +874,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
             getPeerPub: cachedPeerPub, send: command => sendCmd(command.cmd, command),
-            persistMessage: message => dmHistoryEnabled() ? dmHistorySave(message) : false,
+            persistMessage: (message, current) => dmHistoryEnabled() ? dmHistorySave(message, { requireFile: true, current }) : false,
             handleEvent,
             toMessage: event => ({ type: 'message', source: 'local_dm', local: true,
                 message_id: 'native:' + event.from_webid + ':' + event.message_id,
@@ -892,7 +892,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         data_b64: _u8ToB64(bytes), spoiler: row.metadata.spoiler,
                         ...(row.metadata.width ? { width: row.metadata.width, height: row.metadata.height } : {}) },
                     _persistDm: true, _dmHistoryManaged: true };
-                if (await dmHistorySave(message) === false || !current()) return false;
+                if (await dmHistorySave(message, { requireFile: true, current }) === false || !current()) return false;
                 handleEvent(message); return true;
             },
         });
@@ -972,7 +972,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         }
         const _pendingSendsUi = createDmOutboxUi({ outbox: {
             inspect: async () => [...await _dmOutbox.inspect(), ...await _nativeMedia.inspect()],
-            send: id => id.startsWith('native:') ? _nativeMedia.sender.retry(id.slice(7)) : _dmOutbox.send(id),
+            send: id => id.startsWith('native-in:') ? _nativeMedia.recover()
+                : id.startsWith('native:') ? _nativeMedia.sender.retry(id.slice(7)) : _dmOutbox.send(id),
             cancel: id => id.startsWith('native:') ? _nativeMedia.cancel(id.slice(7)) : _dmOutbox.cancel(id),
         },
             getScope: () => JSON.stringify([_outgoingScope(), authContext().epoch, crossMode?.generation() || 0]),
