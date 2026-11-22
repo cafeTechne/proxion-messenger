@@ -1,7 +1,8 @@
 # Round 142: native inline-media custody and primary browser recovery
 
-Status: browser integration checkpoint; Round 142 remains open for the larger
-cross-gateway inline path that needs Round 143's bounded chunk transport. Primary
+Status: browser integration complete, pending the final policy/route acceptance
+audit. Round 143's bounded chunk transport now carries previously accepted
+oversized inline ciphertext with its original receipt/header identity. Primary
 browsers with local DM history enabled now request `native_media_v: 1`, and a
 healthy durable gateway advertises the negotiated version in `registered`.
 Linked/older connections retain explicitly labeled live delivery. Media fanout

@@ -1220,5 +1220,8 @@
   "nativeMedia.storageUnavailable": "Some saved file state could not be read. Other pending sends remain available. Restore storage access or close older tabs, then reload and retry.",
   "nativeMedia.uploading": "Uploading saved file",
   "nativeMedia.progressLabel": "File transfer progress",
-  "nativeMedia.progress": "{percent}% transferred"
+  "nativeMedia.progress": "{percent}% transferred",
+  "nativeMedia.decline": "Decline file",
+  "nativeMedia.declineUnavailable": "This file could not be declined. It may already be saved; refresh and check the conversation.",
+  "nativeMedia.declined": "The recipient declined this file. Its saved source is retained; prepared files cannot be safely cancelled."
 }

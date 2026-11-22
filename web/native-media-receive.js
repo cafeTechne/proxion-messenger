@@ -49,13 +49,19 @@ export async function nativeMediaEnvelope(event) {
 // Header consumption and complete file/history persistence have separate
 // acknowledgements; a protected full receipt survives a lost socket reply.
 export function createNativeMediaReceiver({ e2e, receipts, getScope, getGeneration = () => 0,
-    isActive = () => true, persistMessage, handleEvent, toMessage, sendCommit,
+    isActive = () => true, persistMessage, isPersistedFile = async () => false, handleEvent, toMessage, sendCommit,
     requestReplay = () => {}, onError = err => console.warn('[native-media] receive pending:', err) }) {
     let generation = 0;
-    const queues = new Map();
+    const queues = new Map(), replayOffsets = { headers: 0, full: 0, decline: 0 };
+    function replayBatch(rows, kind) {
+        if (!rows.length) { replayOffsets[kind] = 0; return []; }
+        const start = replayOffsets[kind] % rows.length, count = Math.min(4, rows.length);
+        replayOffsets[kind] = (start + count) % rows.length;
+        return Array.from({ length: count }, (_, index) => rows[(start + index) % rows.length]);
+    }
     const context = () => {
         const scope = getScope(), epoch = generation, session = getGeneration();
-        return { scope, receiptScope: 'native-media:' + scope,
+        return { scope, receiptScope: 'native-media:' + scope, declineScope: 'native-decline:' + scope,
             current: () => typeof scope === 'string' && scope.length > 0 && scope.length <= 8192
                 && epoch === generation && scope === getScope() && session === getGeneration() && isActive() };
     };
@@ -68,6 +74,14 @@ export function createNativeMediaReceiver({ e2e, receipts, getScope, getGenerati
         try { return await run; }
         finally { if (queues.get(key) === run) queues.delete(key); }
     }
+    const declineCommit = commit => ({ ...commit, cmd: 'native_media_decline' });
+    async function sendDecline(event, identity, ctx) {
+        const command = declineCommit(identity.commit);
+        if (!ctx.current() || !await receipts.remember(ctx.declineScope, identity.receiveId, null, command) || !ctx.current()) return false;
+        if (await sendCommit(headerCommit(command)) === false || !ctx.current()) return false;
+        if (await sendCommit(command) === false || !ctx.current()) return false;
+        return e2e.finishDmReceive(event.from_webid, identity.headerId, ctx.current);
+    }
     async function prepare(event, identity, ctx) {
         const { receiveId, headerId, commit } = identity;
         if (await receipts.has(ctx.receiptScope, receiveId)) {
@@ -75,6 +89,9 @@ export function createNativeMediaReceiver({ e2e, receipts, getScope, getGenerati
                 || await sendCommit(commit) === false || !ctx.current()) return false;
             if (!await e2e.finishDmReceive(event.from_webid, headerId, ctx.current)) return false;
             return { complete: true };
+        }
+        if (await receipts.has(ctx.declineScope, receiveId)) {
+            return await sendDecline(event, identity, ctx) ? { declined: true } : false;
         }
         if (!ctx.current() || !await receipts.hasSpace(ctx.receiptScope) || !ctx.current()) return false;
         const message = toMessage(event);
@@ -90,7 +107,7 @@ export function createNativeMediaReceiver({ e2e, receipts, getScope, getGenerati
     }
     async function complete(event, envelope, ctx, persistFile) {
         const prepared = await prepare(event, envelope, ctx);
-        if (!prepared) return false;
+        if (!prepared || prepared.declined) return false;
         if (prepared.complete) return true;
         const { meta, message } = prepared;
         const plain = await openFileBytes(envelope.bytes, meta);
@@ -148,27 +165,61 @@ export function createNativeMediaReceiver({ e2e, receipts, getScope, getGenerati
         if (!ctx.current()) return false;
         return serialized(ctx, identity, () => complete(event, { ...identity, bytes }, ctx, persistFile));
     }
+    async function hasDeclined(event, ciphertextDigest) {
+        const ctx = context(), identity = await nativeMediaIdentity(event, ciphertextDigest);
+        return ctx.current() && await receipts.has(ctx.declineScope, identity.receiveId) && ctx.current();
+    }
+    async function decline(event, ciphertextDigest) {
+        const ctx = context(), identity = await nativeMediaIdentity(event, ciphertextDigest);
+        if (!ctx.current()) return false;
+        return serialized(ctx, identity, async () => {
+            if (await receipts.has(ctx.receiptScope, identity.receiveId) || !ctx.current()) return false;
+            if (await receipts.has(ctx.declineScope, identity.receiveId)) return sendDecline(event, identity, ctx);
+            if (!ctx.current() || !await receipts.hasSpace(ctx.declineScope) || !ctx.current()) return false;
+            const prepared = await prepare(event, identity, ctx);
+            if (!prepared || prepared.complete || !ctx.current()) return false;
+            if (prepared.declined) return true;
+            if (await isPersistedFile(prepared.message, prepared.meta, ctx.current) || !ctx.current()) return false;
+            return sendDecline(event, identity, ctx);
+        });
+    }
     async function recover() {
         const ctx = context();
         if (!ctx.current()) return;
-        for (const row of await e2e.pendingDmReceives({ transport: 'native-media' })) {
+        const headers = (await e2e.pendingDmReceives({ transport: 'native-media' })).filter(row => row.data.scope === ctx.scope && row.data.commit);
+        for (const row of replayBatch(headers, 'headers')) {
             if (!ctx.current()) return;
             if (row.data.scope !== ctx.scope || !row.data.commit) continue;
             // No attachment ciphertext is in localStorage. Re-acknowledge saved
             // headers and request the gateway's still-retained opaque bytes.
             try {
                 checkFileBody(decodeSealedPlain(row.content, KIND_FILE));
-                await sendCommit(headerCommit(row.data.commit));
+                if (await receipts.has(ctx.declineScope, row.data.commit.receive_id)) {
+                    await sendDecline({ from_webid: row.peerId }, { receiveId: row.data.commit.receive_id, headerId: row.receiveId, commit: row.data.commit }, ctx);
+                } else if (ctx.current()) await sendCommit(headerCommit(row.data.commit));
             } catch (err) { onError(err); }
         }
         if (!ctx.current()) return;
-        for (const commit of await receipts.pendingCommits(ctx.receiptScope)) {
+        for (const commit of replayBatch(await receipts.pendingCommits(ctx.receiptScope), 'full')) {
+            if (!ctx.current()) return;
+            await sendCommit(commit);
+        }
+        for (const commit of replayBatch(await receipts.pendingCommits(ctx.declineScope), 'decline')) {
+            if (!ctx.current()) return;
+            await sendCommit(headerCommit(commit));
             if (!ctx.current()) return;
             await sendCommit(commit);
         }
         if (ctx.current()) await requestReplay();
     }
-    return { receive, receiveHeader, receiveBytes, hasReceipt, recover,
+    return { receive, receiveHeader, receiveBytes, hasReceipt, hasDeclined, decline, recover,
+        async confirmDecline(event) {
+            const ctx = context();
+            if (!ctx.current() || !['native_media_declined', 'native_media_decline_refused'].includes(event?.type)
+                || (event.type === 'native_media_decline_refused' && event.status !== 'committed')
+                || !/^[a-f0-9]{64}$/.test(event.receive_id || '')) return false;
+            return receipts.confirmCommit(ctx.declineScope, event.receive_id, event);
+        },
         async confirmCommit(event) {
             const ctx = context();
             if (!ctx.current() || event?.type !== 'native_media_committed'

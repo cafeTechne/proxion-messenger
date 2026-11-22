@@ -409,3 +409,64 @@ async def test_source_without_old_inline_bytes_returns_original_progress_not_inv
         'media_digest': 'B' * 43, 'manifest': manifest()})
     assert json.loads(receiver.send.call_args.args[0])['type'] == 'error'
     gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_decline_requires_original_primary_and_exact_token_and_never_reports_delivery(tmp_path):
+    gw = gateway(tmp_path, 'decline')
+    owner, sender = 'did:key:bob', 'did:key:alice'
+    row = begin(gw._store, sender=sender, recipient=owner)
+    assert put(gw._store, row, 0, b'opaque ciphertext bytes')
+    receiver = socket(gw, owner); gw._session_meta[receiver].update(native_chunks_v=1, native_media_pub='A' * 43)
+    packet = {'cmd': 'native_media_decline', 'v': 1, 'queue_id': row['queue_id'], 'from_webid': sender,
+        'message_id': 'file', 'envelope_digest': row['envelope_digest'], 'receive_id': 'c' * 64}
+    for client in [socket(gw, 'did:key:stranger'), socket(gw, owner, device='did:key:linked')]:
+        gw._session_meta[client].update(native_chunks_v=1, native_media_pub='A' * 43)
+        await gw.process_command(client, packet); client.send.assert_not_called()
+    gw._session_meta[receiver]['native_media_pub'] = 'B' * 43
+    await gw.process_command(receiver, packet); receiver.send.assert_not_called()
+    gw._session_meta[receiver]['native_media_pub'] = 'A' * 43
+    await gw.process_command(receiver, {**packet, 'queue_id': True}); receiver.send.assert_not_called()
+    await gw.process_command(receiver, packet)
+    ack = json.loads(receiver.send.call_args.args[0]); assert ack['type'] == 'native_media_declined' and ack['receive_id'] == 'c' * 64
+    status = gw._native_status(gw._store.get_native_media(sender, 'file'))
+    assert status['status'] == 'declined' and status['header_committed']
+    assert gw._store.get_native_media_part(sender, 'file', row['manifest_digest'], 0) is None
+    await gw.process_command(receiver, {**packet, 'cmd': 'native_media_commit'})
+    assert json.loads(receiver.send.call_args.args[0])['type'] == 'native_media_declined'
+    gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_decline_reconciles_signed_progress_after_restart_without_becoming_commit(tmp_path, monkeypatch):
+    source, target = paired(tmp_path)
+    raw = b'opaque ciphertext bytes'
+    row = begin(source._store, raw, recipient=target._own_gateway_did()); assert put(source._store, row, 0, raw)
+    row = source._store.get_native_media('alice', 'file')
+    async def route(method, url, **kwargs):
+        status, body = await target._handle_relay_post(kwargs['body'], client_ip='127.0.0.1')
+        return int(status.split()[0]), {}, body.encode()
+    monkeypatch.setattr('proxion_messenger_core.network.async_safe_request', route)
+    proof = await source._relay_native_chunks('https://peer.example', row)
+    assert proof['custody_complete'] and not proof['declined']
+    assert source._store.commit_native_media(target._own_gateway_did(), row['queue_id'], 'alice', 'file', row['envelope_digest'], forwarded=True)
+    incoming = target._store.get_native_media(source._own_gateway_did(), 'file')
+    assert target._store.decline_native_media('did:key:bob', incoming['queue_id'], source._own_gateway_did(), 'file', incoming['envelope_digest'], 'A' * 43)
+    path = str(target._store.db_path); target._store.close(); target._store = LocalStore(path)
+    proof = await source._query_native_receipt('https://peer.example', row)
+    assert proof['declined'] and proof['header_committed'] and not proof['committed']
+    assert source._store.record_native_peer_progress('alice', 'file', row['media_digest'], row['header_digest'],
+        header_committed=True, committed=False, declined=proof['declined'])
+    result = source._store.get_native_media('alice', 'file')
+    assert result['declined'] and not result['committed'] and result['header_committed']
+    assert source._store.record_native_peer_progress('alice', 'file', row['media_digest'], row['header_digest'], header_committed=True, committed=True)
+    assert source._store.get_native_media('alice', 'file')['declined']  # Stale progress cannot replace a terminal result.
+    source._store.close(); target._store.close()
+
+
+@pytest.mark.parametrize('patch', [{'declined': True}, {'declined': 'yes'}, {'declined': 1}, {'declined': True, 'header_committed': True, 'committed': True}])
+def test_impossible_decline_proofs_cannot_release_custody(tmp_path, patch):
+    gw = gateway(tmp_path, 'decline-proof'); row = begin(gw._store)
+    proof = {'custody_complete': True, 'header_committed': False, 'committed': False, 'missing': [], 'recipient_pub': 'A' * 43, **patch}
+    assert not gw._native_chunk_proof_valid(proof, row) and not gw._native_progress_valid(proof)
+    gw._store.close()

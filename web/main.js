@@ -875,6 +875,12 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, send: command => sendCmd(command.cmd, command),
             persistFile: (message, blob, current) => dmHistoryEnabled() ? dmHistorySaveFile(message, blob, { current }) : false,
+            isPersistedFile: async (message, meta, current) => {
+                if (!current()) return false;
+                const saved = await dmHistoryGet(message.message_id);
+                return current() && saved?.from_webid === message.from_webid && saved.file?.size === meta.size
+                    && typeof saved.file.data_b64 === 'string' && !saved.file.unavailable;
+            },
             persistMessage: (message, current) => dmHistoryEnabled() ? dmHistorySave(message, { requireFile: true, current }) : false,
             handleEvent,
             toMessage: event => ({ type: 'message', source: 'local_dm', local: true,
@@ -978,6 +984,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             inspect: async () => [...await _dmOutbox.inspect(), ...await _nativeMedia.inspect()],
             send: id => id.startsWith('native-in:') ? _nativeMedia.recover()
                 : id.startsWith('native:') ? _nativeMedia.sender.retry(id.slice(7)) : _dmOutbox.send(id),
+            decline: id => _nativeMedia.decline(id),
             cancel: id => id.startsWith('native:') ? _nativeMedia.cancel(id.slice(7)) : _dmOutbox.cancel(id),
         },
             getScope: () => JSON.stringify([_outgoingScope(), authContext().epoch, crossMode?.generation() || 0]),
@@ -2941,7 +2948,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     break;
                 case "registered":
                     _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
-                    _nativeMedia.start(event.native_media_v, event.native_chunks_v);
+                    _nativeMedia.start(event.native_media_v, event.native_chunks_v, event.native_decline_v);
                     _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;

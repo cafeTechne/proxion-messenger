@@ -463,6 +463,7 @@ class AuthHandlerMixin:
                 registered_msg["native_media_v"] = 1
                 if self._native_chunks_capable(websocket):
                     registered_msg["native_chunks_v"] = 1
+                    registered_msg["native_decline_v"] = 1
             if turn_creds:
                 registered_msg["turn"] = turn_creds
             # R85 Track 1: certify the connecting browser's signing key (its clientDid)

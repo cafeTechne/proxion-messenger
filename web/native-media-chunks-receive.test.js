@@ -25,7 +25,8 @@ async function harness(size = 600 * 1024) {
         finishDmReceive: vi.fn(async (peer, id, current) => { if (!current()) return false; journal.delete(id); return true; }),
         pendingDmReceives: vi.fn(async () => [...journal.values()]),
     };
-    const receiver = createNativeMediaReceiver({ e2e, receipts: createDmReceiptStore(db), getScope: () => scope, isActive: () => true,
+    const receipts = createDmReceiptStore(db);
+    const receiver = createNativeMediaReceiver({ e2e, receipts, getScope: () => scope, isActive: () => true,
         toMessage: ev => ({ message_id: 'native:' + ev.from_webid + ':' + ev.message_id, thread_id: ev.thread_id }),
         persistMessage: vi.fn(), handleEvent: async msg => { messages.push(msg); }, sendCommit: async cmd => { commits.push(cmd); return true; } });
     const options = { inbox, receiver, getScope: () => scope, getOwnPub: () => pub, isActive: () => true,
@@ -36,7 +37,7 @@ async function harness(size = 600 * 1024) {
         message_id: event.message_id, manifest_digest: event.manifest_digest, seq,
         data_b64: b64(prepared.ct.subarray(seq * 65536, (seq + 1) * 65536)),
         part_digest: await hash(prepared.ct.subarray(seq * 65536, (seq + 1) * 65536)) });
-    return { db, inbox, e2e, receiver, options, engine, client, event, plain, journal, sent, commits, messages, errors, part,
+    return { db, inbox, e2e, receipts, receiver, options, engine, client, event, plain, journal, sent, commits, messages, errors, part,
         scope: value => { scope = value; }, pub: value => { pub = value; }, tick: () => { clock += 16000; } };
 }
 async function drain(h, client = h.client) {
@@ -95,4 +96,58 @@ describe('native chunk receive recovery', () => {
         expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(decrypts); expect(h.sent).toHaveLength(fetches);
         expect(h.messages).toHaveLength(1); expect(h.commits.at(-1).cmd).toBe('native_media_commit');
     });
+});
+
+
+describe('durable native recipient decline', () => {
+    it('journals a distinct protected outcome before removing ciphertext and never writes file history or a full commit', async () => {
+        const h = await harness(); await h.client.offer(h.event); await h.client.part(await h.part(0));
+        const keys = new Set(h.e2e.ratchetDecrypt.mock.calls.map(call => call[6].receiveId));
+        expect(await h.client.decline(h.event.from_webid, h.event.message_id)).toBe(true);
+        expect(h.commits.at(-1).cmd).toBe('native_media_decline');
+        expect(h.commits.some(command => command.cmd === 'native_media_commit')).toBe(false);
+        expect(h.options.persistFile).not.toHaveBeenCalled(); expect(h.messages).toEqual([]);
+        expect(h.journal.size).toBe(0); expect(await h.inbox.list('bob')).toEqual([]);
+        expect((await h.receipts.pendingCommits('native-decline:bob')).length).toBe(1);
+        expect(await h.client.part(await h.part(1))).toBe(false);
+        h.client.stop(); const reopened = h.engine(); const sent = h.sent.length;
+        await reopened.offer(h.event);
+        expect(h.sent).toHaveLength(sent); expect(h.commits.at(-1).cmd).toBe('native_media_decline');
+        expect(new Set(h.e2e.ratchetDecrypt.mock.calls.map(call => call[6].receiveId))).toEqual(keys);
+        const command = h.commits.at(-1);
+        expect(await h.receiver.confirmDecline({ ...command, type: 'native_media_declined', queue_id: 999 })).toBe(false);
+        expect(await h.receiver.confirmDecline({ ...command, type: 'native_media_declined' })).toBe(true);
+        expect(await h.receipts.pendingCommits('native-decline:bob')).toEqual([]);
+    });
+    it('retains ciphertext and the consumed header if decline evidence cannot be stored, and retries the original identity', async () => {
+        const h = await harness(); await h.client.offer(h.event);
+        const remember = h.receipts.remember;
+        h.receipts.remember = vi.fn(async (...args) => args[0] === 'native-decline:bob' ? false : remember(...args));
+        expect(await h.client.decline(h.event.from_webid, h.event.message_id)).toBe(false);
+        expect(await h.inbox.list('bob')).toHaveLength(1); expect(h.journal.size).toBe(1);
+        expect(h.commits.some(command => command.cmd === 'native_media_decline')).toBe(false);
+        h.receipts.remember = remember;
+        expect(await h.client.decline(h.event.from_webid, h.event.message_id)).toBe(true);
+        expect(await h.inbox.list('bob')).toEqual([]);
+    });
+    it('does not decline another account, wrong original key or a file already durably saved', async () => {
+        const h = await harness(); await h.client.offer(h.event);
+        h.pub('b'.repeat(43)); expect(await h.client.decline(h.event.from_webid, h.event.message_id)).toBe(false);
+        h.pub('a'.repeat(43)); h.scope('other'); expect(await h.client.decline(h.event.from_webid, h.event.message_id)).toBe(false);
+        h.scope('bob'); await drain(h);
+        expect(await h.client.decline(h.event.from_webid, h.event.message_id)).toBe(false);
+        expect(h.messages).toHaveLength(1); expect(h.commits.at(-1).cmd).toBe('native_media_commit');
+    });
+});
+
+it('does not publish a late part completion or restart downloads after successful decline', async () => {
+    const h = await harness(); await h.client.offer(h.event);
+    const put = h.inbox.put; let finish;
+    h.inbox.put = async (...args) => { const row = await put(...args); await new Promise(resolve => { finish = resolve; }); return row; };
+    const part = h.client.part(await h.part(0));
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(await h.client.decline(h.event.from_webid, h.event.message_id)).toBe(true);
+    const requests = h.sent.length; finish();
+    expect(await part).toBe(false); expect(h.sent).toHaveLength(requests);
+    expect(await h.inbox.list('bob')).toEqual([]); expect(h.messages).toEqual([]);
 });

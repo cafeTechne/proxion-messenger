@@ -37,6 +37,11 @@ class NativeChunkGatewayMixin:
         if target and row['adapted_inline']:
             progress = await self._query_native_receipt(target, row)
             if progress and self._native_storage_writable():
+                if progress.get('declined', False):
+                    if self._store.commit_native_media(peer, row['queue_id'], sender, row['message_id'], row['envelope_digest'], forwarded=True):
+                        self._store.record_native_peer_progress(sender, row['message_id'], row['media_digest'], row['header_digest'],
+                            header_committed=True, committed=False, declined=True)
+                    return
                 if progress['committed']:
                     # The peer may have finished the original inline envelope
                     # before transport adaptation. Its exact signed client
@@ -49,7 +54,7 @@ class NativeChunkGatewayMixin:
         if proof and self._native_storage_writable():
             if self._store.commit_native_media(peer, row['queue_id'], sender, row['message_id'], row['envelope_digest'], forwarded=True):
                 self._store.record_native_peer_progress(sender, row['message_id'], row['media_digest'], row['header_digest'],
-                    header_committed=proof['header_committed'], committed=proof['committed'])
+                    header_committed=proof['header_committed'], committed=proof['committed'], declined=proof.get('declined', False))
 
     async def _handle_native_media_fetch(self, ws, data):
         if (not self._native_chunks_capable(ws) or not self._native_storage_writable()
@@ -113,7 +118,7 @@ class NativeChunkGatewayMixin:
     def _native_chunk_result(self, row, *, after=-1):
         missing = self._store.native_media_missing_parts(row['from_webid'], row['message_id'], row['manifest_digest'], after=after)
         return {'custody_complete': row['custody_complete'], 'header_committed': row['header_committed'],
-                'committed': row['committed'], 'missing': missing or [], 'recipient_pub': row['recipient_pub']}
+                'committed': row['committed'], 'declined': row['declined'], 'missing': missing or [], 'recipient_pub': row['recipient_pub']}
 
     async def _send_native_part_status(self, ws, row, *, seq=None):
         response = {'type': 'native_media_parts', 'v': 1, 'message_id': row['message_id'],
@@ -220,6 +225,8 @@ class NativeChunkGatewayMixin:
         return (isinstance(proof, dict) and type(proof.get('custody_complete')) is bool
                 and type(proof.get('header_committed')) is bool and type(proof.get('committed')) is bool
                 and (not proof['committed'] or proof['header_committed'])
+                and type(proof.get('declined', False)) is bool
+                and (not proof.get('declined', False) or proof['header_committed'] and not proof['committed'])
                 and (not proof['header_committed'] or proof['custody_complete'])
                 and proof.get('recipient_pub') == row['recipient_pub'] and isinstance(missing, list)
                 and len(missing) <= 8 and all(type(seq) is int and 0 <= seq < row['chunk_count'] for seq in missing)

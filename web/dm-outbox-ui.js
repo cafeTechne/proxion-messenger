@@ -7,7 +7,7 @@ export function createDmOutboxUi({ outbox, getScope, isActive, getLegacy = () =>
     getName = id => id, doc = document }) {
     const el = suffix => doc.getElementById('dm-outbox-' + suffix);
     let generation = 0, displayedScope = null;
-    const states = () => ({ nativeUpload: t('nativeMedia.uploading'), nativeStorage: t('nativeMedia.storageUnavailable'), nativeIncoming: t('nativeMedia.receivingPending'), nativeConnection: t('nativeMedia.connectionRequired'), nativeBlocked: t('nativeMedia.blocked'), nativeWaiting: t('nativeMedia.waiting'), nativePeer: t('nativeMedia.peerUnavailable'),
+    const states = () => ({ nativeDeclined: t('nativeMedia.declined'), nativeUpload: t('nativeMedia.uploading'), nativeStorage: t('nativeMedia.storageUnavailable'), nativeIncoming: t('nativeMedia.receivingPending'), nativeConnection: t('nativeMedia.connectionRequired'), nativeBlocked: t('nativeMedia.blocked'), nativeWaiting: t('nativeMedia.waiting'), nativePeer: t('nativeMedia.peerUnavailable'),
         nativeHeader: t('nativeMedia.headerWaiting'), nativeFile: t('nativeMedia.fileWaiting'),
         nativeHistory: t('nativeMedia.historyRequired'), nativeKey: t('nativeMedia.keyChanged'), waiting: t('outbox.waiting'), confirmation: t('outbox.confirmation'),
         cleanup: t('outbox.cleanup'), account: t('outbox.originalAccount'), accountConfirmed: t('outbox.confirmedAccount'), unbound: t('outbox.unknownAccount'), media: t('dmMedia.finishHistory'), mediaAttention: t('dmMedia.originalAccount'), sync: t('outbox.sync'), syncAttention: t('outbox.syncAttention'), attention: t('outbox.attention'), storage: t('outbox.storage'), legacy: t('outbox.legacy') });
@@ -35,6 +35,7 @@ export function createDmOutboxUi({ outbox, getScope, isActive, getLegacy = () =>
             el('rows').innerHTML = rows.map(row => `<li>` + (row.peer ? `<p>${escHtml(getName(row.peer))} · ${escHtml(formatTimestamp(row.timestamp))}</p>` : '')
                 + `<p>${escHtml(states()[row.state] || states().waiting)}</p>` + transferProgress(row)
                 + (row.state === 'cleanup' ? '' : `<button type="button" class="btn btn--sm" data-outbox-id="${escHtml(row.id)}" data-outbox-action="${row.state === 'legacy' ? 'review' : row.state === 'unbound' ? 'unknown' : row.state === 'media' ? 'media' : 'retry'}"${((row.state === 'nativeConnection' || row.state === 'nativeBlocked' || row.state === 'attention' || row.state === 'syncAttention' || row.state === 'mediaAttention' || row.state === 'account' || row.state === 'accountConfirmed') && !row.canRetry) ? ' disabled' : ''}>${escHtml((row.state === 'legacy' || row.state === 'unbound') ? t('outbox.review') : row.state === 'media' ? t('dmMedia.openConversation') : t('send.retry'))}</button>`)
+                + (row.canDecline ? ` <button type="button" class="btn btn--sm" data-outbox-id="${escHtml(row.id)}" data-outbox-action="decline">${escHtml(t('nativeMedia.decline'))}</button>` : '')
                 + (row.canCancel ? ` <button type="button" class="btn btn--sm" data-outbox-id="${escHtml(row.id)}" data-outbox-action="cancel">${escHtml(t('outbox.cancel'))}</button>` : '') + '</li>').join('');
         } catch { if (current()) el('status').textContent = t('outbox.unavailable'); }
     }
@@ -45,16 +46,20 @@ export function createDmOutboxUi({ outbox, getScope, isActive, getLegacy = () =>
         if (displayedScope !== getScope()) { reset(); return; }
         const scope = getScope(), id = button.dataset.outboxId, action = button.dataset.outboxAction;
         button.disabled = true;
-        let cannotCancel = false;
+        let cannotCancel = false, cannotDecline = false;
         try {
             if (action === 'review') await reviewLegacy(id);
             else if (action === 'unknown') await reviewUnknown(id);
             else if (action === 'media') await reviewMedia(id);
+            else if (action === 'decline') cannotDecline = !await outbox.decline(id);
             else if (action === 'cancel') {
                 cannotCancel = !await outbox.cancel(id);
             } else await outbox.send(id);
         } catch { if (getScope() === scope) el('status').textContent = t('outbox.unavailable'); }
-        if (getScope() === scope && isActive() && action !== 'cancel') await refresh();
+        if (getScope() === scope && isActive() && action !== 'cancel') {
+            await refresh();
+            if (cannotDecline && getScope() === scope) el('status').textContent = t('nativeMedia.declineUnavailable');
+        }
         else if (getScope() === scope && isActive()) {
             button.disabled = false; await refresh();
             if (cannotCancel && getScope() === scope) el('status').textContent = t('outbox.cannotCancel');

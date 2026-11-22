@@ -175,7 +175,7 @@ export const PERSIST_CMDS = new Set([
 // Never carried over from a dropped socket: they belong to that connection.
 const _SOCKET_ONLY_CMDS = new Set(['register', 'auth_response', 'ping', 'pong', 'typing',
     'native_media_capability', 'native_media_begin', 'native_media_part', 'native_media_fetch',
-    'native_media_commit', 'native_media_header_commit', 'native_media_recover']);
+    'native_media_commit', 'native_media_header_commit', 'native_media_recover', 'native_media_decline']);
 
 // The identity of a queued command, for the durable queue and for dedup.
 export function queueKey(payload) { return JSON.stringify(payload); }

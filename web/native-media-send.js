@@ -91,6 +91,7 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
             const identity = await nativeMediaSendIdentity(row);
             if (!current()) return false;
             if (row.committed) return complete(row, identity, current);
+            if (row.declined) { await complete(row, identity, current); if (current()) onState(row.id, 'declined'); return false; }
             if (row.headerCommitted && !await complete(row, identity, current)) return false;
             if (chunked) return chunkUpload(row, identity, current);
             const result = await send({ cmd: 'send_file', cert_id: row.view.id, message_id: id,
@@ -104,23 +105,25 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
     function status(event) {
         if (event?.type !== 'native_media_status' || event.v !== 1
             || !/^[A-Za-z0-9_-]{1,128}$/.test(event.message_id || '')
-            || !['pending', 'forwarded', 'committed', 'blocked'].includes(event.status)
+            || !['pending', 'forwarded', 'committed', 'blocked', 'declined'].includes(event.status)
             || typeof event.header_committed !== 'boolean'
-            || (event.status === 'committed' && !event.header_committed)) return Promise.resolve(false);
+            || (['committed', 'declined'].includes(event.status) && !event.header_committed)) return Promise.resolve(false);
         return serialize(event.message_id, async ctx => {
             if (!ctx.current()) return false;
             let row = await store.get(ctx.scope, event.message_id, ctx.current);
             if (!row || row.stage !== 'sealed' || row.receiveHold !== true || getPeerPub(row.peer) !== row.peerPub) return false;
             const current = () => ctx.current() && getPeerPub(row.peer) === row.peerPub;
             const identity = await nativeMediaSendIdentity(row);
-            if (!current() || event.media_digest !== identity.mediaDigest || event.header_digest !== identity.headerDigest) return false;
+            if (!current() || event.media_digest !== identity.mediaDigest || event.header_digest !== identity.headerDigest
+                || row.declined && event.status === 'committed' || row.committed && event.status === 'declined') return false;
             const patch = { ...(event.header_committed && !row.headerCommitted ? { headerCommitted: true } : {}),
                 ...(event.status === 'committed' && !row.committed ? { committed: true } : {}),
-                ...(event.status === 'blocked' && !row.blocked ? { blocked: true } : {}) };
+                ...(event.status === 'blocked' && !row.blocked ? { blocked: true } : {}),
+                ...(event.status === 'declined' && !row.declined ? { declined: true } : {}) };
             if (Object.keys(patch).length) row = await store.progress(ctx.scope, row.id, row.revision, patch, current);
             if (!current()) return false;
             const completed = await complete(row, identity, current);
-            if (current() && !row.committed) onState(row.id, row.blocked ? 'blocked' : row.headerCommitted ? 'file-pending' : 'header-pending');
+            if (current() && !row.committed) onState(row.id, row.declined ? 'declined' : row.blocked ? 'blocked' : row.headerCommitted ? 'file-pending' : 'header-pending');
             return completed;
         });
     }

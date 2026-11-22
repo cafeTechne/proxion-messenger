@@ -67,6 +67,8 @@ export function createNativeChunkUploader({ send, getScope, getGeneration = () =
             || event.header_digest !== entry.identity.headerDigest || event.manifest_digest !== entry.manifestDigest
             || event.recipient_pub !== entry.row.peerPub
             || typeof event.custody_complete !== 'boolean' || typeof event.header_committed !== 'boolean' || typeof event.committed !== 'boolean'
+            || (Object.hasOwn(event, 'declined') && typeof event.declined !== 'boolean')
+            || (event.declined && (!event.header_committed || event.committed))
             || (event.committed && !event.header_committed) || (event.header_committed && !event.custody_complete)
             || !Array.isArray(event.missing) || event.missing.length > 8
             || !event.missing.every(seq => Number.isSafeInteger(seq) && seq >= 0 && seq < entry.manifest.chunk_count)
@@ -77,10 +79,10 @@ export function createNativeChunkUploader({ send, getScope, getGeneration = () =
         try {
             await onProgress({ type: 'native_media_status', v: 1, message_id: event.message_id,
                 media_digest: event.media_digest, header_digest: event.header_digest,
-                header_committed: event.header_committed, status: event.committed ? 'committed' : 'pending' }, entry.current);
+                header_committed: event.header_committed, status: event.declined ? 'declined' : event.committed ? 'committed' : 'pending' }, entry.current);
             if (!entry.current()) return false;
             if (event.custody_complete) {
-                uploads.delete(key); onState(entry.row.id, event.header_committed ? 'file-pending' : 'header-pending'); return true;
+                uploads.delete(key); onState(entry.row.id, event.declined ? 'declined' : event.header_committed ? 'file-pending' : 'header-pending'); return true;
             }
             onState(entry.row.id, 'uploading', { received: Math.min(...event.missing), total: entry.manifest.chunk_count });
             const seq = event.missing[0], bytes = entry.row.prepared.ct.subarray(seq * NATIVE_CHUNK_BYTES, (seq + 1) * NATIVE_CHUNK_BYTES);

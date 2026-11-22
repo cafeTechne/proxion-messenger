@@ -105,7 +105,7 @@ export function createNativeMediaStore(dbApi = globalThis.indexedDB, { maxCipher
             }, current);
         },
         progress(scope, id, revision, patch, current = () => true) {
-            if (!patch || Object.keys(patch).some(key => !['headerCommitted', 'committed', 'historySaved', 'blocked'].includes(key))
+            if (!patch || Object.keys(patch).some(key => !['headerCommitted', 'committed', 'historySaved', 'blocked', 'declined'].includes(key))
                 || Object.values(patch).some(value => value !== true)) throw fail('Invalid native media progress');
             return operation('readwrite', (store, done, abort) => {
                 const request = store.get(keyFor(scope, id));
@@ -114,7 +114,9 @@ export function createNativeMediaStore(dbApi = globalThis.indexedDB, { maxCipher
                     if (!current()) { abort('Native media context changed'); return; }
                     if (!row || row.stage !== 'sealed' || row.revision !== revision
                         || (patch.committed && !patch.headerCommitted && !row.headerCommitted)
-                        || (patch.historySaved && !row.committed)) { abort('Invalid native media progress'); return; }
+                        || (patch.historySaved && !row.committed)
+                        || (patch.declined && (row.committed || !patch.headerCommitted && !row.headerCommitted))
+                        || (patch.committed && row.declined)) { abort('Invalid native media progress'); return; }
                     Object.assign(row, patch); row.revision++;
                     store.put(row); done(row);
                 };

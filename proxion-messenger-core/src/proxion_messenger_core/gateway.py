@@ -1710,6 +1710,8 @@ class ProxionGateway(NativeChunkGatewayMixin, NativeMediaMixin, VoiceHandlerMixi
                 await self._handle_native_media_part(websocket, data)
             elif cmd == "native_media_fetch":
                 await self._handle_native_media_fetch(websocket, data)
+            elif cmd == "native_media_decline":
+                await self._handle_native_media_commit(websocket, data, decline=True)
             elif cmd == "native_media_header_commit":
                 await self._handle_native_media_commit(websocket, data, header_only=True)
             elif cmd == "native_media_commit":

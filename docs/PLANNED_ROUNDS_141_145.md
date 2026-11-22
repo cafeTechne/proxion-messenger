@@ -208,6 +208,12 @@ download recovery, Blob history and labelled progress/retry are connected. Real
 restarts, history failure and lost final receipt with exact hashes. Recipient
 decline and final acceptance evidence remain open; see the transfer contract.
 
+Decline/migration checkpoint (2026-11-22): accepted 400 KiB inline migration and
+keyboard recipient decline now pass real gateway/browser restart journeys.
+Decline is a distinct terminal outcome; the sender retains its exact prepared
+source. Full suites: 4,848 backend and 2,702 frontend passed. Final policy/route
+acceptance audit remains open. No additional round scope is introduced.
+
 ### Problem and result
 
 The existing file_offer/file_chunk/file_complete route buffers live transfer

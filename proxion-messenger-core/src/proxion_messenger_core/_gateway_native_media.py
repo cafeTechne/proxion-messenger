@@ -31,7 +31,7 @@ class NativeMediaMixin:
     def _native_status(row):
         return {"type": "native_media_status", "v": 1, "message_id": row["message_id"],
                 "media_digest": row["media_digest"],
-                "status": row["status"] if row["committed"] or row["forwarded"] or row["status"] == "blocked" else "pending",
+                "status": row["status"] if row["committed"] or row["forwarded"] or row["status"] in ("blocked", "declined") else "pending",
                 "header_digest": row["header_digest"], "header_committed": row["header_committed"]}
 
     async def _handle_native_inline(self, ws, data, sealed, file_bytes):
@@ -112,7 +112,7 @@ class NativeMediaMixin:
             proof = await self._query_native_receipt(target, row) if target else None
             if proof and self._native_storage_writable():
                 self._store.record_native_peer_progress(sender, row["message_id"], row["media_digest"], row["header_digest"],
-                    header_committed=proof["header_committed"], committed=proof["committed"])
+                    header_committed=proof["header_committed"], committed=proof["committed"], declined=proof.get("declined", False))
             return
         if not row["event"]:
             return
@@ -150,7 +150,7 @@ class NativeMediaMixin:
         if proof and self._native_storage_writable():
             if self._store.commit_native_media(peer, row["queue_id"], sender, row["message_id"], row["envelope_digest"], forwarded=True):
                 self._store.record_native_peer_progress(sender, row["message_id"], row["media_digest"], row["header_digest"],
-                    header_committed=proof["header_committed"], committed=proof["committed"])
+                    header_committed=proof["header_committed"], committed=proof["committed"], declined=proof.get("declined", False))
 
     async def _native_exchange(self, target, peer, payload, response_type):
         from .relay import sign_relay_envelope, verify_relay_envelope
@@ -196,7 +196,9 @@ class NativeMediaMixin:
     @staticmethod
     def _native_progress_valid(proof):
         return (isinstance(proof, dict) and type(proof.get("header_committed")) is bool
-                and type(proof.get("committed")) is bool and (not proof["committed"] or proof["header_committed"]))
+                and type(proof.get("committed")) is bool and (not proof["committed"] or proof["header_committed"])
+                and type(proof.get("declined", False)) is bool
+                and (not proof.get("declined", False) or proof["header_committed"] and not proof["committed"]))
 
     async def _relay_native_media(self, target, row):
         event = row["event"]
@@ -240,7 +242,7 @@ class NativeMediaMixin:
             return "503 Service Unavailable", '{"error":"native_media_not_accepted"}'
         if data.get("header_digest") != row["header_digest"]:
             return "409 Conflict", '{"error":"native_media_header_mismatch"}'
-        return self._native_response(data, "native_media_custody", header_committed=row["header_committed"], committed=row["committed"])
+        return self._native_response(data, "native_media_custody", header_committed=row["header_committed"], committed=row["committed"], declined=row["declined"])
 
     def _native_ready(self, owner, expected_pub, *, chunks=False):
         pub = self._store.get_x25519_pub(owner) if self._store else None
@@ -323,10 +325,10 @@ class NativeMediaMixin:
             if (not row or not row["incoming"] or row["media_digest"] != digest or row["header_digest"] != header
                     or self._is_blocked_for(row["to_webid"], sender) or self._store.is_revoked(sender)):
                 return "200 OK", '{"status":"received"}'
-            return self._native_response(data, "native_media_query_result", header_committed=row["header_committed"], committed=row["committed"])
+            return self._native_response(data, "native_media_query_result", header_committed=row["header_committed"], committed=row["committed"], declined=row["declined"])
         return "400 Bad Request", '{"error":"invalid_native_query"}'
 
-    async def _handle_native_media_commit(self, ws, data, *, header_only=False):
+    async def _handle_native_media_commit(self, ws, data, *, header_only=False, decline=False):
         owner = self._client_webids.get(ws, "")
         if (not self._native_capable(ws) or not self._native_storage_writable()
                 or type(data.get("v")) is not int or data["v"] != 1):
@@ -344,6 +346,18 @@ class NativeMediaMixin:
         if (row and row['transport'] == 'chunks'
                 and (not self._native_chunks_capable(ws)
                      or (self._session_meta.get(ws) or {}).get('native_media_pub') != row['recipient_pub'])):
+            return
+        if decline:
+            if not row or row['transport'] != 'chunks':
+                return
+            fields = {"v": 1, "queue_id": data.get("queue_id"), "from_webid": sender, "message_id": message,
+                      "envelope_digest": digest, "receive_id": receive_id}
+            if self._store.decline_native_media(owner, data.get('queue_id'), sender, message, digest,
+                    (self._session_meta.get(ws) or {}).get('native_media_pub')):
+                await ws.send(json.dumps({"type": "native_media_declined", **fields}))
+            elif (row['committed'] and row['to_webid'] == owner and type(data.get('queue_id')) is int
+                    and row['queue_id'] == data['queue_id'] and row['envelope_digest'] == digest):
+                await ws.send(json.dumps({"type": "native_media_decline_refused", "status": "committed", **fields}))
             return
         commit = self._store.commit_native_media_header if header_only else self._store.commit_native_media
         if commit(owner, data.get("queue_id"), sender, message, digest):

@@ -1,8 +1,8 @@
 # Round 143 implementation contract
 
 Status: primary browser chunk negotiation, sender/receiver resume, Blob history
-and accessible progress/retry are integrated. Round 143 remains open for
-recipient-decline handling and final policy/closeout evidence. This implements
+and accessible progress/retry/recipient decline are integrated. Round 143
+remains open for the final policy/route acceptance audit. This implements
 the existing Round 143 scope, rather than adding another round.
 
 ## Preserve the existing boundaries
@@ -288,3 +288,53 @@ pass (1,217 canonical keys, 15 existing fallback warnings). Recipient decline,
 remaining policy/final acceptance checks and an explicit browser journey for
 previously accepted oversized inline custody remain open; neither 142 nor 143
 is closed by this checkpoint.
+
+
+### Recipient decline and accepted-inline browser evidence
+
+The real primary-browser journey now starts a 400 KiB file on an inline-only
+connection, verifies original gateway custody cannot cross the HTTP body cap,
+then upgrades the connection after a gateway/browser restart. Queue id,
+envelope/receipt digest, header digest and ciphertext hash remain unchanged.
+Both primaries restore exactly one readable file after reload. This resolves
+the explicit accepted-inline browser migration evidence gap recorded above.
+
+Chunk-capable primary registration advertises `native_decline_v: 1` only when
+the gateway implements the separate decline command. Pending incoming transfers
+expose a labelled keyboard button. The receiver journals header consumption,
+then a protected content-free decline marker in its own receipt scope before
+removing incoming ciphertext. A decline is never a full receive/history receipt.
+Lost acknowledgements replay the marker and original header proof; normal
+full/decline/header reconciliation rotates through bounded batches rather than
+filling the generic command pacer. Native decline frames stay out of the generic
+reconnect queue.
+
+The gateway authenticates the original primary account/key and exact custody
+token, and accepts decline only for complete offered chunk custody. `declined`
+is a distinct persistent terminal status in the existing native-media table;
+no new schema columns are required. Decline and full commit have one atomic
+winner; a stale full commit cannot turn a decline into delivery. Signed peer
+progress propagates the distinct outcome without revealing a block/revocation.
+Decline clears gateway ciphertext and acknowledges header consumption, while
+retaining the sender's exact prepared browser source. It neither writes a sent
+history file nor finishes/deletes that prepared send. Round 144's prohibition
+on arbitrary prepared cancellation/reset remains intact.
+
+The receiver refuses a decline if a file already reached retained local history
+but the separate full-receipt write failed. It also suppresses in-flight part
+completion after successful decline. Quota/context failures retain ciphertext
+and journal state for an exact retry. Unsupported gateways expose no decline
+control. Earlier clients may retain an unknown declined source pending until
+upgraded; no compatibility path relabels decline as successful file delivery.
+
+Validation: 124 focused native/authorization/policy checks passed; complete
+backend suite 4,848 passed, 15 skipped. Complete frontend suite 2,702 passed,
+64 skipped. Real keyboard decline passed lost-request recovery, both gateway/
+browser restarts, protected receipt confirmation, ciphertext cleanup, no full
+history/delivery claim, unchanged retained source and later text decryptability.
+The full browser run also passed accepted-inline migration, 2 MiB/maximum-size
+fault journeys, inline/voice recovery and every preserved fanout fault case.
+ESLint, Ruff, cold-path, whitespace and translation gates pass (1,220 canonical
+keys, 15 fallback warnings). Shell cache 315 includes the final race guards.
+The final policy/route acceptance audit remains open; no 142–143 closeout or
+146–150 plan execution is claimed by this checkpoint.

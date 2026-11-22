@@ -1,6 +1,8 @@
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 import { nativeMediaJourney } from './scripts/native-media-journey.mjs';
 import { nativeChunkJourney } from './scripts/native-chunk-journey.mjs';
+import { nativeInlineAdaptationJourney } from './scripts/native-inline-adaptation-journey.mjs';
+import { nativeDeclineJourney } from './scripts/native-decline-journey.mjs';
 // Cross-account, multi-device DM smoke (R52 E6) — the "never green-verified"
 // case from memory/multidevice-status.md.
 //
@@ -96,7 +98,7 @@ async function startGateway(name) {
       'import sqlite3,sys,json; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute("SELECT message_id,status,header_committed,event_json IS NOT NULL,incoming FROM native_media").fetchall()))',
       join(dataDir, 'proxion.db')], { encoding: 'utf8' })),
     nativeParts: message => JSON.parse(execFileSync('python', ['-c',
-      'import sqlite3,sys,json; c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row; r=c.execute("SELECT n.chunk_count,n.custody_complete,COUNT(p.seq) AS parts FROM native_media n LEFT JOIN native_media_parts p ON p.queue_id=n.queue_id WHERE n.message_id=? GROUP BY n.queue_id",(sys.argv[2],)).fetchone(); print(json.dumps(dict(r) if r else {}))',
+      'import sqlite3,sys,json; c=sqlite3.connect(sys.argv[1]); c.row_factory=sqlite3.Row; r=c.execute("SELECT n.queue_id,n.envelope_digest,n.header_digest,n.cipher_digest,n.transport,n.status,n.header_committed,n.chunk_count,n.custody_complete,COUNT(p.seq) AS parts FROM native_media n LEFT JOIN native_media_parts p ON p.queue_id=n.queue_id WHERE n.message_id=? GROUP BY n.queue_id",(sys.argv[2],)).fetchone(); print(json.dumps(dict(r) if r else {}))',
       join(dataDir, 'proxion.db'), message], { encoding: 'utf8' })),
     queued: (owner, device) => Number(execFileSync('python', ['-c',
       'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("SELECT COUNT(*) FROM pending_device_fanout WHERE to_webid=? AND to_device_id=?",sys.argv[2:]).fetchone()[0])',
@@ -379,12 +381,19 @@ try {
   step = 'native-inline-durable-recovery';
   await nativeMediaJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
     openSender: () => openFirstDm(ap, 'native inline sender'), openReceiver: () => openFirstDm(b, 'native inline recipient'), online });
+  step = 'native-accepted-inline-adaptation';
+  await nativeInlineAdaptationJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
+    openSender: () => openFirstDm(ap, 'adapted inline sender'), openReceiver: () => openFirstDm(b, 'adapted inline recipient'), online });
   for (const size of [2 * 1024 * 1024, 25 * 1024 * 1024 - 16]) {
     step = 'native-chunk-resume-' + size;
     await nativeChunkJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
       openSender: () => openFirstDm(ap, 'native chunk sender'), openReceiver: () => openFirstDm(b, 'native chunk recipient'), online, size });
   }
 
+
+  step = 'native-recipient-decline';
+  await nativeDeclineJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
+    openSender: () => openFirstDm(ap, 'decline sender'), openReceiver: () => openFirstDm(b, 'decline recipient'), online });
 
   // E5 slice 2: A-primary's SENT message self-synced to A-device. Check A-device's
   // local plaintext store (robust to which thread is active).

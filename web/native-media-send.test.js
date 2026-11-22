@@ -190,3 +190,19 @@ describe('native sender chunk upload integration boundary', () => {
         expect(h.options.send.mock.calls[0][0].cmd).toBe('send_file');
     });
 });
+
+it('retains a declined prepared source and releases only the proven header hold without retransmitting', async () => {
+    const h = await harness(); await h.sender.retry('file-1');
+    const before = await h.store.get('alice/device', 'file-1');
+    const event = await h.status({ status: 'declined', header_committed: true });
+    expect(await h.sender.status(event)).toBe(true);
+    const retained = await h.store.get('alice/device', 'file-1');
+    expect(retained.declined).toBe(true); expect(retained.headerCommitted).toBe(true);
+    expect(retained.prepared).toEqual(before.prepared); expect(retained.hdr).toEqual(before.hdr);
+    expect(h.options.e2e.releaseDmSendHold).toHaveBeenCalled();
+    expect(h.options.e2e.finishDmSend).not.toHaveBeenCalled(); expect(h.options.persistOwnMessage).not.toHaveBeenCalled();
+    const count = h.options.send.mock.calls.length;
+    expect(await h.engine().retry('file-1')).toBe(false); expect(h.options.send).toHaveBeenCalledTimes(count);
+    expect(await h.sender.status({ ...event, status: 'committed' })).toBe(false);
+    expect((await h.store.get('alice/device', 'file-1')).committed).toBeUndefined();
+});

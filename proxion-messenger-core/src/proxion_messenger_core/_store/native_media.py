@@ -37,7 +37,7 @@ class NativeMediaStoreMixin:
                 "message_id": row["message_id"], "to_webid": row["to_webid"],
                 "media_digest": row["media_digest"], "envelope_digest": row["envelope_digest"],
                 "incoming": bool(row["incoming"]), "committed": row["status"] == "committed",
-                "forwarded": row["status"] == "forwarded", "status": row["status"],
+                "forwarded": row["status"] == "forwarded", "declined": row["status"] == "declined", "status": row["status"],
                 "event": event}
 
     def accept_native_media(self, sender, message_id, recipient, thread_id, media_digest,
@@ -167,12 +167,35 @@ class NativeMediaStoreMixin:
             conn.execute("UPDATE native_media SET header_committed=1,header_digest=? WHERE queue_id=?", (header_digest, queue_id))
         return True
 
-    def record_native_peer_progress(self, sender, message_id, media_digest, header_digest, *, header_committed, committed):
-        if (type(header_committed) is not bool or type(committed) is not bool
+    def record_native_peer_progress(self, sender, message_id, media_digest, header_digest, *, header_committed, committed, declined=False):
+        if (type(header_committed) is not bool or type(committed) is not bool or type(declined) is not bool
+                or declined and (not header_committed or committed)
                 or committed and not header_committed or not isinstance(header_digest, str)
                 or not re.fullmatch(r"[a-f0-9]{64}", header_digest)):
             return False
         with self._conn() as conn:
-            changed = conn.execute("UPDATE native_media SET header_committed=MAX(header_committed,?),status=CASE WHEN ? THEN 'committed' ELSE status END WHERE from_webid=? AND message_id=? AND media_digest=? AND header_digest=? AND status IN ('forwarded','committed')",
-                                  (int(header_committed), int(committed), sender, message_id, media_digest, header_digest)).rowcount
+            changed = conn.execute("UPDATE native_media SET header_committed=MAX(header_committed,?),status=CASE WHEN status IN ('committed','declined') THEN status WHEN ? THEN 'declined' WHEN ? THEN 'committed' ELSE status END WHERE from_webid=? AND message_id=? AND media_digest=? AND header_digest=? AND status IN ('forwarded','committed','declined')",
+                                  (int(header_committed), int(declined), int(committed), sender, message_id, media_digest, header_digest)).rowcount
         return bool(changed)
+
+
+    def decline_native_media(self, owner, queue_id, sender, message_id, digest, recipient_pub):
+        """An exact primary recipient choice, never a full-history receipt.
+
+        A conforming client journals header consumption and its protected
+        decline receipt before this command. The command includes header ACK
+        authority so a lost earlier header ACK cannot strand the ordering hold.
+        """
+        if type(queue_id) is not int or queue_id < 1:
+            return False
+        with self._conn() as conn:
+            if not conn.in_transaction:
+                conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute("""SELECT * FROM native_media WHERE queue_id=? AND to_webid=? AND from_webid=?
+                AND message_id=? AND envelope_digest=? AND recipient_pub=? AND transport='chunks'
+                AND custody_complete=1 AND status IN ('pending','declined')""",
+                (queue_id, owner, sender, message_id, digest, recipient_pub)).fetchone()
+            if not row or self._native_chunk_policy_blocked(conn, sender, owner):
+                return False
+            conn.execute("UPDATE native_media SET status='declined',header_committed=1,event_json=NULL,byte_count=0 WHERE queue_id=?", (queue_id,))
+        return True

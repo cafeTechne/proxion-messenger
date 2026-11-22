@@ -314,3 +314,47 @@ def test_schema_70_chunk_upgrade_preserves_exact_manifest_parts_and_receipt(tmp_
         assert upgraded.commit_native_media('bob', original['queue_id'], 'alice', 'file', original['envelope_digest'])
     finally:
         upgraded.close()
+
+
+def test_decline_is_exact_durable_header_consumption_without_a_full_delivery_receipt(tmp_path):
+    path = str(tmp_path / 'decline.db'); db = LocalStore(path)
+    raw = b'A' * CHUNK + b'B' * 17
+    row = begin(db, raw)
+    args = ('bob', row['queue_id'], 'alice', 'file', row['envelope_digest'], 'A' * 43)
+    assert not db.decline_native_media(*args)  # A guessed partial upload is not an offered file.
+    for seq in range(2): assert put(db, row, seq, raw[seq * CHUNK:(seq + 1) * CHUNK])
+    for changed in [('foreign', *args[1:]), (args[0], True, *args[2:]), (*args[:-2], 'f' * 64, args[-1]), (*args[:-1], 'B' * 43)]:
+        assert not db.decline_native_media(*changed)
+    assert db.decline_native_media(*args); db.close(); db = LocalStore(path)
+    try:
+        declined = db.get_native_media('alice', 'file')
+        assert declined['declined'] and declined['header_committed'] and not declined['committed']
+        assert declined['event'] is None and db.pending_native_media('bob') == []
+        assert db.get_native_media_part('alice', 'file', row['manifest_digest'], 0) is None
+        assert db.decline_native_media(*args)
+        assert not db.commit_native_media(*args[:-1])  # A stale full commit cannot change the chosen outcome.
+        assert begin(db, raw)['declined']
+    finally:
+        db.close()
+
+
+def test_decline_and_full_commit_have_one_atomic_terminal_winner(store):
+    raw = b'opaque ciphertext bytes'
+    for index in range(12):
+        row = begin(store, raw, message='race-' + str(index)); assert put(store, row, 0, raw)
+        commit = ('bob', row['queue_id'], 'alice', row['message_id'], row['envelope_digest'])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            declined, delivered = list(pool.map(lambda decline: store.decline_native_media(*commit, 'A' * 43)
+                if decline else store.commit_native_media(*commit), [True, False]))
+        assert declined != delivered
+        result = store.get_native_media('alice', row['message_id'])
+        assert result['header_committed'] and result['declined'] != result['committed']
+        assert result['event'] is None
+
+
+def test_decline_does_not_bypass_existing_block_and_revocation_policy(store):
+    row = begin(store); assert put(store, row, 0, b'opaque ciphertext bytes')
+    store.set_block('bob', 'alice', True)
+    assert not store.decline_native_media('bob', row['queue_id'], 'alice', 'file', row['envelope_digest'], 'A' * 43)
+    assert store.get_native_media('alice', 'file')['status'] == 'blocked'
+    assert not store.get_native_media('alice', 'file')['declined']

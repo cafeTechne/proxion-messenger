@@ -72,3 +72,14 @@ it('shows labelled, bounded transfer progress with retry and no prepared cancell
         await h.ui.refresh(); expect(h.el('rows').innerHTML).not.toContain('<progress');
     }
 });
+
+it('offers a distinct labelled decline action only for eligible incoming files', async () => {
+    const h = fixture(); h.outbox.decline = vi.fn(async () => true);
+    h.outbox.inspect.mockResolvedValue([{ id: 'native-in:chunk:file', peer: 'bob', state: 'nativeIncoming', canCancel: false, canDecline: true }]);
+    await h.ui.refresh();
+    expect(h.el('rows').innerHTML).toContain('data-outbox-action="decline"');
+    expect(h.el('rows').innerHTML).not.toContain('data-outbox-action="cancel"');
+    await h.click('decline', 'native-in:chunk:file'); expect(h.outbox.decline).toHaveBeenCalledWith('native-in:chunk:file');
+    h.outbox.decline.mockResolvedValue(false); await h.click('decline', 'native-in:chunk:file');
+    expect(h.el('status').textContent).toBe('nativeMedia.declineUnavailable');
+});

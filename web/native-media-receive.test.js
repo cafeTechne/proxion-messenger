@@ -31,7 +31,7 @@ async function harness() {
     };
     const persistMessage = vi.fn(async () => { order.push('history'); return true; });
     const sendCommit = vi.fn(async command => { order.push(command.cmd); commits.push(command); return true; });
-    const options = { e2e, receipts, persistMessage, sendCommit,
+    const options = { e2e, receipts, persistMessage, sendCommit, isPersistedFile: vi.fn(async () => false),
         getScope: () => scope, getGeneration: () => generation,
         toMessage: ev => ({ message_id: ev.message_id, thread_id: ev.thread_id, from_webid: ev.from_webid }),
         handleEvent: vi.fn(async message => { messages.push(message); }), requestReplay: vi.fn(), onError: vi.fn() };
@@ -122,4 +122,43 @@ describe('native media durable receive adapter', () => {
         expect(h.journal.size).toBe(1); expect(h.messages).toEqual([]);
         await h.engine().recover(); expect(h.commits).toHaveLength(1);
     });
+});
+
+it('replays protected full and decline receipts in bounded rotating batches, including header proof for a lost decline ACK', async () => {
+    const h = await harness(), engine = h.engine();
+    for (const kind of ['full', 'decline']) {
+        for (let i = 0; i < 9; i++) {
+            const fingerprint = (i + (kind === 'full' ? 1 : 100)).toString(16).padStart(64, '0');
+            const command = { cmd: kind === 'full' ? 'native_media_commit' : 'native_media_decline', v: 1,
+                queue_id: i + 1, from_webid: 'did:key:alice', message_id: kind + '-' + i,
+                envelope_digest: 'a'.repeat(64), receive_id: fingerprint };
+            await h.receipts.remember((kind === 'full' ? 'native-media:' : 'native-decline:') + 'bob/device', fingerprint, null, command);
+        }
+    }
+    for (let i = 0; i < 3; i++) {
+        const count = h.commits.length; await engine.recover();
+        expect(h.commits.length - count).toBeLessThanOrEqual(12);
+    }
+    expect(new Set(h.commits.filter(command => command.cmd === 'native_media_commit').map(command => command.message_id)).size).toBe(9);
+    expect(new Set(h.commits.filter(command => command.cmd === 'native_media_decline').map(command => command.message_id)).size).toBe(9);
+    for (let i = 0; i < h.commits.length; i++) {
+        if (h.commits[i].cmd === 'native_media_decline') expect(h.commits[i - 1]).toEqual({ ...h.commits[i], cmd: 'native_media_header_commit' });
+    }
+    expect(h.e2e.ratchetDecrypt).not.toHaveBeenCalled(); expect(h.options.persistMessage).not.toHaveBeenCalled();
+});
+
+it('refuses decline after retained history succeeded but the separate full receipt write failed', async () => {
+    const h = await harness(), engine = h.engine();
+    const remember = h.receipts.remember;
+    h.receipts.remember = vi.fn(async (...args) => args[0] === 'native-media:bob/device' ? false : remember(...args));
+    expect(await engine.receive(h.event)).toBe(false);
+    expect(h.options.persistMessage).toHaveBeenCalledTimes(1); expect(h.journal.size).toBe(1);
+    h.options.isPersistedFile.mockResolvedValue(true);
+    const { bytes } = await nativeMediaEnvelope(h.event);
+    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('');
+    expect(await engine.decline(h.event, digest)).toBe(false);
+    expect(h.commits.some(command => command.cmd === 'native_media_decline')).toBe(false);
+    h.receipts.remember = remember;
+    expect(await engine.receive(h.event)).toBe(true);
+    expect(h.commits.at(-1).cmd).toBe('native_media_commit');
 });
