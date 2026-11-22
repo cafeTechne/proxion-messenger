@@ -1357,9 +1357,9 @@ class ProxionGateway(NativeChunkGatewayMixin, NativeMediaMixin, VoiceHandlerMixi
             if not self._check_signal_rate_limit(websocket):
                 await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited"}))
                 return
-        elif cmd in ("file_chunk", "native_media_part"):
+        elif cmd in ("file_chunk", "native_media_part", "native_media_fetch"):
             if not self._check_file_chunk_rate_limit(websocket):
-                if cmd == "native_media_part":
+                if cmd in ("native_media_part", "native_media_fetch"):
                     await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited",
                         "cmd": cmd, "seq": data.get("seq"), **_mid}))
                 else:
@@ -1708,6 +1708,8 @@ class ProxionGateway(NativeChunkGatewayMixin, NativeMediaMixin, VoiceHandlerMixi
                 await self._handle_native_media_begin(websocket, data)
             elif cmd == "native_media_part":
                 await self._handle_native_media_part(websocket, data)
+            elif cmd == "native_media_fetch":
+                await self._handle_native_media_fetch(websocket, data)
             elif cmd == "native_media_header_commit":
                 await self._handle_native_media_commit(websocket, data, header_only=True)
             elif cmd == "native_media_commit":

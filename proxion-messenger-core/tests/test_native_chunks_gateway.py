@@ -204,3 +204,65 @@ async def test_unrelated_self_signed_stranger_cannot_grow_native_byte_accounting
     assert not target.__dict__.get('_file_relay_bytes')
     assert target._store.pending_native_media(target._own_gateway_did()) == []
     stranger._store.close(); target._store.close()
+
+
+@pytest.mark.asyncio
+async def test_download_offer_and_parts_require_complete_custody_and_original_recipient(tmp_path):
+    gw = gateway(tmp_path, 'download')
+    raw = b'A' * CHUNK + b'B' * 17
+    row = begin(gw._store, raw, sender='did:key:alice', recipient='did:key:bob')
+    receiver = socket(gw, 'did:key:bob')
+    gw._session_meta[receiver].update(native_chunks_v=1, native_media_pub='A' * 43)
+    await gw._deliver_native_chunk_media(row)
+    receiver.send.assert_not_called()
+    for seq in range(2):
+        assert put(gw._store, row, seq, raw[seq * CHUNK:(seq + 1) * CHUNK])
+    row = gw._store.get_native_media('did:key:alice', 'file')
+    await gw._deliver_native_chunk_media(row)
+    offer = json.loads(receiver.send.call_args.args[0])
+    assert offer['type'] == 'native_media_offer' and offer['manifest_digest'] == row['manifest_digest']
+    packet = {'v': 1, 'from_webid': 'did:key:alice', 'message_id': 'file',
+              'queue_id': row['queue_id'], 'envelope_digest': row['envelope_digest'],
+              'manifest_digest': row['manifest_digest'], 'sequences': [0, 1]}
+    receiver.send.reset_mock()
+    for change in ({'queue_id': True}, {'envelope_digest': 'f' * 64}, {'manifest_digest': 'f' * 64},
+                   {'sequences': [True]}, {'sequences': [0, 0]}, {'sequences': [2]}, {'sequences': []}):
+        await gw._handle_native_media_fetch(receiver, {**packet, **change})
+    receiver.send.assert_not_called()
+    foreign = socket(gw, 'did:key:foreign')
+    gw._session_meta[foreign].update(native_chunks_v=1, native_media_pub='A' * 43)
+    await gw._handle_native_media_fetch(foreign, packet)
+    foreign.send.assert_not_called()
+    gw._session_meta[receiver]['native_media_pub'] = 'B' * 43
+    await gw._handle_native_media_fetch(receiver, packet)
+    receiver.send.assert_not_called()
+    gw._session_meta[receiver]['native_media_pub'] = 'A' * 43
+    await gw._handle_native_media_fetch(receiver, packet)
+    frames = [json.loads(call.args[0]) for call in receiver.send.call_args_list]
+    assert [frame['seq'] for frame in frames] == [0, 1]
+    assert b''.join(base64.b64decode(frame['data_b64']) for frame in frames) == raw
+    retained = gw._store.get_native_media('did:key:alice', 'file')
+    assert not retained['committed'] and not retained['header_committed'] and retained['event']
+    assert gw._store.get_native_media_part('did:key:alice', 'file', row['manifest_digest'], 0)
+    gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_download_window_stops_if_recipient_blocks_sender_between_parts(tmp_path):
+    gw = gateway(tmp_path, 'download-block')
+    raw = b'A' * CHUNK + b'B' * 17
+    row = begin(gw._store, raw, sender='did:key:alice', recipient='did:key:bob')
+    for seq in range(2):
+        assert put(gw._store, row, seq, raw[seq * CHUNK:(seq + 1) * CHUNK])
+    receiver = socket(gw, 'did:key:bob')
+    gw._session_meta[receiver].update(native_chunks_v=1, native_media_pub='A' * 43)
+    async def block_after_first(_wire):
+        gw._store.set_block('did:key:bob', 'did:key:alice', True)
+    receiver.send.side_effect = block_after_first
+    await gw._handle_native_media_fetch(receiver, {'v': 1, 'from_webid': 'did:key:alice', 'message_id': 'file',
+        'queue_id': row['queue_id'], 'envelope_digest': row['envelope_digest'],
+        'manifest_digest': row['manifest_digest'], 'sequences': [0, 1]})
+    assert receiver.send.call_count == 1
+    retained = gw._store.get_native_media('did:key:alice', 'file')
+    assert retained['status'] == 'blocked' and not retained['committed']
+    gw._store.close()

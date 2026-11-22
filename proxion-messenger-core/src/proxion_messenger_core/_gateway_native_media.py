@@ -103,8 +103,6 @@ class NativeMediaMixin:
         if not latest or latest["queue_id"] != row["queue_id"]:
             return
         row = latest
-        if row["transport"] != "inline":
-            return  # Round 143 chunk delivery is not negotiated/activated yet.
         peer, sender = row["to_webid"], row["from_webid"]
         if (self._is_blocked_for(peer, sender) or self._is_blocked_for(sender, peer)
                 or self._store.is_cert_revoked(f"device:{sender}") or self._store.is_cert_revoked(f"device:{peer}")):
@@ -117,6 +115,9 @@ class NativeMediaMixin:
                     header_committed=proof["header_committed"], committed=proof["committed"])
             return
         if not row["event"]:
+            return
+        if row["transport"] == "chunks":
+            await self._deliver_native_chunk_media(row)
             return
         # Native base-peer file crypto targets the primary account, not arbitrary
         # linked devices with independent keys. An unsupported device cannot drain.

@@ -149,3 +149,29 @@ The broad backend run passed 4,813 checks with one friend-accept HTTP timeout,
 one skipped and 14 deselected. That timeout did not reproduce in nine lifecycle
 checks alone or in 49 checks including the same preceding legacy file tests.
 It is not marked fixed; recheck the complete suite at final integration.
+
+### Receive recovery checkpoint (still open)
+
+Added a staged ciphertext-only browser inbox with an eight-transfer/32 MiB
+account bound, immutable manifest identity, ordered full-ciphertext verification,
+and durable missing-part recovery. The receiver requests at most eight parts per
+window after protected header journaling; a failed retained-history save leaves
+the ciphertext and key journal available for retry. Full commit still requires
+the protected receipt. No prepared source cancellation is introduced.
+
+Gateway download offers and bounded part reads now enforce the original
+recipient key, account, exact custody token and manifest, and existing delivery
+policy. Parts remain in custody after socket writes. Cross-gateway complete
+custody can advance forwarding; full delivery still requires the client receipt.
+Browser chunk capability registration and main dispatch remain disabled until
+sender upload integration is ready. Contract checks explicitly exclude staged
+modules, and reject accidentally loading them without removing the exclusions.
+The shared protocol utility used by the active inline receiver is cached in
+shell version 310.
+
+Validation at this checkpoint: 75 focused receiver/ratchet checks, 46 receiver
+and shell checks, and 19 gateway/download/event-contract checks passed. Ruff,
+focused ESLint and whitespace checks passed. These are recovery component tests,
+not a claim of a live browser chunk journey. Sender upload, existing oversized
+inline adaptation, browser activation, accessible progress/decline and full
+restart journeys remain required before closing 142–143.

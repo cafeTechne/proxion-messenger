@@ -9,6 +9,74 @@ import re
 
 
 class NativeChunkGatewayMixin:
+    async def _deliver_native_chunk_media(self, row):
+        if not row['custody_complete'] or not self._native_storage_writable():
+            return
+        sender, peer = row['from_webid'], row['to_webid']
+        sockets = [ws for ws in self._device_sockets(peer, peer) if self._native_chunks_capable(ws)
+                   and (self._session_meta.get(ws) or {}).get('native_media_pub') == row['recipient_pub']]
+        if sockets:
+            if ((row['incoming'] or self._auth_enforced()) and self._store.get_relationship_owner(sender) != peer):
+                return
+            if not self._file_delivery_allowed(peer, sender):
+                return
+            event = {**row['event'], 'type': 'native_media_offer', 'manifest_digest': row['manifest_digest'],
+                     'native_commit': {'v': 1, 'queue_id': row['queue_id'], 'envelope_digest': row['envelope_digest']}}
+            for ws in sockets:
+                live = self._store.get_native_media(sender, row['message_id'])
+                if not live or not live['event'] or self._is_blocked_for(peer, sender) or self._is_blocked_for(sender, peer):
+                    break
+                try:
+                    await ws.send(json.dumps(event))
+                except Exception:
+                    pass  # A socket write cannot release opaque custody.
+            return
+        if row['incoming']:
+            return
+        target = self._resolve_peer_gateway(peer)
+        proof = await self._relay_native_chunks(target, row) if target else None
+        if proof and self._native_storage_writable():
+            if self._store.commit_native_media(peer, row['queue_id'], sender, row['message_id'], row['envelope_digest'], forwarded=True):
+                self._store.record_native_peer_progress(sender, row['message_id'], row['media_digest'], row['header_digest'],
+                    header_committed=proof['header_committed'], committed=proof['committed'])
+
+    async def _handle_native_media_fetch(self, ws, data):
+        if (not self._native_chunks_capable(ws) or not self._native_storage_writable()
+                or type(data.get('v')) is not int or data['v'] != 1):
+            return
+        owner = self._client_webids[ws]
+        if self._store.is_cert_revoked(f'device:{owner}'):
+            return
+        sender, message = data.get('from_webid'), data.get('message_id')
+        if not isinstance(sender, str) or not isinstance(message, str):
+            return
+        row = self._store.get_native_media(sender, message)
+        seqs = data.get('sequences')
+        if (not row or row['transport'] != 'chunks' or row['to_webid'] != owner or not row['custody_complete']
+                or row['queue_id'] != data.get('queue_id') or type(data.get('queue_id')) is not int
+                or row['envelope_digest'] != data.get('envelope_digest') or row['manifest_digest'] != data.get('manifest_digest')
+                or row['recipient_pub'] != (self._session_meta.get(ws) or {}).get('native_media_pub')
+                or not isinstance(seqs, list) or not 1 <= len(seqs) <= 8
+                or not all(type(seq) is int and 0 <= seq < row['chunk_count'] for seq in seqs) or len(set(seqs)) != len(seqs)):
+            return
+        if ((row['incoming'] or self._auth_enforced()) and self._store.get_relationship_owner(sender) != owner):
+            return
+        if not self._file_delivery_allowed(owner, sender):
+            return
+        session = (self._session_meta.get(ws) or {}).get('session_id')
+        for seq in seqs:
+            if (not self._native_storage_writable() or self._client_webids.get(ws) != owner
+                    or (self._session_meta.get(ws) or {}).get('session_id') != session
+                    or not self._native_chunks_capable(ws)
+                    or (self._session_meta.get(ws) or {}).get('native_media_pub') != row['recipient_pub']):
+                return
+            part = self._store.get_native_media_part(sender, message, row['manifest_digest'], seq)
+            if not part:
+                return
+            await ws.send(json.dumps({'type': 'native_media_chunk', 'native_chunks_v': 1,
+                'from_webid': sender, 'message_id': message, 'manifest_digest': row['manifest_digest'],
+                'seq': seq, 'data_b64': base64.b64encode(part['data']).decode(), 'part_digest': part['digest']}))
+
     def _native_chunk_relay_owner(self, sender):
         owner = self._store.get_relationship_owner(sender) if self._store else None
         if (not str(owner or '').startswith('did:key:') or sender in self._revoked_dids
@@ -118,6 +186,8 @@ class NativeChunkGatewayMixin:
             return '400 Bad Request', '{"error":"native_chunk_operation"}'
         if not row:
             return '409 Conflict', '{"error":"native_part_not_accepted"}'
+        if row['custody_complete'] and row['event']:
+            self._schedule_native_media(row)
         return self._native_response(data, 'native_media_chunk_receipt', **self._native_chunk_result(row, after=after))
 
     @staticmethod

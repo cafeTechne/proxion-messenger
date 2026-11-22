@@ -189,7 +189,7 @@ TEARDOWN_COMMANDS: frozenset[str] = frozenset({
 # client needs in order to read (read markers, delivery acks, ratchet session
 # upkeep, typing/screen-share notices inside an existing call or thread).
 READ_ONLY_COMMANDS: frozenset[str] = frozenset({
-    "register", "auth_response", "link_pod", "ping", "list_owner_devices", "dm_receive_recover", "native_media_capability",
+    "register", "auth_response", "link_pod", "ping", "list_owner_devices", "dm_receive_recover", "native_media_capability", "native_media_fetch",
     "get_rooms", "get_dms", "get_local_history", "get_room_members", "get_message",
     "get_files", "export_ticket",
     "read_dm", "read_room", "search", "get_receipts", "get_message_readers",
