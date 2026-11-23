@@ -61,6 +61,8 @@ import { createDmMedia, createDmMediaStore, deliverDmMedia, forwardDmMedia } fro
 import { createDmReceiptStore } from './dm-receipts.js';
 import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receive.js';
 import { createNativeMedia } from './native-media.js';
+import { createNativeEdits } from './native-edits.js';
+import { nativeMessageRef } from './native-message-ref.js';
 import { createDmOutbox } from './dm-outbox.js';
 import { createDmOutboxUi } from './dm-outbox-ui.js';
 import { createAssetInventoryUi } from './asset-inventory-ui.js';
@@ -132,7 +134,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistorySave, dmHistorySaveFile, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
+import { dmHistoryApplyNativeEdit, dmHistorySave, dmHistorySaveFile, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
 import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
@@ -869,19 +871,23 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const _mediaCleanup = new Map();
         const _outgoingGeneration = () => JSON.stringify([authContext().epoch, crossMode?.generation() || 0]);
         const _outgoingScope = () => JSON.stringify(['outgoing', selfWebId || clientDid, clientDid, e2eScopedKey('')]);
+        function _nativeHistoryMessage(message, peer) {
+            const ref = nativeMessageRef(message, { threadId: message.thread_id, selfWebId, peerWebId: peer });
+            return ref ? { ...message, native_ref: ref } : message;
+        }
         const _nativeMedia = createNativeMedia({ secondary,
             e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend },
             receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, send: command => sendCmd(command.cmd, command),
-            persistFile: (message, blob, current) => dmHistoryEnabled() ? dmHistorySaveFile(message, blob, { current }) : false,
+            persistFile: (message, blob, current) => dmHistoryEnabled() ? dmHistorySaveFile(_nativeHistoryMessage(message, message.from_webid), blob, { current }) : false,
             isPersistedFile: async (message, meta, current) => {
                 if (!current()) return false;
                 const saved = await dmHistoryGet(message.message_id);
                 return current() && saved?.from_webid === message.from_webid && saved.file?.size === meta.size
                     && typeof saved.file.data_b64 === 'string' && !saved.file.unavailable;
             },
-            persistMessage: (message, current) => dmHistoryEnabled() ? dmHistorySave(message, { requireFile: true, current }) : false,
+            persistMessage: (message, current) => dmHistoryEnabled() ? dmHistorySave(_nativeHistoryMessage(message, message.from_webid), { requireFile: true, current }) : false,
             handleEvent,
             toMessage: event => ({ type: 'message', source: 'local_dm', local: true,
                 message_id: 'native:' + event.from_webid + ':' + event.message_id,
@@ -892,19 +898,48 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 if (!dmHistoryEnabled() || !current()) return false;
                 const bytes = new Uint8Array(await row.blob.arrayBuffer());
                 if (!current()) return false;
-                const message = { type: 'message', source: 'local_dm', local: true, own: true, e2e: false,
+                const message = _nativeHistoryMessage({ type: 'message', source: 'local_dm', local: true, own: true, e2e: false,
                     message_id: 'native:' + selfWebId + ':' + row.id, thread_id: row.view.id,
                     from_webid: selfWebId, timestamp: row.timestamp, content: '📎 ' + row.metadata.name,
                     file: { filename: row.metadata.name, mime_type: row.metadata.mime, size: bytes.length,
                         data_b64: _u8ToB64(bytes), spoiler: row.metadata.spoiler,
                         ...(row.metadata.width ? { width: row.metadata.width, height: row.metadata.height } : {}) },
-                    _persistDm: true, _dmHistoryManaged: true };
+                    _persistDm: true, _dmHistoryManaged: true }, row.peer);
                 const saved = row.blob.size + FILE_TAG_BYTES > 65536
                     ? await dmHistorySaveFile(message, row.blob, { current })
                     : await dmHistorySave(message, { requireFile: true, current });
                 if (saved === false || !current()) return false;
                 handleEvent(message); return true;
             },
+        });
+        function _nativeEditContext(view) {
+            if (!view || !['dm', 'local_dm'].includes(view.type)) return null;
+            const peer = view.peerWebid || view.peerDid || localDmPeers[view.id]?.peer_webid
+                || Object.keys(peerDidToCertId).find(did => peerDidToCertId[did] === view.id);
+            if (!String(peer || '').startsWith('did:key:')) return null;
+            return { threadId: view.id, selfWebId, peerWebId: peer };
+        }
+        const _nativeEdits = createNativeEdits({
+            e2e: { ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend,
+                saveDmSendJob, listDmSendJobs, removeDmSendJob },
+            receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
+            isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web' && dmHistoryEnabled(),
+            send: command => sendCmd(command.cmd, command), contextForView: _nativeEditContext,
+            contextForPeer: actor => {
+                const id = peerDidToCertId[actor] || Object.keys(localDmPeers).find(key => localDmPeers[key]?.peer_webid === actor);
+                return id ? { threadId: id, selfWebId, peerWebId: actor, actorWebId: actor } : null;
+            },
+            getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, getMessage: dmHistoryGet,
+            applyEdit: dmHistoryApplyNativeEdit,
+            onApplied: async (id, current) => {
+                const record = await dmHistoryGet(id);
+                if (!current() || !record) return;
+                if (messageMap[id]) Object.assign(messageMap[id], { native_ref: record.native_ref, native_edit_seq: record.native_edit_seq,
+                    native_edit_action: record.native_edit_action, native_edit_parent: record.native_edit_parent, edits: record.edits });
+                handleMessageEdited({ message_id: id, new_content: record.content, edited_at: record.edited_at });
+                _syncPreviewAfterChange(id, record.content);
+            },
+            onError: error => console.warn('[native-edit] recovery pending:', error),
         });
         const _dmOutbox = createDmOutbox({
             e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
@@ -981,8 +1016,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             return 'ready';
         }
         const _pendingSendsUi = createDmOutboxUi({ outbox: {
-            inspect: async () => [...await _dmOutbox.inspect(), ...await _nativeMedia.inspect()],
-            send: id => id.startsWith('native-in:') ? _nativeMedia.recover()
+            inspect: async () => [...await _dmOutbox.inspect(), ...await _nativeMedia.inspect(), ...await _nativeEdits.inspect()],
+            send: id => id.startsWith('native-edit:') ? _nativeEdits.sender.retry(id.slice(12))
+                : id.startsWith('native-in:') ? _nativeMedia.recover()
                 : id.startsWith('native:') ? _nativeMedia.sender.retry(id.slice(7)) : _dmOutbox.send(id),
             decline: id => _nativeMedia.decline(id),
             cancel: id => id.startsWith('native:') ? _nativeMedia.cancel(id.slice(7)) : _dmOutbox.cancel(id),
@@ -1142,8 +1178,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 if (document.getElementById('msg-' + id)?.querySelector('.poll-card') || parsePoll(messageMap[id]?.content)) return rendering.refreshMessage(id);
                 return false;
             },
-            saveEdit: (view, id, content, revision) => _isPodRoomView(view)
-                ? _savePodRoomEdit(view, id, content, revision) : null,
+            saveEdit: (view, id, content, revision) => id.startsWith('native:')
+                ? _nativeEdits.save(messageMap[id], view, content)
+                : _isPodRoomView(view) ? _savePodRoomEdit(view, id, content, revision) : null,
             onEditFailed: result => { if (result?.reason !== 'cancelled') showToast(t(result?.reason === 'conflict' ? 'msg.editConflict' : 'msg.changeFailed')); },
         });
         const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
@@ -1318,6 +1355,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             _pendingSendsUi.reset();
             _gatewayReceives.stop();
             _nativeMedia.stop();
+            _nativeEdits.stop();
             _dmOutbox.stop();
             const queued = stopConnection();
             await ratchetIdle().catch(() => {});
@@ -2457,7 +2495,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (!fromPod && crossMode && crossMode.handleEvent(event)) return;
             if (!fromPod && crossRooms && crossRooms.handleEvent(event)) return;
             if (!fromPod) {
-                try { if (await _nativeMedia.handleEvent(event)) return; }
+                try {
+                    if (await _nativeEdits.handleEvent(event)) return;
+                    if (await _nativeMedia.handleEvent(event)) return;
+                }
                 catch (err) { console.warn('[native-media] recovery pending:', err); return; }
             }
             // Cache peer's X25519 pub key from a gateway-delivered DM event only.
@@ -2949,6 +2990,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 case "registered":
                     _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
                     _nativeMedia.start(event.native_media_v, event.native_chunks_v, event.native_decline_v);
+                    _nativeEdits.start(event.native_edit_v);
                     _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;
@@ -8628,6 +8670,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // Only used by "Reset Identity" — not by normal pod sign-out.
             async function _resetIdentity() {
                 _nativeMedia.stop();
+                _nativeEdits.stop();
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }

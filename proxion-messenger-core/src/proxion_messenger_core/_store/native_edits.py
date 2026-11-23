@@ -30,16 +30,22 @@ class NativeEditStoreMixin:
                               (sender, thread_id)).fetchone()
         return parent if thread and thread['peer_webid'] == recipient else None
 
-    def native_edit_next_sequence(self, sender, file_id, recipient, thread_id, *, incoming=False):
+    def native_edit_context(self, sender, file_id, recipient, thread_id, *, incoming=False):
         if (not self._native_edit_id(file_id) or not all(isinstance(value, str) and 0 < len(value) <= 2048
                 for value in (sender, recipient, thread_id))):
             return None
         with self._conn() as conn:
-            if not self._native_edit_parent(conn, sender, file_id, recipient, thread_id, incoming):
+            parent = self._native_edit_parent(conn, sender, file_id, recipient, thread_id, incoming)
+            if not parent:
                 return None
             current = conn.execute("SELECT COALESCE(MAX(native_sequence),0) FROM native_media WHERE from_webid=? AND native_parent_id=? AND transport='edit'",
                                    (sender, file_id)).fetchone()[0]
-            return current + 1 if current < self.MAX_NATIVE_EDITS else None
+            return ({'sequence': current + 1, 'parent_header_digest': parent['header_digest'], 'recipient_pub': parent['recipient_pub']}
+                    if current < self.MAX_NATIVE_EDITS else None)
+
+    def native_edit_next_sequence(self, sender, file_id, recipient, thread_id, *, incoming=False):
+        context = self.native_edit_context(sender, file_id, recipient, thread_id, incoming=incoming)
+        return context['sequence'] if context else None
 
     def accept_native_edit(self, sender, action_id, recipient, thread_id, media_digest, file_id,
                            sequence, parent_header_digest, header, recipient_pub, display_name='', *, incoming=False):

@@ -27,23 +27,12 @@ finish its concrete work before its completion notes/checks are marked done.
 
 Status: in progress.
 
-Reference checkpoint (2026-11-22): a tested, currently unconnected reference
-module separates private history keys from wire UUIDs and resolves author roles
-across gateway aliases. Five checks cover collisions, foreign scope, malformed
-references and ambiguous originals. Persistence and edit routing are still open;
-no working native caption edit is claimed by this component.
-
-Custody/history checkpoint (2026-11-22): schema 72 stages bounded opaque
-caption actions separately from immutable file receipts. Admission checks the
-completed original, author/peer/thread, frozen recipient key where available,
-sequence, policy and existing shared storage limits. A validated codec and an
-atomic local-history adapter bind caption/action identity together, preserve the
-attachment Blob and reject conflicting/reordered actions. Failed writes and
-account changes do not acknowledge consumption. These components are not yet
-connected to browser send/receive or capability negotiation; 146 remains open.
-Validation: backend regression 4,878 passed/15 skipped; the final expanded
-custody suite passed 27 checks. Frontend regression 2,717 passed/64 skipped;
-ESLint, Ruff and the cold-path gate passed.
+Implementation checkpoint (2026-11-22): validated references, protected caption
+plans, signed gateway custody, negotiated primary delivery and atomic caption
+history are connected. The focused real-browser journey passed both authors'
+edits, non-author gating, exact preparation/reload, failed history, lost full
+commits, both gateway restarts, unchanged file hashes and later text. The final
+backend regression gate is still running; see `ROUND_146_CLOSEOUT.md`.
 
 Problem: a native attachment bubble uses `native:<actor>:<UUID>` locally, but
 its edit action sends that private key to a gateway requiring a plain wire id.
@@ -52,16 +41,16 @@ without replacing its ciphertext, immutable custody identity or history Blob.
 
 Bounded work:
 
-- [ ] Define one validated native message reference and separate it from local
+- [x] Define one validated native message reference and separate it from local
   history/DOM ids. Persist the reference and safely resolve existing native
   history records using authenticated conversation/author context.
-- [ ] Resolve and validate a native edit before ratchet preparation; never fix
+- [x] Resolve and validate a native edit before ratchet preparation; never fix
   invalid references by weakening the ordinary message-id validator.
-- [ ] Route authorised caption edits through both gateway endpoints and map
+- [x] Route authorised caption edits through both gateway endpoints and map
   incoming edits back to each primary's existing native history key.
-- [ ] Keep exact edit preparation/retry and retained caption history through
+- [x] Keep exact edit preparation/retry and retained caption history through
   interrupted sends/reload; preserve original file bytes and ownership.
-- [ ] Test author/thread/account/key changes, conflicting/foreign references,
+- [x] Test author/thread/account/key changes, conflicting/foreign references,
   duplicate events and a later normal text message.
 
 Acceptance: both primary accounts can edit their own native file caption in a

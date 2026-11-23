@@ -738,7 +738,7 @@ export function finishDmReceive(peerId, receiveId, current = () => true) {
 // Local recovery needs message metadata when a gateway will not replay a socket
 // event after reload. The metadata is encrypted in the same state record.
 export async function pendingDmReceives({ transport = 'gateway' } = {}) {
-    if (!['gateway', 'native-media'].includes(transport)) throw new TypeError('Unsupported receive transport');
+    if (!['gateway', 'native-media', 'native-edit'].includes(transport)) throw new TypeError('Unsupported receive transport');
     await _ready(_cryptoContext());
     const context = _stateContext(), webId = _currentWebId();
     const prefix = 'proxion_e2e_state_', suffix = webId ? '::' + webId : '';

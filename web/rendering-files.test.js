@@ -148,3 +148,8 @@ describe('history files in the feed', () => {
     expect(sent).toEqual([]);
   });
 });
+
+it('shows an edited native caption even when it starts with the attachment marker', () => {
+  expect(isFileCaption({ file: {}, content: '📎 original.txt' })).toBe(true);
+  expect(isFileCaption({ file: {}, content: '📎 my caption', native_edit_seq: 1 })).toBe(false);
+});

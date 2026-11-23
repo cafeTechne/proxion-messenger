@@ -27,20 +27,41 @@ class NativeMediaMixin:
                 and type((self._session_meta.get(ws) or {}).get("native_media_v")) is int
                 and (self._session_meta.get(ws) or {}).get("native_media_v") == 1)
 
+    def _native_dm_thread(self, owner, thread_id):
+        if not isinstance(thread_id, str) or not 0 < len(thread_id) <= 2048:
+            return None
+        existing = next((thread for thread in self._store.get_dm_threads(owner_webid=owner)
+                         if thread['thread_id'] == thread_id), None)
+        if existing:
+            return existing
+        # A fanout-only conversation can already be visible in the contact
+        # sidebar without an ordinary message ever creating a dm_threads row.
+        # Resolve ONLY its live certificate held by this exact local account;
+        # caller-provided peer strings and another account's certificate confer
+        # no authority. Capability queries remain read-only.
+        if self._store.get_relationship_owner_by_cert_id(thread_id) != owner:
+            return None
+        cert = self._store.get_relationship_by_cert_id(thread_id)
+        peer = cert.get('peer_did') if cert else None
+        if (not isinstance(peer, str) or not peer.startswith('did:key:')
+                or self._store.is_cert_revoked(thread_id) or self._store.is_revoked(peer)):
+            return None
+        return {'thread_id': thread_id, 'peer_webid': peer}
+
     @staticmethod
     def _native_status(row):
         return {"type": "native_media_status", "v": 1, "message_id": row["message_id"],
                 "media_digest": row["media_digest"],
                 "status": row["status"] if row["committed"] or row["forwarded"] or row["status"] in ("blocked", "declined") else "pending",
-                "header_digest": row["header_digest"], "header_committed": row["header_committed"]}
+                "header_digest": row["header_digest"], "header_committed": row["header_committed"],
+                **({"native_edit_v": 1} if row["transport"] == "edit" else {})}
 
     async def _handle_native_inline(self, ws, data, sealed, file_bytes):
         sender = self._client_webids.get(ws, "")
         if not self._native_capable(ws) or not self._native_storage_writable():
             await ws.send(json.dumps({"type": "error", "message": "native_media_unavailable"}))
             return
-        thread = next((t for t in self._store.get_dm_threads(owner_webid=sender)
-                       if t["thread_id"] == data.get("cert_id")), None)
+        thread = self._native_dm_thread(sender, data.get("cert_id"))
         if (not sealed or not thread or data.get("room_id") or data.get("cert_id") in self.dm_clients
                 or not str(thread["peer_webid"]).startswith("did:key:")):
             await ws.send(json.dumps({"type": "error", "message": "native_media_invalid_target"}))
@@ -62,6 +83,7 @@ class NativeMediaMixin:
             await ws.send(json.dumps({"type": "error", "message": "native_media_not_accepted",
                                       "message_id": data.get("message_id")}))
             return
+        self._store.save_dm_thread(thread['thread_id'], peer, owner_webid=sender)
         await ws.send(json.dumps(self._native_status(row)))  # committed before this write
         if row["event"]:
             self._schedule_native_media(row)
@@ -103,7 +125,7 @@ class NativeMediaMixin:
         if not latest or latest["queue_id"] != row["queue_id"]:
             return
         row = latest
-        if row["transport"] not in ("inline", "chunks"):
+        if row["transport"] not in ("inline", "chunks", "edit"):
             return  # Staged action custody cannot reach unnegotiated browsers.
         peer, sender = row["to_webid"], row["from_webid"]
         if (self._is_blocked_for(peer, sender) or self._is_blocked_for(sender, peer)
@@ -117,6 +139,9 @@ class NativeMediaMixin:
                     header_committed=proof["header_committed"], committed=proof["committed"], declined=proof.get("declined", False))
             return
         if not row["event"]:
+            return
+        if row["transport"] == "edit":
+            await self._deliver_native_edit(row)
             return
         if row["transport"] == "chunks":
             await self._deliver_native_chunk_media(row)
@@ -175,7 +200,7 @@ class NativeMediaMixin:
                     or proof.get("content_type") != response_type or proof.get("from_webid") != peer
                     or proof.get("relay_sig_did") != peer or proof.get("to_webid") != self._own_gateway_did()
                     or proof.get("request_digest") != hashlib.sha256(body).hexdigest()
-                    or any(proof.get(key) != payload[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v") if key in payload)
+                    or any(proof.get(key) != payload[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v", "native_edit_v", "file_id", "native_sequence", "parent_header_digest", "recipient_pub") if key in payload)
                     or not verify_relay_envelope(proof)):
                 return None
             return proof
@@ -188,7 +213,7 @@ class NativeMediaMixin:
         import secrets
         proof = {"content_type": response_type, "v": 1,
                  "from_webid": self._own_gateway_did(), "to_webid": data["from_webid"],
-                 **{key: data[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v") if key in data},
+                 **{key: data[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v", "native_edit_v", "file_id", "native_sequence", "parent_header_digest", "recipient_pub") if key in data},
                  "request_digest": hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
                  "relay_sig_did": self._own_gateway_did(),
                  "relay_ts": datetime.now(timezone.utc).isoformat(), "relay_nonce": secrets.token_hex(16), **fields}
@@ -246,12 +271,12 @@ class NativeMediaMixin:
             return "409 Conflict", '{"error":"native_media_header_mismatch"}'
         return self._native_response(data, "native_media_custody", header_committed=row["header_committed"], committed=row["committed"], declined=row["declined"])
 
-    def _native_ready(self, owner, expected_pub, *, chunks=False):
+    def _native_ready(self, owner, expected_pub, *, chunks=False, edits=False):
         pub = self._store.get_x25519_pub(owner) if self._store else None
         if not isinstance(pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", pub):
             return False, None
         sockets = self._device_sockets(owner, owner)
-        capable = self._native_chunks_capable if chunks else self._native_capable
+        capable = self._native_edits_capable if edits else self._native_chunks_capable if chunks else self._native_capable
         supported = any(capable(ws) and (self._session_meta.get(ws) or {}).get("native_media_pub") == pub for ws in sockets)
         return supported and pub == expected_pub, pub if supported else None
 
@@ -267,7 +292,7 @@ class NativeMediaMixin:
                 or not isinstance(expected_pub, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", expected_pub)):
             return
         owner = self._client_webids[ws]
-        thread = next((t for t in self._store.get_dm_threads(owner_webid=owner) if t["thread_id"] == data.get("cert_id")), None)
+        thread = self._native_dm_thread(owner, data.get("cert_id"))
         if not thread or not str(thread["peer_webid"]).startswith("did:key:"):
             return
         peer, session = thread["peer_webid"], self._session_meta[ws].get("session_id")
@@ -288,7 +313,7 @@ class NativeMediaMixin:
                             supported = (proof["supported"] and pub == expected_pub
                                          and (not chunks or type(proof.get("native_chunks_v")) is int and proof["native_chunks_v"] == 1))
             live = self._session_meta.get(ws) or {}
-            current_thread = next((t for t in self._store.get_dm_threads(owner_webid=owner) if t["thread_id"] == data.get("cert_id")), None)
+            current_thread = self._native_dm_thread(owner, data.get("cert_id"))
             if (not self._native_storage_writable() or self._store.is_cert_revoked(f"device:{owner}")
                     or self._client_webids.get(ws) != owner or live.get("session_id") != session
                     or not self._native_capable(ws) or (chunks and not self._native_chunks_capable(ws))
@@ -349,6 +374,10 @@ class NativeMediaMixin:
                 and (not self._native_chunks_capable(ws)
                      or (self._session_meta.get(ws) or {}).get('native_media_pub') != row['recipient_pub'])):
             return
+        if row and row['transport'] == 'edit' and (not self._native_edits_capable(ws)
+                or type(data.get('native_edit_v')) is not int or data['native_edit_v'] != 1
+                or (self._session_meta.get(ws) or {}).get('native_media_pub') != row['recipient_pub']):
+            return
         if decline:
             if not row or row['transport'] != 'chunks':
                 return
@@ -364,7 +393,8 @@ class NativeMediaMixin:
         commit = self._store.commit_native_media_header if header_only else self._store.commit_native_media
         if commit(owner, data.get("queue_id"), sender, message, digest):
             fields = {"v": 1, "queue_id": data["queue_id"], "from_webid": sender, "message_id": message,
-                      "envelope_digest": digest, "receive_id": receive_id}
+                      "envelope_digest": digest, "receive_id": receive_id,
+                      **({"native_edit_v": 1} if row and row["transport"] == "edit" else {})}
             reply = ({"type": "native_media_header_committed", **fields} if header_only
                      else {"type": "native_media_committed", **fields})
             await ws.send(json.dumps(reply))
@@ -385,7 +415,8 @@ class NativeMediaMixin:
             return
         for message_id in ids:
             row = self._store.get_native_media(owner, message_id)
-            status = self._native_status(row) if row else {"type": "native_media_status", "v": 1, "message_id": message_id, "status": "missing"}
+            status = self._native_status(row) if row else {"type": "native_media_status", "v": 1, "message_id": message_id, "status": "missing",
+                **({"native_edit_v": 1} if type(data.get("native_edit_v")) is int and data["native_edit_v"] == 1 else {})}
             await ws.send(json.dumps(status))
             if row and row["forwarded"]:
                 self._schedule_native_media(row)

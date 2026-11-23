@@ -152,7 +152,8 @@ export function mediaSizeAttrs(file) {
 // The gateway's text for a file message ("📎" or "📎 name"). The attachment
 // card already shows the file, so this caption is not rendered as text.
 export function isFileCaption(msg) {
-    return !!(msg && msg.file) && String(msg.content || '').trim().startsWith('📎');
+    return !!(msg && msg.file) && !(Number.isSafeInteger(msg.native_edit_seq) && msg.native_edit_seq > 0)
+        && String(msg.content || '').trim().startsWith('📎');
 }
 
 // Attachment card for a message's file (pure, exported for tests). Three

@@ -135,8 +135,7 @@ class NativeChunkGatewayMixin:
         owner = self._client_webids[ws]
         if self._store.is_cert_revoked(f'device:{owner}'):
             return
-        thread = next((thread for thread in self._store.get_dm_threads(owner_webid=owner)
-                       if thread['thread_id'] == data.get('cert_id')), None)
+        thread = self._native_dm_thread(owner, data.get('cert_id'))
         if (not thread or not str(thread['peer_webid']).startswith('did:key:')
                 or data.get('cert_id') in self.dm_clients or data.get('room_id')):
             return
@@ -161,6 +160,7 @@ class NativeChunkGatewayMixin:
         if not row:
             await ws.send(json.dumps({'type': 'error', 'message': 'native_media_not_accepted', 'message_id': data.get('message_id')}))
             return
+        self._store.save_dm_thread(thread['thread_id'], peer, owner_webid=owner)
         await self._send_native_part_status(ws, row)
         if row['custody_complete']:
             self._schedule_native_media(row)

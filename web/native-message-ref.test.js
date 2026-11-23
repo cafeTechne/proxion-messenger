@@ -48,3 +48,13 @@ describe('native attachment references', () => {
         expect(resolveNativeMessageRef(ref, { ...context, actorWebId: context.selfWebId, messages: [message(context.selfWebId, 'other')] })).toBeNull();
     });
 });
+
+it('requires a persisted native reference to agree with the original key and current author role', () => {
+    const context = { threadId: 'thread', selfWebId: 'did:key:alice', peerWebId: 'did:key:bob' };
+    const message = { message_id: 'native:did:key:alice:file', thread_id: 'thread', from_webid: 'did:key:alice', file: {} };
+    const ref = nativeMessageRef(message, context);
+    expect(nativeMessageRef({ ...message, native_ref: ref }, context)).toEqual(ref);
+    for (const invalid of [{ ...ref, id: 'other' }, { ...ref, author: 'peer' }, { ...ref, extra: true }, null]) {
+        expect(nativeMessageRef({ ...message, native_ref: invalid }, context)).toBeNull();
+    }
+});

@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ account: 'alice' }));
 vi.mock('./auth.js', () => ({ accountDbName: name => `${name}:${state.account}` }));
-import { dmHistoryApplyNativeEdit, dmHistoryClearAll, dmHistoryGet, dmHistorySaveFile, dmHistorySetEnabled } from './dmhistory.js';
+import { dmHistoryApplyNativeEdit, dmHistoryClearAll, dmHistoryGet, dmHistorySaveFile, dmHistorySave, applyLocalRecord, dmHistorySetEnabled } from './dmhistory.js';
 import { encodeNativeEdit } from './native-edit-codec.js';
 const source = { threadId: 'thread', selfWebId: 'did:key:alice', peerWebId: 'did:key:bob' };
 const context = { ...source, actorWebId: source.selfWebId };
@@ -31,6 +31,19 @@ describe('atomic native caption history', () => {
         expect((await dmHistoryGet(message.message_id)).edits).toHaveLength(1);
         expect(await dmHistorySaveFile(message, new Blob(['bytes']))).toBe(true);
         expect((await dmHistoryGet(message.message_id)).content).toBe('caption');
+    });
+    it('persists a validated reference and sequence across ordinary cache saves and history merges', async () => {
+        expect(await apply(action())).toBe(true);
+        let row = await dmHistoryGet(message.message_id);
+        expect(row.native_ref).toEqual({ v: 1, kind: 'native_file', id: 'file', author: 'actor' });
+        expect(await dmHistorySave(row)).toBe(true);
+        row = await dmHistoryGet(message.message_id);
+        expect(row).toMatchObject({ native_edit_seq: 1, native_edit_action: 'edit-1', native_edit_parent: 'a'.repeat(64) });
+        const cached = { ...message };
+        expect(applyLocalRecord(cached, row)).toBe(true);
+        expect(cached.native_edit_seq).toBe(1); expect(cached.native_ref).toEqual(row.native_ref);
+        expect(await apply(action(2, 'second'))).toBe(true);
+        expect((await dmHistoryGet(message.message_id)).native_edit_seq).toBe(2);
     });
     it('accepts the authenticated peer alias on the receiving device', async () => {
         expect(await apply(action(), { ...context, selfWebId: source.peerWebId, peerWebId: source.selfWebId })).toBe(true);

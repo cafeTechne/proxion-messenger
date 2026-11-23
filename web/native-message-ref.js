@@ -31,7 +31,10 @@ export function nativeMessageRef(message, context) {
     const match = HISTORY.exec(message.message_id);
     if (!match || message.from_webid !== match[1]) return null;
     const author = match[1] === context.selfWebId ? 'actor' : match[1] === context.peerWebId ? 'peer' : null;
-    return author ? { v: 1, kind: 'native_file', id: match[2], author } : null;
+    if (!author) return null;
+    if (message.native_ref !== undefined && (!validNativeMessageRef(message.native_ref)
+        || message.native_ref.id !== match[2] || message.native_ref.author !== author)) return null;
+    return { v: 1, kind: 'native_file', id: match[2], author };
 }
 
 // The action actor must have been authenticated by the caller. This helper

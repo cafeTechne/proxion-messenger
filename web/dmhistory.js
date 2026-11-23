@@ -14,7 +14,7 @@
 
 import { accountDbName } from './auth.js';
 import { decodeNativeEdit } from './native-edit-codec.js';
-import { resolveNativeMessageRef } from './native-message-ref.js';
+import { nativeMessageRef, validNativeMessageRef, resolveNativeMessageRef } from './native-message-ref.js';
 
 // Base name; the live database is namespaced per authenticated account by
 // accountDbName (see auth.js) so one account can never read another's cached DM
@@ -133,6 +133,13 @@ export function applyLocalRecord(existing, rec) {
         existing.reply_to_id = rec.reply_to_id;
         changed = true;
     }
+    if (rec.file && existing.from_webid === rec.from_webid && existing.thread_id === rec.thread_id && validNativeMessageRef(rec.native_ref)) {
+        for (const field of ['native_ref', 'native_edit_seq', 'native_edit_action', 'native_edit_parent']) {
+            if (rec[field] !== undefined && JSON.stringify(existing[field]) !== JSON.stringify(rec[field])) {
+                existing[field] = rec[field]; changed = true;
+            }
+        }
+    }
     // The gateway has no DM file bytes; show the copy this device kept.
     if (rec.file && !existing.file?.data_b64 && (rec.file.data_b64 || !existing.file)) {
         existing.file = rec.file;
@@ -152,6 +159,11 @@ function _recordForMessage(msg, opts = {}) {
         reply_to_id: msg.reply_to_id || null,
         ...(msg.sender_verified === true ? { sender_verified: true } : {}),
         ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
+        ...(validNativeMessageRef(msg.native_ref) ? { native_ref: { ...msg.native_ref } } : {}),
+        ...(validNativeMessageRef(msg.native_ref) && Number.isSafeInteger(msg.native_edit_seq) && msg.native_edit_seq >= 1 && msg.native_edit_seq <= 100
+            && typeof msg.native_edit_action === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(msg.native_edit_action)
+            && typeof msg.native_edit_parent === 'string' && /^[a-f0-9]{64}$/.test(msg.native_edit_parent)
+            ? { native_edit_seq: msg.native_edit_seq, native_edit_action: msg.native_edit_action, native_edit_parent: msg.native_edit_parent } : {}),
         ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
         ...(msg.file ? { file: fileForRecord(msg.file) } : {}),
         ...(opts.delivery ? { delivery: opts.delivery } : {}),
@@ -640,6 +652,7 @@ export async function dmHistoryApplyNativeEdit(plaintext, event, context, { curr
                     if (!Number.isSafeInteger(previous) || previous < 0 || body.seq !== previous + 1
                         || (previous > 0 && rec.native_edit_parent !== body.parent)) return;
                     applyEditToRecord(rec, body.text, { edited_by: context.actorWebId });
+                    rec.native_ref = nativeMessageRef(rec, context);
                     rec.native_edit_seq = body.seq;
                     rec.native_edit_action = body.action_id;
                     rec.native_edit_parent = body.parent;

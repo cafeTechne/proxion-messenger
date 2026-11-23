@@ -82,7 +82,7 @@ export function createNativeMedia({ secondary, e2e, receipts, getScope, getGener
             recover().catch(onError);
         },
         async handleEvent(event) {
-            if (!active()) return false;
+            if (!active() || event?.native_edit_v === 1) return false;
             if (event?.type === 'native_media_capability_result') {
                 const row = pending.get(event.request_id);
                 if (row?.current() && event.v === 1 && typeof event.supported === 'boolean'

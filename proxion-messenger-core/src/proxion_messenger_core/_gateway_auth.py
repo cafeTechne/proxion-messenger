@@ -158,6 +158,7 @@ class AuthHandlerMixin:
             "dm_commit_v": pending.get("dm_commit_v"),
             "native_media_v": pending.get("native_media_v"),
             "native_chunks_v": pending.get("native_chunks_v"),
+            "native_edit_v": pending.get("native_edit_v"),
             "x25519_pub": pending.get("x25519_pub"),
         })
 
@@ -263,6 +264,7 @@ class AuthHandlerMixin:
                 "dm_commit_v": data.get("dm_commit_v"),
                 "native_media_v": data.get("native_media_v"),
                 "native_chunks_v": data.get("native_chunks_v"),
+                "native_edit_v": data.get("native_edit_v"),
                 "x25519_pub": data.get("x25519_pub"),
             }
             _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
@@ -359,6 +361,7 @@ class AuthHandlerMixin:
                 "dm_commit_v": 1 if data.get("dm_commit_v") == 1 else 0,
                 "native_media_v": 1 if type(data.get("native_media_v")) is int and data["native_media_v"] == 1 else 0,
                 "native_chunks_v": 1 if type(data.get("native_chunks_v")) is int and data["native_chunks_v"] == 1 else 0,
+                "native_edit_v": 1 if type(data.get("native_edit_v")) is int and data["native_edit_v"] == 1 else 0,
                 "native_media_pub": data.get("x25519_pub"),
                 "session_id": str(_uuid_sess.uuid4()),
                 "connected_at": datetime.now(timezone.utc).isoformat(),
@@ -461,6 +464,8 @@ class AuthHandlerMixin:
             registered_msg: dict = {"type": "registered", "webid": identity, "dm_commit_v": 1}
             if self._native_capable(websocket) and self._native_storage_writable():
                 registered_msg["native_media_v"] = 1
+                if self._native_edits_capable(websocket):
+                    registered_msg["native_edit_v"] = 1
                 if self._native_chunks_capable(websocket):
                     registered_msg["native_chunks_v"] = 1
                     registered_msg["native_decline_v"] = 1

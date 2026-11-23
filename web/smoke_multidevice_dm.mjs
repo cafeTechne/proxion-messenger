@@ -1,4 +1,5 @@
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
+import { nativeCaptionJourney } from './scripts/native-caption-journey.mjs';
 import { nativeMediaJourney } from './scripts/native-media-journey.mjs';
 import { nativeChunkJourney } from './scripts/native-chunk-journey.mjs';
 import { nativeInlineAdaptationJourney } from './scripts/native-inline-adaptation-journey.mjs';
@@ -380,8 +381,13 @@ try {
     { timeout: 20000, polling: 250 });
   console.log('  ✓ native DM voice records and sends through the sealed attachment route');
   step = 'native-inline-durable-recovery';
-  await nativeMediaJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
+  if (!process.env.PROXION_NATIVE_CAPTION_ONLY) await nativeMediaJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
     openSender: () => openFirstDm(ap, 'native inline sender'), openReceiver: () => openFirstDm(b, 'native inline recipient'), online });
+  step = 'native-caption-edits';
+  await nativeCaptionJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
+    openSender: () => openFirstDm(ap, 'caption sender'), openReceiver: () => openFirstDm(b, 'caption recipient'), online,
+    fixtureQuery: process.env.PROXION_NATIVE_CAPTION_ONLY ? 'native-history-' : 'native-durable-' });
+  if (!process.env.PROXION_NATIVE_CAPTION_ONLY) {
   step = 'native-accepted-inline-adaptation';
   await nativeInlineAdaptationJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
     openSender: () => openFirstDm(ap, 'adapted inline sender'), openReceiver: () => openFirstDm(b, 'adapted inline recipient'), online });
@@ -559,6 +565,7 @@ try {
   await nativeBlockJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
     openSender: () => openFirstDm(ap, 'blocked sender'), online });
 
+  } // Full acceptance suite; focused caption runs still use both real gateways and primary browsers.
   step = 'done';
   if (pageErrors.length) fail(`uncaught page errors: ${pageErrors.join(' | ')}`);
   if (!process.exitCode) {
