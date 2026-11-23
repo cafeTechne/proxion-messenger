@@ -311,9 +311,10 @@ class OwnerMixin:
                     details=f"removed owner {did[:40]}")
             except Exception:
                 pass
+        # Finish reopening ownership before acknowledging removal. send() can
+        # yield to a client that immediately reads the new claim state.
+        self._owner_claim_code()
         await websocket.send(json.dumps({
             "type": "owner_device_removed", "did": did, "removed": removed}))
-        # The last owner of a public gateway is gone: open a new claim.
-        self._owner_claim_code()
         if self._owner_by_did_or_local(websocket):
             await self._handle_list_owner_devices(websocket, {})

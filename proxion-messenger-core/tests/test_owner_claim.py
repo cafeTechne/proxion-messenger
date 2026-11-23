@@ -431,3 +431,24 @@ def test_owner_rows_are_wrapped_at_rest_and_hand_written_rows_ignored(tmp_path):
     assert [d["did"] for d in store.list_owner_devices()] == [did]
     assert store.remove_owner_device(did) is True
     assert store.list_owner_devices() == []
+
+
+@pytest.mark.asyncio
+async def test_last_owner_removal_ack_observes_the_reopened_claim(tmp_path, public_auth):
+    from unittest.mock import AsyncMock
+    gw = _gateway(tmp_path / 'claim-before-ack.db')
+    owner = _did(Ed25519PrivateKey.generate())
+    ws = AsyncMock()
+    gw._client_webids[ws] = owner
+    gw._proven_sockets.add(ws)
+    gw._remember_owner(owner, 'claim')
+    assert gw._owner_claim is None
+    seen = []
+    async def observe(wire):
+        assert gw._store.list_owner_devices() == []
+        assert gw._owner_claim_open() and gw._owner_claim and gw._owner_claim['code']
+        seen.append(json.loads(wire))
+    ws.send.side_effect = observe
+    await gw._handle_remove_owner_device(ws, {'did': owner, 'confirm': True})
+    assert seen == [{'type': 'owner_device_removed', 'did': owner, 'removed': True}]
+    gw._store.close()
