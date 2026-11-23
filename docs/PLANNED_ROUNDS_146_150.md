@@ -33,6 +33,18 @@ across gateway aliases. Five checks cover collisions, foreign scope, malformed
 references and ambiguous originals. Persistence and edit routing are still open;
 no working native caption edit is claimed by this component.
 
+Custody/history checkpoint (2026-11-22): schema 72 stages bounded opaque
+caption actions separately from immutable file receipts. Admission checks the
+completed original, author/peer/thread, frozen recipient key where available,
+sequence, policy and existing shared storage limits. A validated codec and an
+atomic local-history adapter bind caption/action identity together, preserve the
+attachment Blob and reject conflicting/reordered actions. Failed writes and
+account changes do not acknowledge consumption. These components are not yet
+connected to browser send/receive or capability negotiation; 146 remains open.
+Validation: backend regression 4,878 passed/15 skipped; the final expanded
+custody suite passed 27 checks. Frontend regression 2,717 passed/64 skipped;
+ESLint, Ruff and the cold-path gate passed.
+
 Problem: a native attachment bubble uses `native:<actor>:<UUID>` locally, but
 its edit action sends that private key to a gateway requiring a plain wire id.
 Cross-gateway actor aliases also differ. Editing must target the original file

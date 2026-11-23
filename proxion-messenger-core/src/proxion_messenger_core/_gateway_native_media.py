@@ -103,6 +103,8 @@ class NativeMediaMixin:
         if not latest or latest["queue_id"] != row["queue_id"]:
             return
         row = latest
+        if row["transport"] not in ("inline", "chunks"):
+            return  # Staged action custody cannot reach unnegotiated browsers.
         peer, sender = row["to_webid"], row["from_webid"]
         if (self._is_blocked_for(peer, sender) or self._is_blocked_for(sender, peer)
                 or self._store.is_cert_revoked(f"device:{sender}") or self._store.is_cert_revoked(f"device:{peer}")):

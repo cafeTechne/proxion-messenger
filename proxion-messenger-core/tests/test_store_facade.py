@@ -47,4 +47,4 @@ def test_schema_version_intact():
     import sqlite3
     s = _store()
     v = sqlite3.connect(s.db_path).execute("SELECT version FROM schema_version").fetchone()[0]
-    assert v == LocalStore._SCHEMA_VERSION == 71  # 71 = accepted-inline chunk identity binding
+    assert v == LocalStore._SCHEMA_VERSION == 72  # 72 = ordered native caption action provenance

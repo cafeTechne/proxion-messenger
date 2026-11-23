@@ -13,6 +13,8 @@
 // (same as today) and the app still works live.
 
 import { accountDbName } from './auth.js';
+import { decodeNativeEdit } from './native-edit-codec.js';
+import { resolveNativeMessageRef } from './native-message-ref.js';
 
 // Base name; the live database is namespaced per authenticated account by
 // accountDbName (see auth.js) so one account can never read another's cached DM
@@ -213,7 +215,7 @@ export async function dmHistorySaveFile(msg, blob, { current = () => true } = {}
         || typeof msg.from_webid !== 'string' || !msg.from_webid || msg.from_webid.length > 2048
         || msg.e2e === true || !msg.file || msg.file.size !== blob.size) return false;
     const name = accountDbName(DB_NAME), callerCurrent = current;
-    current = () => _enabled && name === accountDbName(DB_NAME) && callerCurrent();
+    current = () => _enabled && callerCurrent() && name === accountDbName(DB_NAME);
     try {
         const bytes = await blob.arrayBuffer();
         if (!current()) return false;
@@ -604,6 +606,49 @@ export function applyEditToRecord(rec, newContent, meta) {
     }
     rec.content = next;
     return rec;
+}
+
+// Apply a previously authenticated/decrypted native action. The last action
+// identity and caption commit in one transaction, without touching attachment
+// bytes. A caller may acknowledge only a true result; missing originals,
+// conflicts, disabled history and aborted writes must retain its receive job.
+export async function dmHistoryApplyNativeEdit(plaintext, event, context, { current = () => true } = {}) {
+    const body = decodeNativeEdit(plaintext, event);
+    if (!body || !context || event.from_webid !== context.actorWebId || !_enabled || !current()) return false;
+    const name = accountDbName(DB_NAME), callerCurrent = current;
+    current = () => _enabled && callerCurrent() && name === accountDbName(DB_NAME);
+    const id = `native:${context.actorWebId}:${body.ref.id}`;
+    try {
+        const db = await _open();
+        if (!current()) return false;
+        return await new Promise(resolve => {
+            const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+            let accepted = false;
+            tx.oncomplete = () => resolve(accepted && current());
+            tx.onabort = tx.onerror = () => resolve(false);
+            const get = store.get(id);
+            get.onsuccess = () => {
+                try {
+                    if (!current()) { tx.abort(); return; }
+                    const rec = resolveNativeMessageRef(body.ref, { ...context, messages: [get.result] });
+                    if (!rec) return;
+                    const previous = rec.native_edit_seq ?? 0;
+                    if (previous === body.seq) {
+                        accepted = rec.native_edit_action === body.action_id && rec.native_edit_parent === body.parent && rec.content === body.text;
+                        return;
+                    }
+                    if (!Number.isSafeInteger(previous) || previous < 0 || body.seq !== previous + 1
+                        || (previous > 0 && rec.native_edit_parent !== body.parent)) return;
+                    applyEditToRecord(rec, body.text, { edited_by: context.actorWebId });
+                    rec.native_edit_seq = body.seq;
+                    rec.native_edit_action = body.action_id;
+                    rec.native_edit_parent = body.parent;
+                    store.put(rec);
+                    accepted = true;
+                } catch { try { tx.abort(); } catch { /* Already settled. */ } }
+            };
+        });
+    } catch { return false; }
 }
 
 // Earlier versions of one message, oldest first ([] when none are cached).

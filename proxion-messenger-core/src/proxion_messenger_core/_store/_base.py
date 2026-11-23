@@ -254,7 +254,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 71
+    _SCHEMA_VERSION = 72
     _integrity_ok: bool = True
     _migration_error: str = ""
     def _init_db(self) -> None:
@@ -1719,6 +1719,13 @@ class _StoreBase(object):
             # 71: bind adapted chunk manifests without changing an accepted
             # inline envelope's original retry/receipt identity.
             ["ALTER TABLE native_media ADD COLUMN chunk_identity_digest TEXT"],
+            # 72: ordered caption actions retain their original file provenance
+            # without changing the file's immutable envelope/receipt identity.
+            [
+                "ALTER TABLE native_media ADD COLUMN native_parent_id TEXT",
+                "ALTER TABLE native_media ADD COLUMN native_sequence INTEGER NOT NULL DEFAULT 0",
+                "CREATE UNIQUE INDEX native_edit_order ON native_media(from_webid,native_parent_id,native_sequence) WHERE transport='edit'",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):

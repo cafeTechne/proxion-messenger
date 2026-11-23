@@ -200,7 +200,8 @@ def test_schema_69_upgrade_preserves_inline_bytes_without_inventing_chunk_eviden
     with sqlite3.connect(path) as conn:
         conn.execute('DROP TRIGGER native_media_clear_parts'); conn.execute('DROP TRIGGER native_media_delete_parts')
         conn.execute('DROP TABLE native_media_parts')
-        for field in ['transport', 'cipher_digest', 'total_bytes', 'chunk_count', 'custody_complete', 'manifest_digest', 'recipient_pub', 'chunk_identity_digest']:
+        conn.execute('DROP INDEX native_edit_order')
+        for field in ['transport', 'cipher_digest', 'total_bytes', 'chunk_count', 'custody_complete', 'manifest_digest', 'recipient_pub', 'chunk_identity_digest', 'native_parent_id', 'native_sequence']:
             conn.execute('ALTER TABLE native_media DROP COLUMN ' + field)
         conn.execute('UPDATE schema_version SET version=69')
     upgraded = LocalStore(path)
@@ -304,6 +305,9 @@ def test_schema_70_chunk_upgrade_preserves_exact_manifest_parts_and_receipt(tmp_
     for seq in range(2): assert put(old, original, seq, raw[seq * CHUNK:(seq + 1) * CHUNK])
     original = old.get_native_media('alice', 'file'); old.close()
     with sqlite3.connect(path) as conn:
+        conn.execute('DROP INDEX native_edit_order')
+        conn.execute('ALTER TABLE native_media DROP COLUMN native_parent_id')
+        conn.execute('ALTER TABLE native_media DROP COLUMN native_sequence')
         conn.execute('ALTER TABLE native_media DROP COLUMN chunk_identity_digest')
         conn.execute('UPDATE schema_version SET version=70')
     upgraded = LocalStore(path)

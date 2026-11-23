@@ -33,6 +33,7 @@ class NativeMediaStoreMixin:
                 "total_bytes": row["total_bytes"], "chunk_count": row["chunk_count"],
                 "custody_complete": bool(row["custody_complete"]), "manifest_digest": row["manifest_digest"],
                 "recipient_pub": row["recipient_pub"],
+                "native_parent_id": row["native_parent_id"], "native_sequence": row["native_sequence"],
                 "queue_id": row["queue_id"], "from_webid": row["from_webid"],
                 "message_id": row["message_id"], "to_webid": row["to_webid"],
                 "media_digest": row["media_digest"], "envelope_digest": row["envelope_digest"],
