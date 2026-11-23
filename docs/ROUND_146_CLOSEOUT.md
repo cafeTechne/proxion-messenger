@@ -1,7 +1,6 @@
 # Round 146: Native attachment references and caption edits
 
-Status: implementation and focused browser acceptance verified; final backend
-regression gate running. Keep 146 open until that gate completes.
+Status: complete (2026-11-22).
 
 ## Result
 
@@ -66,10 +65,9 @@ ownerless, expired and revoked certificates cannot use this path. The completed
   isolated, not-yet-connected round 147 reply codec. This includes ordinary text/room edit coverage.
 - Focused real-browser caption journey: passed (both authors and interruptions).
 - ESLint, Ruff, cold-path gate and whitespace checks: passed.
-- Backend regression after the owned-contact fix: 4,897 passed, 15 skipped,
-  with one owner-removal acknowledgement-order failure. The completion-order
-  fix and deterministic check passed the owner/native gateway suite (33 tests);
-  a clean full backend rerun is pending.
+- Clean backend regression: 4,899 passed, 15 skipped. Its earlier owner-removal
+  completion-order race was fixed and covered by a deterministic check; claim
+  reopening now completes before the removal acknowledgement.
 
 Rounds 130–145 retain their existing scope and outcomes. In particular, 144
 remains design-only: no prepared cancellation, unilateral reset or larger skip

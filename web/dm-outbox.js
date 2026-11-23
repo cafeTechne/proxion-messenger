@@ -1,9 +1,23 @@
 import { dmEnvelopeFingerprint } from './dm-receipts.js';
+import { decodeNativeReply } from './native-reply-codec.js';
+import { validNativeMessageRef } from './native-message-ref.js';
+
+function validReplyPlan(job) {
+    if (job.wireText === undefined) return true;
+    const body = decodeNativeReply(job.wireText, job.id), ref = job.record?.native_reply_ref;
+    return !!body && body.text === job.record?.content && validNativeMessageRef(ref)
+        && ['v', 'kind', 'id', 'author'].every(field => ref[field] === body.ref[field])
+        && job.record.native_reply_actor === job.actor && job.record.from_webid === job.actor
+        && String(job.actor).startsWith('did:key:') && String(job.peer).startsWith('did:key:') && job.actor !== job.peer
+        && (job.route?.cmd === 'local_dm' ? job.route.target_webid === job.peer
+            : job.route?.cmd === 'send_dm' && job.route.cert_id === job.record.thread_id);
+}
+
 
 // A frozen send plan precedes every ratchet advance. Per-peer pendingSends then
 // bridge a crash between encryption and saving the fully prepared wire frames.
 export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActive = () => true, send,
-    persistMessage, clearDelivery, canSend = () => true, planStatus = () => 'ready', onCancelled = () => {}, onPending = () => {}, onConfirmed = () => {},
+    persistMessage, clearDelivery, canSend = () => true, planStatus = () => 'ready', nativeReferencesReady = () => false, onCancelled = () => {}, onPending = () => {}, onConfirmed = () => {},
     onError = err => console.warn('[dm-outbox] pending:', err), now = Date.now }) {
     const failures = new Set(), headerWaiting = new Set();
     const rememberFailure = (id, err) => {
@@ -55,11 +69,13 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             fanout.push({ to_webid: entry.account, to_device_id: entry.device,
                 payload: { ...field(encrypted[index]), from_device_id: job.device,
                     thread_id: job.record.thread_id, thread_peer: job.peer,
-                    x25519_pub: job.pub, ...(job.record.reply_to_id ? { reply_to_id: job.record.reply_to_id } : {}) } });
+                    x25519_pub: job.pub, ...(job.record.reply_to_id && job.wireText === undefined ? { reply_to_id: job.record.reply_to_id } : {}) } });
         }
         if (job.mode === 'fanout') return fanout.length ? [{ cmd: 'send_dm_fanout', message_id: job.id, fanout }] : [];
         const primary = job.entries.findIndex(entry => entry.primary);
-        const frames = encrypted[primary] ? [{ ...job.route, ...field(encrypted[primary]), message_id: job.id,
+        const route = { ...job.route };
+        if (job.wireText !== undefined) delete route.reply_to_id;
+        const frames = encrypted[primary] ? [{ ...route, ...field(encrypted[primary]), message_id: job.id,
             timestamp: job.record.timestamp, from_display_name: job.record.from_display_name }] : [];
         if (fanout.length) frames.push({ cmd: 'send_dm_fanout', message_id: job.id, fanout });
         return frames;
@@ -126,6 +142,8 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 || (input.mode === 'single' && input.entries.filter(entry => entry.primary).length !== 1)) {
             throw Error('Invalid frozen send plan');
         }
+        if (!validReplyPlan(input)) throw Error('Invalid native reply send plan');
+        if (input.wireText !== undefined && !nativeReferencesReady(input)) throw Error('Native reference delivery unavailable');
         const job = JSON.parse(JSON.stringify({ ...input, receiptsVersion: 1, accepted: [], peerConfirmed: false, scope: ctx.scope,
             sendId: await dmEnvelopeFingerprint({ scope: ctx.scope, message_id: input.id }) }));
         await save(job, ctx);
@@ -151,7 +169,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             if (!force && attempts.has(id) && now() - attempts.get(id) < 18000) return false;
             try {
                 if (job.peerConfirmed) await settleAccepted(job, ctx);
-                if (!ctx.current() || !canSend(job)) return false;
+                if (!ctx.current() || !canSend(job) || job.wireText !== undefined && !nativeReferencesReady(job)) return false;
                 failures.delete(id);
                 headerWaiting.delete(id);
                 let ready = job, transmitted = false;
@@ -159,7 +177,8 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 const prepare = async (entry, index) => {
                     if (encrypted[index] || accepted(ready).has(index)) return;
                     if (!ctx.current()) throw Error('Send context changed');
-                    encrypted[index] = await e2e.ratchetEncrypt(entry.peerId, job.record.content,
+                    if (!validReplyPlan(job)) throw Error('Invalid native reply send plan');
+                    encrypted[index] = await e2e.ratchetEncrypt(entry.peerId, job.wireText ?? job.record.content,
                         { sendId: job.sendId, peerPub: entry.pub, current: ctx.current });
                 };
                 if (!job.frames) {

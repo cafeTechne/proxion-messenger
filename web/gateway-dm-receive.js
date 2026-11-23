@@ -35,6 +35,7 @@ export function gatewayReceiveCommit(event) {
 
 export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleEvent,
     getScope, getGeneration = () => 0, toMessage, isActive = () => true, isSealedPlain = () => false,
+    transformMessage = message => message,
     sendCommit = () => true, requestReplay = () => {},
     onError = err => console.warn('[gateway-dm] receive pending:', err) }) {
     let generation = 0, timer = null, recovering = null;
@@ -63,8 +64,10 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
             return true;
         }
         if (!ctx.current()) return false;
-        const message = { ...row.data.message, content: row.content, e2e: false,
-            _persistDm: true, _dmHistoryManaged: true };
+        const message = await transformMessage({ ...row.data.message, content: row.content, e2e: false,
+            _persistDm: true, _dmHistoryManaged: true }, ctx.current);
+        if (!message || !ctx.current() || ['message_id', 'thread_id', 'from_webid']
+            .some(field => message[field] !== row.data.message[field])) return false;
         if (!isSealedPlain(message.content)) {
             if (!presented.has(key)) {
                 presented.add(key);

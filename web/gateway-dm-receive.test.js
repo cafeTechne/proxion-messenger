@@ -230,3 +230,34 @@ describe('durable gateway commit acknowledgements', () => {
         expect(gatewayReceiveCommit({ ...fanout, receive_commit: { ...fanout.receive_commit, v: 2 } })).toBeNull();
     });
 });
+
+describe('structured message transformation at the durable history boundary', () => {
+    it('retains transformed display text and reply reference before full receive commit', async () => {
+        const h = harness(); h.options.transformMessage = vi.fn(async message => ({ ...message, content: 'reply display text',
+            native_reply_ref: { v: 1, kind: 'native_file', id: 'file', author: 'peer' }, native_reply_actor: 'did:key:alice' }));
+        expect(await h.engine().receive(event)).toBe(true);
+        expect(h.history.get(event.message_id)).toMatchObject({ content: 'reply display text', native_reply_ref: { id: 'file' } });
+        expect(h.delivered[0].content).toBe('reply display text');
+        expect(h.journal.size).toBe(0);
+    });
+    it('keeps the protected journal and withholds acknowledgement after failed transformation', async () => {
+        const h = harness(); h.options.transformMessage = vi.fn().mockResolvedValueOnce(null).mockImplementation(async message => message);
+        const engine = h.engine(); expect(await engine.receive(event)).toBe(false);
+        expect(h.journal.size).toBe(1); expect(h.history.size).toBe(0); expect(h.e2e.finishDmReceive).not.toHaveBeenCalled();
+        expect(await h.receipts.pendingCommits('bob/device')).toEqual([]);
+        await engine.recover(); expect(h.history.size).toBe(1); expect(h.journal.size).toBe(0);
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledOnce();
+    });
+    it('does not allow a decoded body to retarget the authenticated message routing', async () => {
+        for (const field of ['message_id', 'thread_id', 'from_webid']) {
+            const h = harness(); h.options.transformMessage = message => ({ ...message, [field]: 'foreign' });
+            expect(await h.engine().receive(event)).toBe(false);
+            expect(h.history.size).toBe(0); expect(h.e2e.finishDmReceive).not.toHaveBeenCalled();
+        }
+    });
+    it('rejects stale account work during asynchronous transformation', async () => {
+        const h = harness(); h.options.transformMessage = async message => { h.scope('other-account'); return message; };
+        expect(await h.engine().receive(event)).toBe(false);
+        expect(h.history.size).toBe(0); expect(h.e2e.finishDmReceive).not.toHaveBeenCalled();
+    });
+});

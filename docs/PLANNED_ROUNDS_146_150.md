@@ -25,14 +25,14 @@ finish its concrete work before its completion notes/checks are marked done.
 
 ## Round 146: Valid native attachment references and caption edits
 
-Status: in progress.
+Status: complete (2026-11-22).
 
 Implementation checkpoint (2026-11-22): validated references, protected caption
 plans, signed gateway custody, negotiated primary delivery and atomic caption
 history are connected. The focused real-browser journey passed both authors'
 edits, non-author gating, exact preparation/reload, failed history, lost full
 commits, both gateway restarts, unchanged file hashes and later text. The final
-backend regression gate is still running; see `ROUND_146_CLOSEOUT.md`.
+backend regression passed (4,899 tests, 15 skipped); see `ROUND_146_CLOSEOUT.md`.
 
 Problem: a native attachment bubble uses `native:<actor>:<UUID>` locally, but
 its edit action sends that private key to a gateway requiring a plain wire id.
@@ -64,7 +64,17 @@ new room permissions, resets or prepared file retirement.
 
 ## Round 147: Replies and reactions on native attachments
 
-Status: not started. Depends on 146.
+Status: in progress. Depends on 146.
+
+Reply checkpoint (2026-11-22): the codec covers author disambiguation for
+same-UUID files, foreign scope, malformed bindings and delayed originals without
+phantom attachments. Normal outbox plans can freeze a validated typed wire body
+separately from display text and omit private reply keys from primary/mirror
+metadata. An optional receive transform runs before durable history/ACK and
+cannot change authenticated routing. Compose, capability/version gates, reference
+history, quote navigation and reactions remain unconnected/unimplemented. None
+of 147's user-visible acceptance cases is claimed complete. See
+`ROUND_147_IMPLEMENTATION_NOTES.md` for the compatibility and ordering handoff.
 
 Problem: reaction and reply targets currently use the same private UI ids.
 A reference must identify the correct original message on each endpoint,

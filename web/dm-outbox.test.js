@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDmOutbox } from './dm-outbox.js';
+import { encodeNativeReply } from './native-reply-codec.js';
 const clone = value => JSON.parse(JSON.stringify(value));
 const input = { id: 'message-1', peer: 'bob', actor: 'alice', device: 'alice-device', pub: 'alice-pub',
     mode: 'single', entries: [{ peerId: 'bob', account: 'bob', primary: true }],
@@ -381,5 +382,50 @@ describe('bridge source account binding', () => {
         const pending = engine.send(job.id); await entered; generation++; generation++; release();
         expect(await pending).toBe(false); expect(h.frames).toEqual([]); expect(h.disk.get(job.id).podActor).toBe('pod-A');
         await engine.send(job.id); expect(h.frames).toHaveLength(1);
+    });
+});
+
+// A native reply has display text in history and a typed, bound wire body.
+// Neither primary nor mirror metadata may publish its private local target id.
+function nativeReplyInput() {
+    const context = { threadId: 'thread', selfWebId: 'did:key:alice', peerWebId: 'did:key:bob' };
+    const original = { message_id: 'native:did:key:alice:file', from_webid: context.selfWebId, thread_id: 'thread', file: {} };
+    const encoded = encodeNativeReply(original, context, { messageId: input.id, text: 'reply text' });
+    return { ...clone(input), peer: context.peerWebId, actor: context.selfWebId,
+        entries: [{ peerId: context.peerWebId, account: context.peerWebId, primary: true },
+            { peerId: 'mirror', account: context.selfWebId, device: 'mirror' }],
+        wireText: encoded.plaintext, route: { ...input.route, target_webid: context.peerWebId, reply_to_id: original.message_id },
+        record: { ...input.record, from_webid: context.selfWebId, content: encoded.body.text,
+            reply_to_id: original.message_id, native_reply_ref: encoded.body.ref, native_reply_actor: context.selfWebId } };
+}
+
+describe('native reply plans in the normal durable outbox', () => {
+    it('seals the frozen typed body for primary and mirrors while persisting ordinary display text', async () => {
+        const h = harness(), plan = nativeReplyInput(); h.options.nativeReferencesReady = () => true; const engine = h.engine();
+        await engine.queue(plan); expect(await engine.send(plan.id)).toBe(true);
+        expect(h.e2e.ratchetEncrypt.mock.calls.map(call => call[1])).toEqual([plan.wireText, plan.wireText]);
+        expect(h.history.get(plan.id).content).toBe('reply text');
+        expect(h.history.get(plan.id).reply_to_id).toBe(plan.record.reply_to_id);
+        expect(h.frames[0].reply_to_id).toBeUndefined(); expect(h.frames[1].fanout[0].payload.reply_to_id).toBeUndefined();
+        expect(JSON.stringify(h.frames)).not.toContain('native:');
+        expect(h.disk.get(plan.id).wireText).toBe(plan.wireText);
+    });
+    it('keeps typed replies disabled until capability-gated ingress/delivery is configured', async () => {
+        const h = harness(), plan = nativeReplyInput();
+        await expect(h.engine().queue(plan)).rejects.toThrow('Native reference delivery unavailable');
+        expect(h.disk.size).toBe(0); expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled();
+        let ready = true; h.options.nativeReferencesReady = () => ready;
+        const engine = h.engine(); await engine.queue(plan); ready = false;
+        expect(await engine.send(plan.id)).toBe(false);
+        expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled(); expect(h.frames).toEqual([]);
+    });
+    it('rejects changed message identity, text, author or reference before encryption', async () => {
+        for (const patch of [plan => { plan.wireText = 'ordinary text'; }, plan => { plan.record.content = 'different'; },
+            plan => { plan.record.native_reply_actor = 'did:key:foreign'; }, plan => { plan.record.native_reply_ref.author = 'peer'; },
+            plan => { plan.route.cmd = 'send_room'; }, plan => { plan.route.target_webid = 'did:key:foreign'; }]) {
+            const h = harness(), plan = nativeReplyInput(); h.options.nativeReferencesReady = () => true; const engine = h.engine(); patch(plan);
+            await expect(engine.queue(plan)).rejects.toThrow('Invalid native reply send plan');
+            expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled(); expect(h.disk.size).toBe(0);
+        }
     });
 });
