@@ -28,6 +28,7 @@ from ._gateway_http import HttpEndpointsMixin
 from ._gateway_dm import DmHandlerMixin
 from ._gateway_native_media import NativeMediaMixin
 from ._gateway_native_edits import NativeEditGatewayMixin
+from ._gateway_native_refs import NativeReferenceGatewayMixin
 from ._gateway_native_chunks import NativeChunkGatewayMixin
 from ._gateway_auth import AuthHandlerMixin
 from ._gateway_misc import MiscHandlerMixin
@@ -127,7 +128,7 @@ def invite_issuer_did(invite: dict) -> str:
         return ""
 
 
-class ProxionGateway(NativeEditGatewayMixin, NativeChunkGatewayMixin, NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, OwnerMixin, HttpEndpointsMixin):
+class ProxionGateway(NativeReferenceGatewayMixin, NativeEditGatewayMixin, NativeChunkGatewayMixin, NativeMediaMixin, VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, OwnerMixin, HttpEndpointsMixin):
     def __init__(
         self,
         agent: AgentState,
@@ -1703,6 +1704,10 @@ class ProxionGateway(NativeEditGatewayMixin, NativeChunkGatewayMixin, NativeMedi
                 await self._handle_get_peer_devices(websocket, data)
             elif cmd == "get_peer_device_keys":
                 await self._handle_get_peer_device_keys(websocket, data)
+            elif cmd == "native_ref_capability":
+                await self._handle_native_ref_capability(websocket, data)
+            elif cmd == "native_ref_send":
+                await self._handle_native_ref_send(websocket, data)
             elif cmd == "native_edit_capability":
                 await self._handle_native_edit_capability(websocket, data)
             elif cmd == "native_edit_send":

@@ -327,7 +327,7 @@ export function createRendering({
     getActiveView, getSocket, getSelfWebId, getSelfPubHex,
     getCurrentDisappearMs, getCurrentDisappearSince = () => '', getMessageMap, getAllMessages, getUserPresence,
     renderReactions, openCtxMenu, sendUpdateLastRead,
-    getRoomCode, renderWindow, scrollBatch,
+    getRoomCode, renderWindow, scrollBatch, loadReplyParent = null,
     // Account-scopes the verification-badge localStorage key so a second account
     // on a shared browser can't read the first's trust marks (see e2e.js). Falls
     // back to identity for callers/tests that don't supply it.
@@ -802,12 +802,37 @@ export function createRendering({
             } else {
                 // Parent not in the buffer: fetch it once, fill the quote when it arrives
                 bodyHtml += `<div class="reply-context reply-context-loading" data-msg-action="scroll-reply" data-reply-id="${replyIdEsc}" data-reply-target="${replyIdEsc}"><em>${t('msg.loadingReply')}</em></div>`;
-                if (!state._requestedReplies.has(msg.reply_to_id)
+                if (typeof msg.reply_to_id === 'string' && msg.reply_to_id.startsWith('native:')) {
+                    if (!state._requestedReplies.has(msg.reply_to_id) && loadReplyParent) {
+                        state._requestedReplies.add(msg.reply_to_id);
+                        const view = getActiveView(), scope = e2eScopedKey('native-reply'), self = getSelfWebId();
+                        Promise.resolve().then(() => loadReplyParent(msg.reply_to_id, msg)).then(parentRow => {
+                            if (getActiveView()?.id !== view?.id || getActiveView()?.type !== view?.type
+                                || scope !== e2eScopedKey('native-reply') || self !== getSelfWebId()) { state._requestedReplies.delete(msg.reply_to_id); return; }
+                            const found = parentRow?.message_id === msg.reply_to_id ? parentRow : null;
+                            if (!found) state._requestedReplies.delete(msg.reply_to_id);
+                            if (found) {
+                                getMessageMap()[found.message_id] = found;
+                                const messages = getAllMessages();
+                                if (!messages.some(row => row.message_id === found.message_id)) {
+                                    messages.push(found); messages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+                                }
+                            }
+                            const selector = `.reply-context[data-reply-id="${typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(msg.reply_to_id) : msg.reply_to_id}"]`;
+                            document.querySelectorAll(selector).forEach(quote => {
+                                quote.classList.remove('reply-context-loading');
+                                quote.innerHTML = found ? replyQuoteHtml(found) : `<em>${t('file.unavailable')}</em>`;
+                            });
+                        }).catch(() => { state._requestedReplies.delete(msg.reply_to_id); });
+                    }
+                } else if (!state._requestedReplies.has(msg.reply_to_id)
                         && socket && socket.readyState === WebSocket.OPEN) {
                     state._requestedReplies.add(msg.reply_to_id);
                     socket.send(JSON.stringify({ cmd: "get_message", message_id: msg.reply_to_id }));
                 }
             }
+        } else if (msg.native_reply_ref && msg.native_reply_unavailable) {
+            bodyHtml += `<div class="reply-context reply-context-unavailable"><em>${t('file.unavailable')}</em></div>`;
         }
 
         // Round 68: forwarded banner

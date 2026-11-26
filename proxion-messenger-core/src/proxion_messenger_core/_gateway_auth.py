@@ -159,6 +159,7 @@ class AuthHandlerMixin:
             "native_media_v": pending.get("native_media_v"),
             "native_chunks_v": pending.get("native_chunks_v"),
             "native_edit_v": pending.get("native_edit_v"),
+            "native_ref_v": pending.get("native_ref_v"),
             "x25519_pub": pending.get("x25519_pub"),
         })
 
@@ -265,6 +266,7 @@ class AuthHandlerMixin:
                 "native_media_v": data.get("native_media_v"),
                 "native_chunks_v": data.get("native_chunks_v"),
                 "native_edit_v": data.get("native_edit_v"),
+                "native_ref_v": data.get("native_ref_v"),
                 "x25519_pub": data.get("x25519_pub"),
             }
             _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
@@ -362,6 +364,7 @@ class AuthHandlerMixin:
                 "native_media_v": 1 if type(data.get("native_media_v")) is int and data["native_media_v"] == 1 else 0,
                 "native_chunks_v": 1 if type(data.get("native_chunks_v")) is int and data["native_chunks_v"] == 1 else 0,
                 "native_edit_v": 1 if type(data.get("native_edit_v")) is int and data["native_edit_v"] == 1 else 0,
+                "native_ref_v": 1 if type(data.get("native_ref_v")) is int and data["native_ref_v"] == 1 else 0,
                 "native_media_pub": data.get("x25519_pub"),
                 "session_id": str(_uuid_sess.uuid4()),
                 "connected_at": datetime.now(timezone.utc).isoformat(),
@@ -420,6 +423,8 @@ class AuthHandlerMixin:
                         continue
                     if self._store.is_cert_revoked(f"device:{_dev_id}") or self._client_webids.get(websocket) != identity:
                         break
+                    if 'native_ref_v' in _env['payload'] and not self._native_ref_deliverable(websocket, _env['payload']):
+                        continue  # Legacy/changed-key readers cannot consume typed reference text.
                     if not self._store.has_device_fanout(identity, _dev_id, _env["queue_id"]):
                         continue  # removed by account/policy cleanup or another completed drain
                     await websocket.send(json.dumps(self._fanout_commit_event(_env, _dev_id) if self._fanout_commit_capable(websocket) else {
@@ -462,6 +467,8 @@ class AuthHandlerMixin:
                     display_name=self._display_names.get(websocket, "")))
             turn_creds = self._make_turn_creds(identity)
             registered_msg: dict = {"type": "registered", "webid": identity, "dm_commit_v": 1}
+            if self._native_ref_capable(websocket) and self._native_storage_writable():
+                registered_msg['native_ref_v'] = 1
             if self._native_capable(websocket) and self._native_storage_writable():
                 registered_msg["native_media_v"] = 1
                 if self._native_edits_capable(websocket):

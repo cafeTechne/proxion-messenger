@@ -1000,6 +1000,8 @@ class HttpEndpointsMixin:
             _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"media_digest", "payload", "header_digest", "operation", "request_id", "expected_pub"}
         if data.get("content_type") == "native_media_query":
             _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"native_chunks_v"}
+        if data.get("content_type") == "native_ref":
+            _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"native_ref_v", "file_id", "author", "parent_header_digest", "operation", "expected_pub", "request_id", "payload", "to_device_id"}
         if data.get("content_type") == "native_edit":
             _ALLOWED_RELAY_KEYS = _ALLOWED_RELAY_KEYS | {"native_edit_v", "file_id", "native_sequence", "parent_header_digest", "recipient_pub", "payload", "media_digest", "header_digest", "operation", "request_id", "expected_pub"}
         if data.get("content_type") == "native_media_chunks":
@@ -1030,7 +1032,7 @@ class HttpEndpointsMixin:
         #     participate in the channel, else it could inject a fake peer.
         _SELF_SIGNED_TYPES = (
             "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer",
-            "voice_signal", "contact_removed", "native_inline", "native_media_query", "native_media_chunks", "native_edit")
+            "voice_signal", "contact_removed", "native_inline", "native_media_query", "native_media_chunks", "native_edit", "native_ref")
         _MEMBER_SIGNED_TYPES = (
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
             "room_emoji", "room_update",
@@ -1193,6 +1195,8 @@ class HttpEndpointsMixin:
         if data.get("content_type") == "voice_channel_peer_present":
             return await self._handle_voice_channel_peer_present_relay(data)
 
+        if data.get("content_type") == "native_ref":
+            return await self._handle_native_ref_relay(data)
         if data.get("content_type") == "native_edit":
             return await self._handle_native_edit_relay(data)
         if data.get("content_type") == "native_inline":

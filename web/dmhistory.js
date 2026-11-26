@@ -14,7 +14,8 @@
 
 import { accountDbName } from './auth.js';
 import { decodeNativeEdit } from './native-edit-codec.js';
-import { nativeMessageRef, validNativeMessageRef, resolveNativeMessageRef } from './native-message-ref.js';
+import { resolveNativeReply } from './native-reply-codec.js';
+import { nativeMessageRef, validNativeMessageRef, resolveNativeMessageRef, nativeMessageIdForRef } from './native-message-ref.js';
 
 // Base name; the live database is namespaced per authenticated account by
 // accountDbName (see auth.js) so one account can never read another's cached DM
@@ -140,6 +141,12 @@ export function applyLocalRecord(existing, rec) {
             }
         }
     }
+    if (rec.from_webid === existing.from_webid && rec.thread_id === existing.thread_id && validNativeMessageRef(rec.native_reply_ref)
+        && rec.native_reply_actor === rec.from_webid) {
+        for (const field of ['native_reply_ref', 'native_reply_actor', 'native_reply_unavailable']) {
+            if (JSON.stringify(existing[field]) !== JSON.stringify(rec[field])) { existing[field] = rec[field]; changed = true; }
+        }
+    }
     // The gateway has no DM file bytes; show the copy this device kept.
     if (rec.file && !existing.file?.data_b64 && (rec.file.data_b64 || !existing.file)) {
         existing.file = rec.file;
@@ -157,6 +164,10 @@ function _recordForMessage(msg, opts = {}) {
         content: msg.content != null ? String(msg.content) : '',
         timestamp: msg.timestamp || new Date().toISOString(),
         reply_to_id: msg.reply_to_id || null,
+        ...(validNativeMessageRef(msg.native_reply_ref) && typeof msg.native_reply_actor === 'string'
+            && /^did:key:[A-Za-z0-9_-]{1,2040}$/.test(msg.native_reply_actor) && msg.native_reply_actor === msg.from_webid
+            ? { native_reply_ref: { ...msg.native_reply_ref }, native_reply_actor: msg.native_reply_actor,
+                native_reply_unavailable: msg.native_reply_unavailable === true } : {}),
         ...(msg.sender_verified === true ? { sender_verified: true } : {}),
         ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
         ...(validNativeMessageRef(msg.native_ref) ? { native_ref: { ...msg.native_ref } } : {}),
@@ -659,6 +670,46 @@ export async function dmHistoryApplyNativeEdit(plaintext, event, context, { curr
                     store.put(rec);
                     accepted = true;
                 } catch { try { tx.abort(); } catch { /* Already settled. */ } }
+            };
+        });
+    } catch { return false; }
+}
+
+// Repair only a retained reply's local quote link after its original arrives.
+// Read metadata in the same account/transaction; do not hydrate, copy or invent
+// a file, and do not rewrite delivery state or edited text.
+export async function dmHistoryResolveNativeReply(messageId, context, { current = () => true } = {}) {
+    if (!_enabled || !messageId || !context || !current()) return false;
+    const name = accountDbName(DB_NAME), callerCurrent = current;
+    current = () => _enabled && callerCurrent() && name === accountDbName(DB_NAME);
+    try {
+        const db = await _open(); if (!current()) return false;
+        return await new Promise(resolve => {
+            const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+            let result = false;
+            tx.oncomplete = () => resolve(current() ? result : false);
+            tx.onabort = tx.onerror = () => resolve(false);
+            const request = store.get(messageId);
+            request.onsuccess = () => {
+                try {
+                    if (!current()) { tx.abort(); return; }
+                    const rec = request.result;
+                    if (!rec || rec.thread_id !== context.threadId || rec.from_webid !== context.actorWebId
+                        || rec.native_reply_actor !== context.actorWebId || !validNativeMessageRef(rec.native_reply_ref)) return;
+                    const target = nativeMessageIdForRef(rec.native_reply_ref, context);
+                    if (!target) return;
+                    const original = store.get(target);
+                    original.onsuccess = () => {
+                        try {
+                            if (!current()) { tx.abort(); return; }
+                            const resolved = resolveNativeReply({ mid: rec.message_id, ref: rec.native_reply_ref, text: 'reference' },
+                                { ...context, messages: original.result ? [original.result] : [] });
+                            if (!resolved) return;
+                            result = { reply_to_id: resolved.reply_to_id, native_reply_unavailable: resolved.native_reply_unavailable };
+                            if (rec.reply_to_id !== result.reply_to_id || rec.native_reply_unavailable !== result.native_reply_unavailable) store.put({ ...rec, ...result });
+                        } catch { try { tx.abort(); } catch { /* settled */ } }
+                    };
+                } catch { try { tx.abort(); } catch { /* settled */ } }
             };
         });
     } catch { return false; }

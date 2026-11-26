@@ -30,7 +30,8 @@ export function gatewayReceiveCommit(event) {
     if (event?.type !== 'dm_fanout' || token?.v !== 1 || !Number.isSafeInteger(token.queue_id)
         || token.queue_id < 1 || !/^[a-f0-9]{64}$/.test(token.envelope_digest || '')) return null;
     return { cmd: 'dm_receive_commit', v: 1, queue_id: token.queue_id,
-        envelope_digest: token.envelope_digest, from_webid: event.from_webid, message_id: event.message_id };
+        envelope_digest: token.envelope_digest, from_webid: event.from_webid, message_id: event.message_id,
+        ...(event.payload?.native_ref_v === 1 ? { native_ref_v: 1 } : {}) };
 }
 
 export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleEvent,
@@ -86,7 +87,7 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
     }
     async function receive(event) {
         const ctx = context();
-        if (!ctx.current()) return false;
+        if (!ctx.current() || event.payload && 'native_ref_v' in event.payload && event.payload.native_ref_v !== 1) return false;
         const receiveId = await dmEnvelopeFingerprint(gatewayDmEnvelope(event));
         if (!ctx.current()) return false;
         const key = ctx.scope + receiveId;
@@ -162,6 +163,9 @@ export function createGatewayDmReceiver({ e2e, receipts, persistMessage, handleE
         async confirmCommit(event) {
             const ctx = context();
             if (!ctx.current() || !/^[a-f0-9]{64}$/.test(event?.receive_id || '')) return false;
+            const pending = await receipts.pendingCommits(ctx.scope);
+            const known = pending.find(command => command.receive_id === event.receive_id);
+            if (known?.native_ref_v === 1 && event.native_ref_v !== 1) return false;
             return receipts.confirmCommit(ctx.scope, event.receive_id, event);
         },
         start() {

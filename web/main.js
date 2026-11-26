@@ -62,7 +62,8 @@ import { createDmReceiptStore } from './dm-receipts.js';
 import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receive.js';
 import { createNativeMedia } from './native-media.js';
 import { createNativeEdits } from './native-edits.js';
-import { nativeMessageRef } from './native-message-ref.js';
+import { nativeMessageRef, nativeMessageIdForRef } from './native-message-ref.js';
+import { createNativeReferences } from './native-references.js';
 import { createDmOutbox } from './dm-outbox.js';
 import { createDmOutboxUi } from './dm-outbox-ui.js';
 import { createAssetInventoryUi } from './asset-inventory-ui.js';
@@ -134,7 +135,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistoryApplyNativeEdit, dmHistorySave, dmHistorySaveFile, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
+import { dmHistoryResolveNativeReply, dmHistoryApplyNativeEdit, dmHistorySave, dmHistorySaveFile, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
 import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
@@ -561,6 +562,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             getScope: () => JSON.stringify(['gateway', selfWebId || clientDid, clientDid, e2eScopedKey('')]),
             isActive: () => !!clientDid && tabLock.isLeader() && transport.mode !== 'web',
             persistMessage: dmHistorySave, handleEvent: message => handleEvent(message), isSealedPlain,
+            transformMessage: (message, current) => _nativeRefs.transform(message, current),
             sendCommit: command => {
                 if (_dmCommitV !== 1 || !socket || socket.readyState !== WebSocket.OPEN) return false;
                 socket.send(JSON.stringify(command)); return true;
@@ -588,6 +590,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     source: event.source || (fanout ? 'local_dm' : undefined),
                     local: event.local, own: event.own,
                     sender_verified: selfCopy ? undefined : !!event.sender_verified,
+                    ...(p.native_ref_v === 1 ? { _native_ref_v: 1, _nativeRefPub: p.recipient_pub, _nativeThreadPeer: p.thread_peer } : {}),
                 });
             },
         });
@@ -628,7 +631,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             getUserPresence: () => userPresence,
             renderReactions: (id) => renderReactions(id),
             openCtxMenu, sendUpdateLastRead: _sendUpdateLastRead,
-            getRoomCode: (id) => _roomCodes[id] || "",
+            getRoomCode: (id) => _roomCodes[id] || "", loadReplyParent: _loadNativeReplyParent,
             e2eScopedKey, isPeerVerified,
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
             resolveName: (w) => resolvePeerName(w),
@@ -919,6 +922,28 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (!String(peer || '').startsWith('did:key:')) return null;
             return { threadId: view.id, selfWebId, peerWebId: peer };
         }
+        async function _loadNativeReplyParent(id, child = null) {
+            const view = activeView && { ...activeView }, context = _nativeEditContext(view);
+            if (!context || !id?.startsWith('native:')) return null;
+            const scope = _outgoingScope(), generation = _outgoingGeneration();
+            const current = () => scope === _outgoingScope() && generation === _outgoingGeneration()
+                && activeView?.id === view.id && activeView?.type === view.type;
+            if (child?.native_reply_ref && nativeMessageIdForRef(child.native_reply_ref,
+                { ...context, actorWebId: child.native_reply_actor }) !== id) return null;
+            const parent = await dmHistoryGet(id);
+            return current() && nativeMessageRef(parent, context) ? { ...parent, local: true } : null;
+        }
+        async function _jumpReply(id) {
+            if (id?.startsWith('native:') && !messageMap[id]) {
+                const parent = await _loadNativeReplyParent(id);
+                if (!parent) { showToast(t('file.unavailable')); return; }
+                messageMap[id] = parent;
+                if (!allMessages.some(row => row.message_id === id)) {
+                    allMessages.push(parent); allMessages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+                }
+            }
+            jumpToMessage(rendering.revealMessage(id), scrollBehavior());
+        }
         const _nativeEdits = createNativeEdits({
             e2e: { ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend,
                 saveDmSendJob, listDmSendJobs, removeDmSendJob },
@@ -941,9 +966,21 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             },
             onError: error => console.warn('[native-edit] recovery pending:', error),
         });
+        const _nativeRefs = createNativeReferences({
+            getScope: _outgoingScope, getGeneration: _outgoingGeneration,
+            isActive: () => !!clientDid && tabLock.isLeader() && transport.mode !== 'web' && socket?.readyState === WebSocket.OPEN,
+            historyEnabled: dmHistoryEnabled, send: command => sendCmd(command.cmd, command),
+            getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, getMessage: dmHistoryGet, contextForView: _nativeEditContext,
+            contextForMessage: message => {
+                const actor = message.from_webid, peer = actor === selfWebId ? message._nativeThreadPeer : actor;
+                const context = _nativeEditContext({ id: message.thread_id, type: 'dm', peerWebid: peer });
+                return context ? { ...context, actorWebId: actor } : null;
+            },
+        });
         const _dmOutbox = createDmOutbox({
-            e2e: { ratchetEncrypt, finishDmSend, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
+            e2e: { ratchetEncrypt, finishDmSend, releaseDmSendHold, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
             getScope: _outgoingScope, getGeneration: _outgoingGeneration, isActive: () => !!clientDid && tabLock.isLeader(),
+            nativeReferencesReady: () => _nativeRefs.available(),
             send: (frame, job) => {
                 const actor = job.podActor || job.media?.actor;
                 const bound = transport.mode !== 'web' && isDmPeerWebId(job.peer) && actor;
@@ -1036,6 +1073,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         }
         function _confirmDmSend(id, evidence) {
             if (!_dmOutbox.has(id)) {
+                if (evidence?.kind === 'native-ref') return; // A typed proof must match a restored frozen plan.
                 if (evidence?.kind === 'fanout' && !evidence.delivered?.some(row => row.to_webid !== selfWebId && row.to_webid !== clientDid)) return;
                 sendStatus.confirm(id); return;
             }
@@ -1356,6 +1394,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             _gatewayReceives.stop();
             _nativeMedia.stop();
             _nativeEdits.stop();
+            _nativeRefs.stop();
             _dmOutbox.stop();
             const queued = stopConnection();
             await ratchetIdle().catch(() => {});
@@ -2496,6 +2535,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (!fromPod && crossRooms && crossRooms.handleEvent(event)) return;
             if (!fromPod) {
                 try {
+                    if (_nativeRefs.handleEvent(event)) return;
                     if (await _nativeEdits.handleEvent(event)) return;
                     if (await _nativeMedia.handleEvent(event)) return;
                 }
@@ -2805,6 +2845,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     }
 
                     renderMessage(msg, { live: true });
+                    if (msg.message_id?.startsWith('native:') && msg.file && activeView?.id === id) mergeDmLocalHistory(id).catch(() => {});
 
                     // A contact's DM landing in the open, visible thread is read now:
                     // tell the gateway, which sends the read receipt to the sender.
@@ -2991,6 +3032,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
                     _nativeMedia.start(event.native_media_v, event.native_chunks_v, event.native_decline_v);
                     _nativeEdits.start(event.native_edit_v);
+                    _nativeRefs.start(event.native_ref_v);
                     _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;
@@ -4252,6 +4294,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     break;
                 case "dm_receive_committed":
                     _gatewayReceives.confirmCommit(event).catch(err => console.warn('[gateway-dm] commit receipt:', err)); break;
+                case "native_ref_fanout_ack":
+                    _confirmDmSend(event.message_id, { kind: 'native-ref', native_ref_v: event.native_ref_v, delivered: event.delivered });
+                    break;
                 case "send_dm_fanout_ack":
                     // Fanout has no self-echo; confirm the optimistic send on ack.
                     _confirmDmSend(event.message_id, { kind: 'fanout', delivered: event.delivered });
@@ -5194,6 +5239,15 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             let local;
             try { local = await dmHistoryLoad(threadId); } catch (_) { return; }
             if (!local || !local.length || !activeView || activeView.id !== threadId) return;
+            const scope = _outgoingScope(), generation = _outgoingGeneration(), view = { ...activeView };
+            const current = () => scope === _outgoingScope() && generation === _outgoingGeneration()
+                && activeView?.id === threadId && activeView?.type === view.type;
+            const context = _nativeEditContext(view);
+            if (context) for (const row of local) if (row.native_reply_ref) {
+                const resolved = await dmHistoryResolveNativeReply(row.message_id, { ...context, actorWebId: row.native_reply_actor }, { current });
+                if (!current()) return;
+                if (resolved) Object.assign(row, resolved);
+            }
             let changed = false;
             for (const lm of local) {
                 const existing = messageMap[lm.message_id];
@@ -6500,7 +6554,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (content) {
                 const _sendView = { ...activeView }, _sendActor = selfWebId, _sendDevice = clientDid;
                 const _sendScope = _outgoingScope(), _sendGeneration = _outgoingGeneration(), _sendReply = replyingTo ? { ...replyingTo } : null;
-                let payload;
+                let payload, _nativeReply = null;
                 let _e2ePlainTarget = null; // peer to ratchet-encrypt for, ONLY if the plain path actually sends
                 const clientMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID)
                     ? crypto.randomUUID()
@@ -6553,8 +6607,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
                 if (_sendScope !== _outgoingScope() || _sendGeneration !== _outgoingGeneration()) throw Error('Send context changed');
                 if (_sendReply) {
+                    if (_sendReply.id.startsWith('native:') && ['dm', 'local_dm'].includes(_sendView.type)) {
+                        const original = await dmHistoryGet(_sendReply.id);
+                        _nativeReply = await _nativeRefs.prepareReply(original, _sendView, { messageId: clientMsgId, text: content },
+                            () => _sendScope === _outgoingScope() && _sendGeneration === _outgoingGeneration());
+                        content = _nativeReply.body.text;
+                    }
                     payload.reply_to_id = _sendReply.id;
-                    if (replyingTo?.id === _sendReply.id) cancelReply();
+                    if (!_nativeReply && replyingTo?.id === _sendReply.id) cancelReply();
                 }
                 // Multi-device: if the DM peer has >1 linked device, fan the message
                 // out to each device (separate ratchet per peer-device) instead of a
@@ -6562,11 +6622,13 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 const _dmPeer = (_sendView.type === "dm" || _sendView.type === "local_dm")
                     ? (_sendView.peerWebid || _sendView.peerDid || _sendView.id) : null;
                 let _resendPayload = null, _durableDm = false;
-                if (_dmPeer && (_e2ePlainTarget || identity.devicesForPeer(_dmPeer).length >= 2)) {
-                    const peerDevs = identity.devicesForPeer(_dmPeer).filter(dev => dev.device_id && dev.pub_b64u);
+                if (_dmPeer && (_nativeReply || _e2ePlainTarget || identity.devicesForPeer(_dmPeer).length >= 2)) {
+                    let peerDevs = identity.devicesForPeer(_dmPeer).filter(dev => dev.device_id && dev.pub_b64u);
+                    if (_nativeReply) peerDevs = [{ device_id: _nativeReply.primaryDeviceId, pub_b64u: _nativeReply.peerPub },
+                        ...peerDevs.filter(dev => dev.device_id !== _nativeReply.primaryDeviceId)];
                     const ownDevs = (await _ownDevicesForSend(_dmPeer)).filter(dev => dev.device_id && dev.pub_b64u);
                     if (_sendScope !== _outgoingScope() || _sendGeneration !== _outgoingGeneration()) throw Error('Send context changed');
-                    const mode = peerDevs.length >= 2 ? 'fanout' : 'single';
+                    const mode = _nativeReply || peerDevs.length >= 2 ? 'fanout' : 'single';
                     const entries = mode === 'fanout' ? peerDevs.map(dev => ({
                         peerId: _dmPeer + '#' + dev.device_id, account: _dmPeer, device: dev.device_id, pub: dev.pub_b64u,
                     })) : [{ peerId: _e2ePlainTarget, account: _dmPeer, primary: true, pub: cachedPeerPub(_e2ePlainTarget) }];
@@ -6574,9 +6636,12 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         account: _sendActor, device: dev.device_id, pub: dev.pub_b64u });
                     await _dmOutbox.queue({ id: clientMsgId, peer: _dmPeer, actor: _sendActor, device: _sendDevice,
                         pub: myX25519PubB64u(), podActor: _bridgeActorForSend(_dmPeer), mode, entries, route: payload,
+                        ...(_nativeReply ? { wireText: _nativeReply.plaintext } : {}),
                         record: { message_id: clientMsgId, thread_id: _sendView.id, from_webid: _sendActor,
                             from_display_name: localStorage.getItem('proxion_display_name') || '',
-                            content, timestamp: _clientTs, reply_to_id: payload.reply_to_id || null } });
+                            content, timestamp: _clientTs, reply_to_id: payload.reply_to_id || null,
+                            ...(_nativeReply ? { native_reply_ref: _nativeReply.body.ref, native_reply_actor: _sendActor, native_reply_unavailable: false } : {}) } });
+                    if (_nativeReply && replyingTo?.id === _sendReply?.id) cancelReply();
                     _durableDm = true;
                     _resendPayload = () => _dmOutbox.send(clientMsgId);
                 } else {
@@ -6602,6 +6667,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // server echo so edit/delete/seq patch the file it was written to.
                     pod_ts: _sendView.type === 'local_room' ? _clientTs : undefined,
                     reply_to_id: payload.reply_to_id || null,
+                    ...(_nativeReply ? { native_reply_ref: _nativeReply.body.ref, native_reply_actor: _sendActor, native_reply_unavailable: false } : {}),
                     local: true,
                 }, { live: true });
                 document.getElementById('msg-' + clientMsgId)?.classList.add('msg-pending');
@@ -8671,6 +8737,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             async function _resetIdentity() {
                 _nativeMedia.stop();
                 _nativeEdits.stop();
+                _nativeRefs.stop();
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }
@@ -8913,7 +8980,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         // list) is where a contact is managed. Not both at once.
                         showProfileCard(webid, name, e.clientX, e.clientY);
                         break;
-                    case 'scroll-reply': jumpToMessage(rendering.revealMessage(replyId), scrollBehavior()); break;
+                    case 'scroll-reply': _jumpReply(replyId).catch(() => showToast(t('file.unavailable'))); break;
                     case 'bookmark':
                         savedMsgs.toggleBookmark(messageMap[msgId], activeView);
                         break;

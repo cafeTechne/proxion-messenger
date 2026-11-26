@@ -9,25 +9,27 @@ const input = { id: 'message-1', peer: 'bob', actor: 'alice', device: 'alice-dev
         content: 'hello', timestamp: '2026-01-01T00:00:00.000Z' } };
 function harness() {
     let scope = 'alice/device', active = true;
-    const disk = new Map(), cipher = new Map(), history = new Map(), frames = [];
+    const disk = new Map(), cipher = new Map(), history = new Map(), frames = [], holds = new Set();
     const e2e = {
         listDmSendJobs: vi.fn(async () => [...disk.values()].map(clone)),
         saveDmSendJob: vi.fn(async (job, current) => { if (!current()) throw Error('stale'); disk.set(job.id, clone(job)); }),
         removeDmSendJob: vi.fn(async (id, current) => { if (!current()) return false; disk.delete(id); return true; }),
         ratchetEncrypt: vi.fn(async (peer, text, opts) => {
             const key = peer + opts.sendId;
+            if (opts.holdForReceive) holds.add(key);
             if (!cipher.has(key)) cipher.set(key, { ciphertext: peer + '-ct', nonce: peer + '-nonce', msgNum: 0, pn: 0, ratchetPub: peer + '-ratchet' });
             return clone(cipher.get(key));
         }),
         hasPendingDmSend: vi.fn(async (peer, id) => cipher.has(peer + id)),
-        finishDmSend: vi.fn(async (peer, id, current) => { if (!current()) return false; cipher.delete(peer + id); return true; }),
+        releaseDmSendHold: vi.fn(async (peer, id, current) => { if (!current()) return false; holds.delete(peer + id); return true; }),
+        finishDmSend: vi.fn(async (peer, id, current) => { if (!current() || holds.has(peer + id)) return false; cipher.delete(peer + id); return true; }),
     };
     const options = { e2e, getScope: () => scope, isActive: () => active,
         persistMessage: vi.fn(async record => { history.set(record.message_id, clone(record)); return true; }),
         clearDelivery: vi.fn(async () => true), onPending: vi.fn(), onConfirmed: vi.fn(), onError: vi.fn(),
         send: vi.fn(async frame => { frames.push(clone(frame)); }),
     };
-    return { e2e, options, disk, cipher, history, frames, engine: () => createDmOutbox(options),
+    return { e2e, options, disk, cipher, history, frames, holds, engine: () => createDmOutbox(options),
         scope: value => { scope = value; }, active: value => { active = value; } };
 }
 
@@ -391,9 +393,9 @@ function nativeReplyInput() {
     const context = { threadId: 'thread', selfWebId: 'did:key:alice', peerWebId: 'did:key:bob' };
     const original = { message_id: 'native:did:key:alice:file', from_webid: context.selfWebId, thread_id: 'thread', file: {} };
     const encoded = encodeNativeReply(original, context, { messageId: input.id, text: 'reply text' });
-    return { ...clone(input), peer: context.peerWebId, actor: context.selfWebId,
-        entries: [{ peerId: context.peerWebId, account: context.peerWebId, primary: true },
-            { peerId: 'mirror', account: context.selfWebId, device: 'mirror' }],
+    return { ...clone(input), peer: context.peerWebId, actor: context.selfWebId, mode: 'fanout', pub: 'A'.repeat(43),
+        entries: [{ peerId: context.peerWebId, account: context.peerWebId, device: 'bob-device', pub: 'B'.repeat(43) },
+            { peerId: 'mirror', account: context.selfWebId, device: 'mirror', pub: 'C'.repeat(43) }],
         wireText: encoded.plaintext, route: { ...input.route, target_webid: context.peerWebId, reply_to_id: original.message_id },
         record: { ...input.record, from_webid: context.selfWebId, content: encoded.body.text,
             reply_to_id: original.message_id, native_reply_ref: encoded.body.ref, native_reply_actor: context.selfWebId } };
@@ -406,9 +408,23 @@ describe('native reply plans in the normal durable outbox', () => {
         expect(h.e2e.ratchetEncrypt.mock.calls.map(call => call[1])).toEqual([plan.wireText, plan.wireText]);
         expect(h.history.get(plan.id).content).toBe('reply text');
         expect(h.history.get(plan.id).reply_to_id).toBe(plan.record.reply_to_id);
-        expect(h.frames[0].reply_to_id).toBeUndefined(); expect(h.frames[1].fanout[0].payload.reply_to_id).toBeUndefined();
+        expect(h.frames[0].cmd).toBe('native_ref_send'); expect(h.frames[0].native_ref_v).toBe(1);
+        expect(h.frames[0].fanout[0].payload.reply_to_id).toBeUndefined(); expect(h.frames[1].fanout[0].payload.reply_to_id).toBeUndefined();
+        expect(h.frames[0].fanout[0].payload).toMatchObject({ native_ref_v: 1, e2e_v: 1, recipient_pub: 'B'.repeat(43) });
         expect(JSON.stringify(h.frames)).not.toContain('native:');
         expect(h.disk.get(plan.id).wireText).toBe(plan.wireText);
+    });
+    it('holds each ratchet until versioned full consumption proof, independently of other recipients', async () => {
+        const h = harness(), plan = nativeReplyInput(); h.options.nativeReferencesReady = () => true; const engine = h.engine();
+        await engine.queue(plan); await engine.send(plan.id);
+        expect(h.holds.size).toBe(2); expect(h.e2e.ratchetEncrypt.mock.calls.every(call => call[2].holdForReceive)).toBe(true);
+        const peer = { to_webid: plan.peer, to_device_id: 'bob-device' }, mirror = { to_webid: plan.actor, to_device_id: 'mirror' };
+        expect(await engine.confirm(plan.id, { kind: 'fanout', delivered: [peer, mirror] })).toBe(false);
+        expect(h.holds.size).toBe(2);
+        expect(await engine.confirm(plan.id, { kind: 'native-ref', native_ref_v: 1, delivered: [peer] })).toBe(true);
+        expect(h.holds.size).toBe(1); expect(h.disk.has(plan.id)).toBe(true);
+        expect(await engine.confirm(plan.id, { kind: 'native-ref', native_ref_v: 1, delivered: [mirror] })).toBe(true);
+        expect(h.holds.size).toBe(0); expect(h.disk.has(plan.id)).toBe(false);
     });
     it('keeps typed replies disabled until capability-gated ingress/delivery is configured', async () => {
         const h = harness(), plan = nativeReplyInput();

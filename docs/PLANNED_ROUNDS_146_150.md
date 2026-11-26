@@ -66,15 +66,13 @@ new room permissions, resets or prepared file retirement.
 
 Status: in progress. Depends on 146.
 
-Reply checkpoint (2026-11-22): the codec covers author disambiguation for
-same-UUID files, foreign scope, malformed bindings and delayed originals without
-phantom attachments. Normal outbox plans can freeze a validated typed wire body
-separately from display text and omit private reply keys from primary/mirror
-metadata. An optional receive transform runs before durable history/ACK and
-cannot change authenticated routing. Compose, capability/version gates, reference
-history, quote navigation and reactions remain unconnected/unimplemented. None
-of 147's user-visible acceptance cases is claimed complete. See
-`ROUND_147_IMPLEMENTATION_NOTES.md` for the compatibility and ordering handoff.
+Reply checkpoint (2026-11-25): compose, version-gated per-device delivery,
+retained references, quote rendering and local jump navigation are connected.
+The real three-browser/two-gateway journey passed both authors' replies, reload,
+legacy-mirror restart/upgrade and later ordinary text. Reaction wire/state and
+receive-boundary primitives are tested; source intent, outbox and visible pills
+remain unconnected. The combined acceptance checklist stays open. See
+`ROUND_147_IMPLEMENTATION_NOTES.md` for evidence and the remaining work.
 
 Problem: reaction and reply targets currently use the same private UI ids.
 A reference must identify the correct original message on each endpoint,

@@ -37,6 +37,15 @@ export function nativeMessageRef(message, context) {
     return { v: 1, kind: 'native_file', id: match[2], author };
 }
 
+// Derive only a local cache lookup key. This does not prove that a file exists
+// and must never be used as a wire mutation target or to create a placeholder.
+export function nativeMessageIdForRef(ref, { actorWebId, ...context } = {}) {
+    if (!validNativeMessageRef(ref) || !participants(context)
+        || ![context.selfWebId, context.peerWebId].includes(actorWebId)) return null;
+    const other = actorWebId === context.selfWebId ? context.peerWebId : context.selfWebId;
+    return `native:${ref.author === 'actor' ? actorWebId : other}:${ref.id}`;
+}
+
 // The action actor must have been authenticated by the caller. This helper
 // performs local resolution only; it cannot authorise a network edit/delete.
 export function resolveNativeMessageRef(ref, { actorWebId, messages, ...context } = {}) {

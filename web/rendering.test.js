@@ -1057,3 +1057,36 @@ describe('signed pod attachment cards', () => {
     } finally { global.document.createElement = original; }
   });
 });
+
+describe('native reply quote cache lookup', () => {
+  it('loads a missing native parent locally without sending a private id to get_message', async () => {
+    miniDom();
+    const parent = { message_id: 'native:did:key:zA:file', thread_id: 'room-1', from_webid: 'did:key:zA', content: 'file caption',
+      file: { filename: 'file.txt', size: 1, data_b64: 'eA==' }, timestamp: at('2026-10-04T10:00:00') };
+    const loader = vi.fn(async () => parent), r = make({ loadReplyParent: loader });
+    r.renderMessage({ message_id: 'reply', thread_id: 'room-1', from_webid: 'did:key:zB', content: 'reply',
+      reply_to_id: parent.message_id, timestamp: at('2026-10-04T11:00:00') });
+    await vi.waitFor(() => expect(host.messageMap[parent.message_id]).toEqual(parent));
+    expect(loader).toHaveBeenCalledOnce(); expect(sent.some(packet => packet.cmd === 'get_message')).toBe(false);
+    expect(host.allMessages.filter(row => row.message_id === parent.message_id)).toHaveLength(1);
+  });
+  it('does not populate another view when an asynchronous native lookup finishes late', async () => {
+    miniDom(); let finish;
+    const pending = new Promise(resolve => { finish = resolve; });
+    const r = make({ loadReplyParent: () => pending });
+    r.renderMessage({ message_id: 'reply', thread_id: 'room-1', from_webid: 'did:key:zB', content: 'reply',
+      reply_to_id: 'native:did:key:zA:file', timestamp: at('2026-10-04T11:00:00') });
+    await Promise.resolve(); view = { type: 'room', id: 'other' };
+    finish({ message_id: 'native:did:key:zA:file', from_webid: 'did:key:zA', content: 'private' });
+    await Promise.resolve(); await Promise.resolve();
+    expect(host.messageMap['native:did:key:zA:file']).toBeUndefined(); expect(sent.some(packet => packet.cmd === 'get_message')).toBe(false);
+  });
+  it('renders a missing original as explicitly unavailable without a phantom file or network request', () => {
+    const { feed } = miniDom(), r = make();
+    r.renderMessage({ message_id: 'reply', thread_id: 'room-1', from_webid: 'did:key:zB', content: 'reply',
+      native_reply_ref: { v: 1, kind: 'native_file', id: 'file', author: 'peer' }, native_reply_unavailable: true,
+      timestamp: at('2026-10-04T11:00:00') });
+    expect(bodyOf(feed, 'reply').innerHTML).toContain('reply-context-unavailable');
+    expect(host.allMessages).toHaveLength(1); expect(sent.some(packet => packet.cmd === 'get_message')).toBe(false);
+  });
+});

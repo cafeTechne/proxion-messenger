@@ -9,6 +9,8 @@ function validReplyPlan(job) {
         && ['v', 'kind', 'id', 'author'].every(field => ref[field] === body.ref[field])
         && job.record.native_reply_actor === job.actor && job.record.from_webid === job.actor
         && String(job.actor).startsWith('did:key:') && String(job.peer).startsWith('did:key:') && job.actor !== job.peer
+        && job.mode === 'fanout' && Array.isArray(job.entries) && job.entries.every(entry => !entry.primary
+            && typeof entry.device === 'string' && entry.device && /^[A-Za-z0-9_-]{43}$/.test(entry.pub || ''))
         && (job.route?.cmd === 'local_dm' ? job.route.target_webid === job.peer
             : job.route?.cmd === 'send_dm' && job.route.cert_id === job.record.thread_id);
 }
@@ -69,9 +71,10 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             fanout.push({ to_webid: entry.account, to_device_id: entry.device,
                 payload: { ...field(encrypted[index]), from_device_id: job.device,
                     thread_id: job.record.thread_id, thread_peer: job.peer,
-                    x25519_pub: job.pub, ...(job.record.reply_to_id && job.wireText === undefined ? { reply_to_id: job.record.reply_to_id } : {}) } });
+                    x25519_pub: job.pub, ...(job.wireText !== undefined ? { native_ref_v: 1, recipient_pub: entry.pub, e2e_v: 1 } : {}), ...(job.record.reply_to_id && job.wireText === undefined ? { reply_to_id: job.record.reply_to_id } : {}) } });
         }
-        if (job.mode === 'fanout') return fanout.length ? [{ cmd: 'send_dm_fanout', message_id: job.id, fanout }] : [];
+        if (job.mode === 'fanout') return fanout.length ? [{ cmd: job.wireText !== undefined ? 'native_ref_send' : 'send_dm_fanout',
+            ...(job.wireText !== undefined ? { native_ref_v: 1, cert_id: job.record.thread_id } : {}), message_id: job.id, fanout }] : [];
         const primary = job.entries.findIndex(entry => entry.primary);
         const route = { ...job.route };
         if (job.wireText !== undefined) delete route.reply_to_id;
@@ -88,7 +91,10 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         }
         for (const index of accepted(job)) {
             const entry = job.entries[index];
-            if (!entry || !ctx.current() || await e2e.finishDmSend(entry.peerId, job.sendId, ctx.current) === false) return false;
+            if (!entry || !ctx.current()) return false;
+            if (job.wireText !== undefined && await e2e.hasPendingDmSend(entry.peerId, job.sendId)
+                && await e2e.releaseDmSendHold(entry.peerId, job.sendId, ctx.current) === false) return false;
+            if (!ctx.current() || await e2e.finishDmSend(entry.peerId, job.sendId, ctx.current) === false) return false;
         }
         return ctx.current();
     }
@@ -104,7 +110,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
     function pendingFrames(job, include = () => true) {
         const pending = remaining(job).filter(entry => include(entry) && planStatus({ ...job, entries: [entry] }) === 'ready');
         return job.frames.flatMap(frame => {
-            if (frame.cmd !== 'send_dm_fanout') return pending.some(entry => entry.primary) ? [frame] : [];
+            if (!['send_dm_fanout', 'native_ref_send'].includes(frame.cmd)) return pending.some(entry => entry.primary) ? [frame] : [];
             const fanout = frame.fanout.filter(target => pending.some(entry => !entry.primary
                 && entry.account === target.to_webid && entry.device === target.to_device_id));
             return fanout.length ? [{ ...frame, fanout }] : [];
@@ -176,10 +182,10 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 const encrypted = preparedResults(job);
                 const prepare = async (entry, index) => {
                     if (encrypted[index] || accepted(ready).has(index)) return;
-                    if (!ctx.current()) throw Error('Send context changed');
+                    if (!ctx.current() || job.wireText !== undefined && !nativeReferencesReady(job)) throw Error('Send context changed');
                     if (!validReplyPlan(job)) throw Error('Invalid native reply send plan');
                     encrypted[index] = await e2e.ratchetEncrypt(entry.peerId, job.wireText ?? job.record.content,
-                        { sendId: job.sendId, peerPub: entry.pub, current: ctx.current });
+                        { sendId: job.sendId, peerPub: entry.pub, current: () => ctx.current() && (job.wireText === undefined || nativeReferencesReady(job)), ...(job.wireText !== undefined ? { holdForReceive: true } : {}) });
                 };
                 if (!job.frames) {
                     const peers = job.entries.filter(entry => entry.account === job.peer);
@@ -191,9 +197,9 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                     await save(ready, ctx); // peer ciphertext is durable before transmission
                 }
                 const transmitPhase = async include => {
-                    if (!ctx.current() || !canSend(ready)) return;
+                    if (!ctx.current() || !canSend(ready) || ready.wireText !== undefined && !nativeReferencesReady(ready)) return;
                     for (const frame of pendingFrames(ready, include)) {
-                        if (!ctx.current()) return;
+                        if (!ctx.current() || ready.wireText !== undefined && !nativeReferencesReady(ready)) return;
                         attempts.set(id, now());
                         await send(JSON.parse(JSON.stringify(frame)), ready); transmitted = true;
                     }
@@ -221,11 +227,12 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         });
     }
     function evidencedTargets(job, evidence) {
+        if (job.wireText !== undefined && (evidence?.kind !== 'native-ref' || evidence.native_ref_v !== 1)) return [];
         if (['echo', 'history', 'pod'].includes(evidence?.kind)) {
             if (evidence.from !== job.record.from_webid || job.mode !== 'single') return [];
             return job.entries.flatMap((entry, index) => entry.primary ? [index] : []);
         }
-        if (evidence?.kind !== 'fanout' || !Array.isArray(evidence.delivered)) return [];
+        if ((job.wireText !== undefined ? evidence?.kind !== 'native-ref' : evidence?.kind !== 'fanout') || !Array.isArray(evidence.delivered)) return [];
         const prepared = preparedResults(job);
         return job.entries.flatMap((entry, index) => prepared[index] && !entry.primary && evidence.delivered.some(row =>
             row.to_webid === entry.account && row.to_device_id === entry.device) ? [index] : []);

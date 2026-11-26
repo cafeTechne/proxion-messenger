@@ -1,4 +1,5 @@
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
+import { nativeReplyJourney } from './scripts/native-reply-journey.mjs';
 import { nativeCaptionJourney } from './scripts/native-caption-journey.mjs';
 import { nativeMediaJourney } from './scripts/native-media-journey.mjs';
 import { nativeChunkJourney } from './scripts/native-chunk-journey.mjs';
@@ -387,6 +388,11 @@ try {
   await nativeCaptionJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
     openSender: () => openFirstDm(ap, 'caption sender'), openReceiver: () => openFirstDm(b, 'caption recipient'), online,
     fixtureQuery: process.env.PROXION_NATIVE_CAPTION_ONLY ? 'native-history-' : 'native-durable-' });
+  if (!process.env.PROXION_NATIVE_CAPTION_ONLY || process.env.PROXION_NATIVE_REFERENCE_ONLY) {
+    step = 'native-reply-references';
+    await nativeReplyJourney({ sender: ap, receiver: b, linked: ad, sourceGateway: A,
+      openSender: () => openFirstDm(ap, 'reply sender'), openReceiver: () => openFirstDm(b, 'reply recipient'), online });
+  }
   if (!process.env.PROXION_NATIVE_CAPTION_ONLY) {
   step = 'native-accepted-inline-adaptation';
   await nativeInlineAdaptationJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,

@@ -2,6 +2,13 @@ import { encodeSealedPlain, decodeSealedPlain } from './e2e-secondary.js';
 import { nativeMessageRef, validNativeMessageRef, resolveNativeMessageRef } from './native-message-ref.js';
 
 export const NATIVE_REPLY_KIND = 'native_reply';
+
+export function isNativeReplyPlain(plaintext) {
+    // Recognise the reserved kind even when its version/body is invalid so a
+    // malformed reply cannot fall through the legacy control ACK/drop path.
+    if (typeof plaintext !== 'string' || !plaintext.startsWith('\u0000pxs1')) return false;
+    try { return JSON.parse(plaintext.slice(5))?.k === NATIVE_REPLY_KIND; } catch { return false; }
+}
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const DID = /^did:key:[A-Za-z0-9_-]{1,2040}$/;
 const bytes = new TextEncoder();
