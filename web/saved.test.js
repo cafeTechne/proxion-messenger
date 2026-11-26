@@ -16,7 +16,7 @@ vi.mock('./auth.js', () => ({
 
 import {
     toggleSaved, listSaved, removeSaved, snapshotFromMessage, MAX_SAVED,
-    forgetSavedMessage, forgetSavedExpired,
+    forgetSavedMessage, forgetSavedExpired, upsertSaved, createSaved,
 } from './saved.js';
 
 const msg = (id, over = {}) => ({
@@ -150,5 +150,49 @@ describe('main.js wiring', () => {
         };
         expect(block('message_deleted')).toContain('forgetSavedMessage(event.message_id)');
         expect(block('dm_messages_expired')).toContain('forgetSavedExpired(');
+    });
+});
+
+describe('Saved account-bound transactions and reference UI', () => {
+    it('does not return old-account snapshots when an IndexedDB read completes after a switch', async () => {
+        const a = crypto.randomUUID(), b = crypto.randomUUID(); _h.acct = a;
+        await toggleSaved(snapshotFromMessage(msg('private'), view));
+        const getAll = IDBObjectStore.prototype.getAll;
+        const spy = vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (...args) {
+            const request = getAll.apply(this, args); request.addEventListener('success', () => { _h.acct = b; }, { once: true }); return request;
+        });
+        try { expect(await listSaved()).toEqual([]); } finally { spy.mockRestore(); }
+        expect(await listSaved()).toEqual([]);
+        _h.acct = a; expect((await listSaved())[0].id).toBe('private');
+    });
+    it('aborts deletion on account replacement without deleting either account copy', async () => {
+        const a = crypto.randomUUID(), b = crypto.randomUUID();
+        for (const account of [a, b]) { _h.acct = account; await toggleSaved(snapshotFromMessage(msg('same'), view)); }
+        _h.acct = a; const get = IDBObjectStore.prototype.get;
+        const spy = vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementation(function (...args) {
+            const request = get.apply(this, args); request.addEventListener('success', () => { _h.acct = b; }, { once: true }); return request;
+        });
+        try { await expect(forgetSavedMessage('same')).rejects.toThrow(); } finally { spy.mockRestore(); }
+        for (const account of [a, b]) { _h.acct = account; expect((await listSaved()).map(row => row.id)).toEqual(['same']); }
+    });
+    it('keeps imported references bounded and strips unrequested snapshot bytes', async () => {
+        _h.acct = crypto.randomUUID();
+        for (let n = 0; n <= MAX_SAVED; n++) await upsertSaved({ id: `saved-${n}`, thread_id: 'thread', content: 'x'.repeat(600), data_b64: 'private file bytes' });
+        const rows = await listSaved(); expect(rows).toHaveLength(MAX_SAVED);
+        expect(rows.every(row => row.content.length === 500 && row.data_b64 === undefined)).toBe(true);
+    });
+    it('carries original conversation/type/target into Jump and rejects an old-account button', async () => {
+        _h.acct = crypto.randomUUID();
+        await toggleSaved({ ...snapshotFromMessage(msg('ref'), view), reference_target: 'https://pod.example/room/day#ref' });
+        const element = () => ({ style: {}, children: [], listeners: {}, appendChild(row) { this.children.push(row); },
+            addEventListener(type, fn) { this.listeners[type] = fn; }, set innerHTML(value) { this.html = value; this.children = []; }, get innerHTML() { return this.html || ''; } });
+        const list = element(), panel = element(); panel.style.display = 'block';
+        global.document = { getElementById: id => id === 'saved-list' ? list : panel, createElement: element };
+        const navigateReference = vi.fn(async () => true), controller = createSaved({ showToast: vi.fn(), navigateReference });
+        await controller.renderSaved();
+        const jump = list.children[0].children[2].children[0]; await jump.listeners.click();
+        expect(navigateReference).toHaveBeenCalledWith(expect.objectContaining({ message_id: 'ref', thread_id: 'room-1', thread_type: 'local_room', reference_target: 'https://pod.example/room/day#ref' }));
+        _h.acct = crypto.randomUUID(); await jump.listeners.click();
+        expect(navigateReference).toHaveBeenCalledOnce(); expect(panel.style.display).toBe('none'); expect(list.children).toEqual([]);
     });
 });

@@ -45,126 +45,103 @@ function _open() {
     });
     return _dbPromise;
 }
-function _tx(db, mode) { return db.transaction(STORE, mode).objectStore(STORE); }
-
-export async function listSaved() {
+function accountContext() {
+    const name = accountDbName(DB_NAME);
+    return { current: () => name === accountDbName(DB_NAME) };
+}
+function snapshotRow(row) {
+    if (!row || typeof row.id !== 'string' || !row.id || row.id.length > 4096) throw Error('Invalid saved reference');
+    const text = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
+    return { id: row.id, thread_id: text(row.thread_id, 4096), thread_type: text(row.thread_type, 32),
+        thread_label: text(row.thread_label, 256), from_name: text(row.from_name, 256), content: text(row.content, 500),
+        has_file: row.has_file === true, file_kind: text(row.file_kind, 32), timestamp: text(row.timestamp, 64),
+        ...(typeof row.reference_target === 'string' ? { reference_target: row.reference_target.slice(0, 4096) } : {}),
+        addedAt: Number.isFinite(row.addedAt) ? row.addedAt : Date.now() };
+}
+async function transaction(mode, context, operation) {
     const db = await _open();
+    if (!context.current()) throw Error('Saved account changed');
     return new Promise((resolve, reject) => {
-        const req = _tx(db, 'readonly').getAll();
-        req.onsuccess = () => resolve(sortByRecency(req.result || []));
-        req.onerror = () => reject(req.error);
+        const tx = db.transaction(STORE, mode), store = tx.objectStore(STORE);
+        let result;
+        const safe = fn => { try { if (!context.current()) tx.abort(); else fn(); } catch { try { tx.abort(); } catch { /* settled */ } } };
+        tx.oncomplete = () => context.current() ? resolve(result) : reject(Error('Saved account changed'));
+        tx.onabort = tx.onerror = () => reject(tx.error || Error('Saved transaction aborted'));
+        try { operation(store, value => { result = value; }, safe); } catch (error) { tx.abort(); reject(error); }
     });
 }
-
-// Snapshot in, 'saved' | 'removed' out (toggle by message id).
-export async function toggleSaved(snapshot) {
-    const db = await _open();
-    const existing = await new Promise((res, rej) => {
-        const req = _tx(db, 'readonly').get(snapshot.id);
-        req.onsuccess = () => res(req.result);
-        req.onerror = () => rej(req.error);
-    });
-    if (existing) {
-        await new Promise((res, rej) => {
-            const req = _tx(db, 'readwrite').delete(snapshot.id);
-            req.onsuccess = () => res();
-            req.onerror = () => rej(req.error);
+export async function listSaved() {
+    const context = accountContext();
+    try { return await transaction('readonly', context, (store, finish, safe) => {
+        const request = store.getAll(); request.onsuccess = () => safe(() => finish(sortByRecency(request.result || [])));
+    }); } catch { if (!context.current()) return []; throw Error('Saved history unavailable'); }
+}
+async function putSaved(snapshot, toggle, context = accountContext()) {
+    const row = snapshotRow(snapshot);
+    return transaction('readwrite', context, (store, finish, safe) => {
+        const existing = store.get(row.id);
+        existing.onsuccess = () => safe(() => {
+            if (existing.result) {
+                if (toggle) store.delete(row.id);
+                finish(toggle ? 'removed' : false); return;
+            }
+            const all = store.getAll(); all.onsuccess = () => safe(() => {
+                for (const id of evictOverCap(all.result, MAX_SAVED)) store.delete(id);
+                store.put(row); finish(toggle ? 'saved' : true);
+            });
         });
-        return 'removed';
-    }
-    const rows = await listSaved();
-    const evict = evictOverCap(rows, MAX_SAVED);
-    await new Promise((res, rej) => {
-        const store = _tx(db, 'readwrite');
-        for (const eid of evict) store.delete(eid);
-        store.put({ ...snapshot, addedAt: Date.now() });
-        store.transaction.oncomplete = () => res();
-        store.transaction.onerror = () => rej(store.transaction.error);
     });
-    return 'saved';
 }
-
-export async function removeSaved(id) {
-    const db = await _open();
-    return new Promise((res, rej) => {
-        const req = _tx(db, 'readwrite').delete(id);
-        req.onsuccess = () => res();
-        req.onerror = () => rej(req.error);
+export function toggleSaved(snapshot) { return putSaved(snapshot, true); }
+export function removeSaved(id, context = accountContext()) {
+    return transaction('readwrite', context, (store, finish, safe) => {
+        safe(() => { store.delete(id); finish(true); });
     });
 }
 
-// A bookmark is a copy of the message (up to 500 chars of its text). When the
-// message is deleted or disappears, the copy goes too, here and on the pod.
+// Bind each multi-await operation to its original account and transaction.
 export async function forgetSavedMessage(id) {
     if (!id) return false;
-    const db = await _open();
-    const existing = await new Promise((res) => {
-        const req = _tx(db, 'readonly').get(id);
-        req.onsuccess = () => res(req.result);
-        req.onerror = () => res(null);
+    const context = accountContext();
+    const removed = await transaction('readwrite', context, (store, finish, safe) => {
+        const existing = store.get(id); existing.onsuccess = () => safe(() => {
+            if (existing.result) store.delete(id); finish(!!existing.result);
+        });
     });
-    if (!existing) return false;
-    await removeSaved(id);
-    await podSyncRemoveSavedMessage(id).catch(() => {});
-    return true;
+    if (removed && context.current()) await podSyncRemoveSavedMessage(id).catch(() => {});
+    return context.current() && removed;
 }
-
-// Disappearing-message expiry for a thread (see isExpired): drop every bookmark
-// of a message in one of threadIds sent before beforeIso (and, with sinceIso,
-// not before the timer was turned on). Returns how many were removed.
 export async function forgetSavedExpired(threadIds, beforeIso, sinceIso = '') {
-    const ids = new Set((threadIds || []).filter(Boolean));
+    const context = accountContext(), ids = new Set((threadIds || []).filter(Boolean));
     if (!ids.size || !beforeIso) return 0;
-    const rows = await listSaved();
-    const victims = rows.filter((r) => ids.has(r.thread_id) && r.timestamp
-        && isExpired(r.timestamp, beforeIso, sinceIso));
-    for (const r of victims) {
-        await removeSaved(r.id);
-        await podSyncRemoveSavedMessage(r.id).catch(() => {});
+    const victims = (await listSaved()).filter(row => ids.has(row.thread_id) && row.timestamp && isExpired(row.timestamp, beforeIso, sinceIso));
+    if (!context.current()) return 0;
+    for (const row of victims) {
+        if (!context.current()) return 0;
+        await removeSaved(row.id, context);
+        if (context.current()) await podSyncRemoveSavedMessage(row.id).catch(() => {});
     }
-    return victims.length;
+    return context.current() ? victims.length : 0;
 }
-
-// R62: put a row without toggling (used when merging pod-synced bookmarks into
-// the local store). Returns true if it was newly added.
-export async function upsertSaved(row) {
-    if (!row?.id) return false;
-    const db = await _open();
-    const existing = await new Promise((res) => {
-        const req = _tx(db, 'readonly').get(row.id);
-        req.onsuccess = () => res(req.result);
-        req.onerror = () => res(null);
-    });
-    if (existing) return false;
-    await new Promise((res, rej) => {
-        const req = _tx(db, 'readwrite').put(row);
-        req.onsuccess = () => res();
-        req.onerror = () => rej(req.error);
-    });
-    return true;
-}
-
-// R62: push every locally-saved bookmark to the pod (used when the user turns
-// sync on, so the pod reflects this device immediately). Gated inside
-// podSyncSavedMessage.
+export function upsertSaved(row, context = accountContext()) { return putSaved(row, false, context); }
 export async function pushAllSavedToPod() {
-    let rows = [];
-    try { rows = await listSaved(); } catch (_) { return; }
+    const context = accountContext(); let rows;
+    try { rows = await listSaved(); } catch { return; }
     for (const row of rows) {
-        try { await podSyncSavedMessage(row); } catch (_) { /* skip */ }
+        if (!context.current()) return;
+        try { await podSyncSavedMessage(row); } catch { /* skip */ }
     }
 }
-
-// R62: pull pod-synced bookmarks into the local store (opt-in + logged-in gated
-// inside podReadSavedMessages). Returns how many were newly added.
 export async function syncSavedFromPod() {
-    let rows = [];
-    try { rows = await podReadSavedMessages(); } catch (_) { return 0; }
+    const context = accountContext(); let rows;
+    try { rows = await podReadSavedMessages(); } catch { return 0; }
+    if (!context.current()) return 0;
     let added = 0;
-    for (const row of rows) {
-        try { if (await upsertSaved(row)) added++; } catch (_) { /* skip */ }
+    for (const row of rows.slice(0, MAX_SAVED)) {
+        if (!context.current()) return 0;
+        try { if (await upsertSaved(row, context)) added++; } catch { /* skip invalid references */ }
     }
-    return added;
+    return context.current() ? added : 0;
 }
 
 // Pure: message + view context → the stored snapshot row.
@@ -179,27 +156,43 @@ export function snapshotFromMessage(msg, view) {
         content,
         has_file: !!msg.file,
         file_kind: msg.file ? (msg.file.mime_type || '').split('/')[0] : '',
-        timestamp: msg.timestamp || '',
+        timestamp: msg.pod_ts || msg.timestamp || '',
+        ...(typeof msg.iri === 'string' && msg.iri.length <= 4096 ? { reference_target: msg.iri } : {}),
     };
 }
 
-export function createSaved({ showToast, jumpToMsg }) {
+export function createSaved({ showToast, jumpToMsg, navigateReference = null, getScope = () => accountDbName(DB_NAME) }) {
+    let epoch = 0;
+    function reset() {
+        epoch++;
+        const list = document.getElementById('saved-list'), panel = document.getElementById('saved-panel');
+        if (list) list.innerHTML = '';
+        if (panel) panel.style.display = 'none';
+    }
 
     async function showSavedPanel() {
         const panel = document.getElementById('saved-panel');
         if (!panel) return;
         panel.style.display = 'block';
+        const scope = getScope(), stamp = epoch;
         await renderSaved();
+        if (scope !== getScope() || stamp !== epoch) return;
         // R62: pull any pod-synced bookmarks from other devices, then re-render
         // if anything new arrived.
-        syncSavedFromPod().then((n) => { if (n > 0) renderSaved(); }).catch(() => {});
+        syncSavedFromPod().then((n) => { if (n > 0 && scope === getScope() && stamp === epoch) renderSaved(); }).catch(() => {});
     }
 
     async function renderSaved() {
         const list = document.getElementById('saved-list');
         if (!list) return;
+        const scope = getScope(), stamp = epoch;
+        const current = () => scope === getScope() && stamp === epoch;
         let rows = [];
-        try { rows = await listSaved(); } catch (_) { /* no IDB */ }
+        try { rows = await listSaved(); } catch (_) {
+            if (current()) list.innerHTML = inlineNotice(t('common.updateFailed'));
+            return;
+        }
+        if (!current()) { if (stamp === epoch) reset(); return; }
         list.innerHTML = '';
         if (!rows.length) {
             list.innerHTML = inlineNotice(t('saved.none'));
@@ -219,12 +212,19 @@ export function createSaved({ showToast, jumpToMsg }) {
             const jump = document.createElement('button');
             jump.textContent = `[${t('saved.jump')}]`;
             jump.className = 'link-btn link-btn--info';
-            jump.addEventListener('click', () => jumpToMsg?.(row.id));
+            jump.addEventListener('click', async () => {
+                if (!current()) { reset(); return; }
+                if (navigateReference) await navigateReference({ message_id: row.id, thread_id: row.thread_id,
+                    thread_type: row.thread_type, timestamp: row.timestamp, reference_target: row.reference_target });
+                else jumpToMsg?.(row.id);
+            });
             const rm = document.createElement('button');
             rm.textContent = t('saved.remove');
             rm.className = 'link-btn';
             rm.addEventListener('click', async () => {
+                if (!current()) { reset(); return; }
                 await removeSaved(row.id).catch(() => {});
+                if (!current()) { reset(); return; }
                 podSyncRemoveSavedMessage(row.id).catch(() => {});   // R62
                 renderSaved();
             });
@@ -239,26 +239,28 @@ export function createSaved({ showToast, jumpToMsg }) {
 
     async function toggleBookmark(msg, view) {
         if (!msg?.message_id) return;
+        const scope = getScope(), stamp = epoch;
+        const current = () => scope === getScope() && stamp === epoch;
         try {
             const snapshot = snapshotFromMessage(msg, view);
             const r = await toggleSaved(snapshot);
+            if (!current()) { reset(); return; }
             // R62: mirror the change to the pod (no-op unless sync opted in)
             if (r === 'saved') podSyncSavedMessage({ ...snapshot, addedAt: Date.now() }).catch(() => {});
             else podSyncRemoveSavedMessage(snapshot.id).catch(() => {});
             showToast(t(r === 'saved' ? 'saved.added' : 'saved.removedToast'));
             if (document.getElementById('saved-panel')?.style.display !== 'none') renderSaved();
         } catch (_) {
-            showToast(t('common.updateFailed'));
+            if (current()) showToast(t('common.updateFailed'));
         }
     }
 
     function wireSaved() {
         document.getElementById('saved-panel-btn')?.addEventListener('click', showSavedPanel);
         document.getElementById('saved-panel-close')?.addEventListener('click', () => {
-            const panel = document.getElementById('saved-panel');
-            if (panel) panel.style.display = 'none';
+            reset();
         });
     }
 
-    return { showSavedPanel, renderSaved, toggleBookmark, wireSaved };
+    return { showSavedPanel, renderSaved, toggleBookmark, wireSaved, reset };
 }

@@ -134,7 +134,12 @@ prepared cancellation, broader room moderation and new file retention caps.
 
 ## Round 149: Saved/search/reference navigation across conversations
 
-Status: not started.
+Status: in progress.
+
+Checkpoint: Saved account-bound transactions/UI guards are implemented; the
+scoped navigation coordinator is tested but not connected to main.js. Complete
+cross-conversation and offline navigation remains unimplemented. See
+`ROUND_149_IMPLEMENTATION_NOTES.md`; acceptance remains open.
 
 Problem: Saved snapshots retain `thread_id`, but their Jump control passes only
 a message id to the current view. Search/reference navigation also needs to
