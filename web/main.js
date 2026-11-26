@@ -592,7 +592,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     source: event.source || (fanout ? 'local_dm' : undefined),
                     local: event.local, own: event.own,
                     sender_verified: selfCopy ? undefined : !!event.sender_verified,
-                    ...(p.native_ref_v === 1 ? { _native_ref_v: 1, _nativeRefPub: p.recipient_pub, _nativeThreadPeer: p.thread_peer } : {}),
+                    ...(p.native_ref_v === 1 ? { _native_ref_v: 1, _nativeRefPub: p.recipient_pub, _nativeThreadPeer: p.thread_peer, ...(p.native_action_v !== undefined ? { _nativeActionV: p.native_action_v } : {}) } : {}),
                 });
             },
         });
@@ -884,7 +884,6 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend },
             receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
-            acceptReaction: _applyNativeReaction,
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, send: command => sendCmd(command.cmd, command),
             persistFile: (message, blob, current) => dmHistoryEnabled() ? dmHistorySaveFile(_nativeHistoryMessage(message, message.from_webid), blob, { current }) : false,
             isPersistedFile: async (message, meta, current) => {
@@ -3085,7 +3084,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
                     _nativeMedia.start(event.native_media_v, event.native_chunks_v, event.native_decline_v);
                     _nativeEdits.start(event.native_edit_v);
-                    _nativeRefs.start(event.native_ref_v);
+                    _nativeRefs.start(event.native_ref_v, event.native_action_v);
                     _dmOutbox.start();
                     if (transport.mode !== 'web') _gatewayReceives.start();
                     if (event.turn) voice.state._turnIceServer = event.turn;

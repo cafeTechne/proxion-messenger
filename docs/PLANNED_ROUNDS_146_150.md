@@ -99,7 +99,12 @@ new crypto retirement/reset protocols.
 
 ## Round 148: Native message deletion and pins
 
-Status: not started. Depends on 146–147.
+Status: in progress. Depends on 146–147.
+
+Persistence/protocol checkpoint: atomic bounded deletion and pin state, history
+v3 migration, replay suppression and separate action capability gates are tested.
+Controls, outbox integration and real delete/pin acceptance remain unconnected.
+See `ROUND_148_IMPLEMENTATION_NOTES.md`; the acceptance checklist stays open.
 
 Problem: generic delete/pin commands do not distinguish a native file's local
 history key from its gateway reference/provenance. Existing controls must apply

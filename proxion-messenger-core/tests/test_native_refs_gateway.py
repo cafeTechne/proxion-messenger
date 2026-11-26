@@ -181,7 +181,7 @@ async def test_authenticated_registration_keeps_strict_reference_support_for_pri
     if not linked: client = account
     owner, device = pub_key_to_did(account.identity_pub_bytes), pub_key_to_did(client.identity_pub_bytes)
     ws = socket(gw, owner); ws.remote_address = ('127.0.0.1', 1234)
-    packet = {'did': device, 'dm_commit_v': 1, 'native_ref_v': version, 'x25519_pub': 'A' * 43}
+    packet = {'did': device, 'dm_commit_v': 1, 'native_ref_v': version, 'native_action_v': version, 'x25519_pub': 'A' * 43}
     if linked: packet['delegation_cert'] = issue_device_cert(account.identity_key, device)
     await gw._handle_register(ws, packet)
     nonce = gw._pending_auth[ws]['nonce']
@@ -191,6 +191,8 @@ async def test_authenticated_registration_keeps_strict_reference_support_for_pri
     registered = next(json.loads(call.args[0]) for call in ws.send.call_args_list if json.loads(call.args[0]).get('type') == 'registered')
     assert gw._native_ref_capable(ws) is enabled
     assert registered.get('native_ref_v') == (1 if enabled else None)
+    assert gw._native_action_capable(ws) is enabled
+    assert registered.get('native_action_v') == (1 if enabled else None)
     assert gw._native_ref_device(owner, device, 'A' * 43)
     gw._store.close()
 
@@ -210,3 +212,97 @@ async def test_register_drain_retains_legacy_typed_rows_until_upgrade(tmp_path, 
     assert len(frames) == 1 and frames[0]['payload']['native_ref_v'] == 1
     assert gw._store.pending_device_fanout(owner, owner)  # socket write is not a history commit
     gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_native_action_requires_distinct_device_capability_and_consumption_proof(tmp_path):
+    gw = gateway(tmp_path, 'action-device'); owner, actor = 'did:key:bob', 'did:key:alice'
+    ws = capable(gw, owner); body = {**envelope(), 'native_action_v': 1}
+    assert gw._native_ref_payload(body)
+    assert await gw._native_ref_admit(owner, owner, actor, 'delete', body) is False
+    ws.send.assert_not_called()
+    row = gw._store.pending_device_fanout(owner, owner)[0]
+    ack = {'v': 1, 'native_ref_v': 1, 'queue_id': row['queue_id'], 'from_webid': actor,
+        'message_id': 'delete', 'envelope_digest': row['envelope_digest'], 'receive_id': 'b' * 64}
+    await gw._handle_dm_receive_commit(ws, {**ack, 'native_action_v': 1})
+    assert gw._store.pending_device_fanout(owner, owner)
+    gw._session_meta[ws].update(native_action_v=1, dm_commit_replay_at=0)
+    await gw._handle_dm_receive_recover(ws, {})
+    assert json.loads(ws.send.call_args.args[0])['payload']['native_action_v'] == 1
+    await gw._handle_dm_receive_commit(ws, ack)
+    assert gw._store.pending_device_fanout(owner, owner)
+    await gw._handle_dm_receive_commit(ws, {**ack, 'native_action_v': 1})
+    assert gw._store.device_fanout_committed(owner, owner, actor, 'delete', body)
+    assert json.loads(ws.send.call_args.args[0])['native_action_v'] == 1
+
+
+@pytest.mark.parametrize('version,enabled', [(1, True), (True, False), (0, False), ('1', False), (2, False)])
+@pytest.mark.asyncio
+async def test_native_action_capability_is_strict_and_does_not_enable_a_legacy_reference_reader(tmp_path, version, enabled):
+    gw = gateway(tmp_path, 'action-version'); owner = 'did:key:bob'
+    ws = capable(gw, owner); gw._session_meta[ws]['native_action_v'] = version
+    assert gw._native_action_capable(ws) is enabled
+    assert gw._native_ref_payload({**envelope(), 'native_action_v': version}) is enabled
+    gw._session_meta[ws]['native_ref_v'] = 0
+    assert gw._native_action_capable(ws) is False
+
+
+@pytest.mark.asyncio
+async def test_native_action_preflight_does_not_claim_support_from_a_reply_only_primary(tmp_path):
+    gw = gateway(tmp_path, 'action-query'); owner, peer = 'did:key:alice', 'did:key:bob'
+    source = capable(gw, owner); target = capable(gw, peer)
+    gw._session_meta[source]['native_action_v'] = 1
+    gw._store.save_dm_thread('thread', peer, owner_webid=owner)
+    file_parent(gw._store, sender=owner, recipient=peer)
+    query = {'native_ref_v': 1, 'native_action_v': 1, 'cert_id': 'thread', 'request_id': 'query',
+        'expected_pub': 'A' * 43, 'file_id': 'file', 'author': 'actor'}
+    await gw._handle_native_ref_capability(source, query); await drain(gw)
+    result = json.loads(source.send.call_args.args[0]); assert result['supported'] is False and result['native_action_v'] == 1
+    gw._session_meta[target]['native_action_v'] = 1
+    await gw._handle_native_ref_capability(source, query); await drain(gw)
+    assert json.loads(source.send.call_args.args[0])['supported'] is True
+
+
+@pytest.mark.asyncio
+async def test_native_action_capability_and_custody_cross_signed_relay(tmp_path, monkeypatch):
+    source, target, actor, owner, sender_did, peer = paired(tmp_path)
+    ws, recipient = capable(source, actor), capable(target, owner)
+    source._session_meta[ws]['native_action_v'] = 1
+    source._resolve_peer_gateway = lambda _: 'https://peer.example'; source._is_owner_account = lambda *args: True
+    file_parent(source._store, sender=actor, recipient=peer)
+    file_parent(target._store, sender=sender_did, recipient=owner, incoming=True)
+    async def route(method, url, **kwargs):
+        status, body = await target._handle_relay_post(kwargs['body'], client_ip='127.0.0.1')
+        return int(status.split()[0]), {}, body.encode()
+    monkeypatch.setattr('proxion_messenger_core.network.async_safe_request', route)
+    query = {'native_ref_v': 1, 'native_action_v': 1, 'cert_id': 'thread', 'request_id': 'query',
+        'expected_pub': 'A' * 43, 'file_id': 'file', 'author': 'actor'}
+    await source._handle_native_ref_capability(ws, query); await drain(source)
+    assert json.loads(ws.send.call_args.args[0])['supported'] is False
+    target._session_meta[recipient]['native_action_v'] = 1
+    await source._handle_native_ref_capability(ws, query); await drain(source)
+    result = json.loads(ws.send.call_args.args[0]); assert result['supported'] is True and result['native_action_v'] == 1
+    body = {**envelope(actor=actor, peer=peer), 'native_action_v': 1}
+    data = {'native_ref_v': 1, 'native_action_v': 1, 'cert_id': 'thread', 'message_id': 'delete',
+        'fanout': [{'to_webid': peer, 'to_device_id': owner, 'payload': body}]}
+    await source._handle_native_ref_send(ws, data); await drain(source)
+    assert json.loads(ws.send.call_args.args[0])['delivered'] == []
+    row = target._store.pending_device_fanout(owner, owner)[0]
+    assert row['payload']['native_action_v'] == 1
+    await target._handle_dm_receive_commit(recipient, {'v': 1, 'native_ref_v': 1, 'native_action_v': 1, 'queue_id': row['queue_id'],
+        'from_webid': sender_did, 'message_id': 'delete', 'envelope_digest': row['envelope_digest'], 'receive_id': 'c' * 64})
+    await source._handle_native_ref_send(ws, data); await drain(source)
+    proof = json.loads(ws.send.call_args.args[0])
+    assert proof['native_action_v'] == 1 and proof['delivered'] == [{'to_webid': peer, 'to_device_id': owner}]
+
+
+@pytest.mark.asyncio
+async def test_native_action_marker_alone_cannot_bypass_versioned_ingress(tmp_path):
+    gw = gateway(tmp_path, 'action-bypass'); actor, peer = 'did:key:alice', 'did:key:bob'
+    source, recipient = capable(gw, actor), capable(gw, peer)
+    body = {**envelope(), 'native_action_v': 1}; body.pop('native_ref_v')
+    await gw._handle_send_dm_fanout(source, {'message_id': 'bypass', 'fanout': [
+        {'to_webid': peer, 'to_device_id': peer, 'payload': body}]})
+    assert gw._store.pending_device_fanout(peer, peer) == []
+    recipient.send.assert_not_called()
+    assert await gw._deliver_commit_fanout([recipient], 'bypass', actor, peer, body) is False

@@ -200,7 +200,7 @@ class NativeMediaMixin:
                     or proof.get("content_type") != response_type or proof.get("from_webid") != peer
                     or proof.get("relay_sig_did") != peer or proof.get("to_webid") != self._own_gateway_did()
                     or proof.get("request_digest") != hashlib.sha256(body).hexdigest()
-                    or any(proof.get(key) != payload[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v", "native_edit_v", "file_id", "native_sequence", "parent_header_digest", "recipient_pub", "native_ref_v", "to_device_id", "author") if key in payload)
+                    or any(proof.get(key) != payload[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v", "native_edit_v", "file_id", "native_sequence", "parent_header_digest", "recipient_pub", "native_ref_v", "native_action_v", "to_device_id", "author") if key in payload)
                     or not verify_relay_envelope(proof)):
                 return None
             return proof
@@ -213,7 +213,7 @@ class NativeMediaMixin:
         import secrets
         proof = {"content_type": response_type, "v": 1,
                  "from_webid": self._own_gateway_did(), "to_webid": data["from_webid"],
-                 **{key: data[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v", "native_edit_v", "file_id", "native_sequence", "parent_header_digest", "recipient_pub", "native_ref_v", "to_device_id", "author") if key in data},
+                 **{key: data[key] for key in ("message_id", "media_digest", "header_digest", "operation", "request_id", "expected_pub", "manifest_digest", "seq", "after", "native_chunks_v", "native_edit_v", "file_id", "native_sequence", "parent_header_digest", "recipient_pub", "native_ref_v", "native_action_v", "to_device_id", "author") if key in data},
                  "request_digest": hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
                  "relay_sig_did": self._own_gateway_did(),
                  "relay_ts": datetime.now(timezone.utc).isoformat(), "relay_nonce": secrets.token_hex(16), **fields}

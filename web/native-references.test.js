@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createNativeReferences } from './native-references.js';
+import { encodeNativeAction } from './native-action-codec.js';
 import { encodeNativeReaction } from './native-reaction-codec.js';
 import { encodeNativeReply } from './native-reply-codec.js';
 const context = { threadId: 'thread', selfWebId: 'did:key:alice', peerWebId: 'did:key:bob' };
@@ -87,5 +88,31 @@ describe('native reaction receive boundary', () => {
         h.controller.handleEvent(result(h.send.mock.calls.at(-1)[0]));
         expect(await pending).toMatchObject({ primaryDeviceId: 'did:key:bob-primary', peerPub: 'A'.repeat(43), body: { mid: 'react', ref: { author: 'peer' } } });
         h.controller.stop();
+    });
+});
+
+describe('native delete/pin separate capability', () => {
+    it('does not preflight new actions through a reply-only connection', async () => {
+        const h = harness(); h.controller.start(1);
+        await expect(h.controller.prepareAction(original, { id: 'thread' }, { messageId: 'pin', operation: 'pin', clock: 1 })).rejects.toThrow();
+        expect(h.send).not.toHaveBeenCalled(); expect(h.controller.actionsAvailable()).toBe(false);
+    });
+    it('requires an action-capable primary proof before returning a prepared pin', async () => {
+        const h = harness(); h.controller.start(1, 1);
+        const pending = h.controller.prepareAction(original, { id: 'thread' }, { messageId: 'pin', operation: 'pin', clock: 1 });
+        const packet = h.send.mock.calls.at(-1)[0]; expect(packet.native_action_v).toBe(1);
+        h.controller.handleEvent(result(packet, { native_action_v: 1 }));
+        expect(await pending).toMatchObject({ body: { op: 'pin', ref: { author: 'peer' } }, peerPub: 'A'.repeat(43) }); h.controller.stop();
+    });
+    it('requires the new wire flag, authenticated routing and durable action state before consumption', async () => {
+        const acceptAction = vi.fn(async () => false), h = harness({ acceptAction }); h.controller.start(1, 1);
+        const encoded = encodeNativeAction(original, context, { messageId: 'pin', operation: 'pin', clock: 1 });
+        const message = { message_id: 'pin', thread_id: 'thread', from_webid: context.selfWebId,
+            _native_ref_v: 1, _nativeRefPub: 'A'.repeat(43), _nativeActionV: 1, content: encoded.plaintext };
+        expect(await h.controller.transform(message, () => true)).toBeNull();
+        expect(await h.controller.transform({ ...message, _nativeActionV: undefined }, () => true)).toBeNull();
+        acceptAction.mockResolvedValueOnce(true);
+        expect(await h.controller.transform(message, () => true)).toBe(message); expect(h.getMessage).not.toHaveBeenCalled();
+        h.controller.start(1); expect(await h.controller.transform(message, () => true)).toBeNull(); h.controller.stop();
     });
 });

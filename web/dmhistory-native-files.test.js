@@ -10,7 +10,7 @@ const message = (id = 'native:alice:file', size = 19) => ({ message_id: id, thre
     file: { filename: 'private.txt', mime_type: 'text/plain', size } });
 async function raw(store, key) {
     const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open(name(), 2); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+        const request = indexedDB.open(name(), 3); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     try {
         return await new Promise((resolve, reject) => {
@@ -103,7 +103,7 @@ describe('durable native file history', () => {
         const msg = message(); await history.dmHistorySaveFile(msg, new Blob(['private file bytes!']));
         await history.dmHistorySave({ message_id: 'text', thread_id: 'thread', content: 'other readable message' });
         const asset = await raw('native_files', msg.message_id);
-        const db = await new Promise(resolve => { const req = indexedDB.open(name(), 2); req.onsuccess = () => resolve(req.result); });
+        const db = await new Promise(resolve => { const req = indexedDB.open(name(), 3); req.onsuccess = () => resolve(req.result); });
         await new Promise(resolve => {
             const tx = db.transaction('native_files', 'readwrite');
             tx.objectStore('native_files').put({ ...asset, blob: new Blob([new Uint8Array(asset.size).fill(66)]) });

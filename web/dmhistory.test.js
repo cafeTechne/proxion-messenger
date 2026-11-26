@@ -80,7 +80,7 @@ describe('per-thread retention cap', () => {
     expect(ids.has('m00002')).toBe(false);
     expect(ids.has('m02002')).toBe(true);
     const blob = await new Promise(resolve => {
-      const request = indexedDB.open('proxion-dm-history', 2);
+      const request = indexedDB.open('proxion-dm-history', 3);
       request.onsuccess = () => {
         const db = request.result, get = db.transaction('native_files').objectStore('native_files').get('m00000');
         get.onsuccess = () => { db.close(); resolve(get.result); };

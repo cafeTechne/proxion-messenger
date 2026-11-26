@@ -2,7 +2,7 @@ export async function nativeReplyJourney({ sender, receiver, linked, sourceGatew
     const findPeerFile = async page => page.evaluate(async () => {
         const { accountDbName } = await import('./auth.js'), self = localStorage.getItem('proxion_identity_did');
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(accountDbName('proxion-dm-history'), 2);
+            const request = indexedDB.open(accountDbName('proxion-dm-history'), 3);
             request.onerror = () => reject(request.error);
             request.onsuccess = () => {
                 const db = request.result, get = db.transaction('messages').objectStore('messages').getAll();

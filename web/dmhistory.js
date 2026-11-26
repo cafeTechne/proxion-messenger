@@ -14,6 +14,7 @@
 
 import { accountDbName } from './auth.js';
 import { decodeNativeEdit } from './native-edit-codec.js';
+import { validNativeAction } from './native-action-codec.js';
 import { resolveNativeReply } from './native-reply-codec.js';
 import { nativeMessageRef, validNativeMessageRef, resolveNativeMessageRef, nativeMessageIdForRef } from './native-message-ref.js';
 
@@ -24,6 +25,8 @@ import { nativeMessageRef, validNativeMessageRef, resolveNativeMessageRef, nativ
 const DB_NAME = 'proxion-dm-history';
 const STORE = 'messages';
 const FILE_STORE = 'native_files';
+const NATIVE_STATE = 'native_state';
+const MAX_NATIVE_STATE = 2000;
 export const MAX_NATIVE_HISTORY_BYTES = 128 * 1024 * 1024;
 export const MAX_NATIVE_HISTORY_FILES = 64;
 let _dbPromise = null;
@@ -52,13 +55,14 @@ function _open() {
     _dbPromise = new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') { reject(new Error('no-indexeddb')); return; }
         let blocked = false;
-        const req = indexedDB.open(name, 2);
+        const req = indexedDB.open(name, 3);
         req.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(STORE)) {
                 const os = db.createObjectStore(STORE, { keyPath: 'message_id' });
                 os.createIndex('thread_id', 'thread_id', { unique: false });
             }
+            if (!db.objectStoreNames.contains(NATIVE_STATE)) db.createObjectStore(NATIVE_STATE, { keyPath: 'message_id' }).createIndex('thread_id', 'thread_id');
             if (!db.objectStoreNames.contains(FILE_STORE)) db.createObjectStore(FILE_STORE, { keyPath: 'message_id' }).createIndex('size', 'size');
         };
         req.onblocked = () => { blocked = true; reject(new Error('history-upgrade-blocked')); };
@@ -204,8 +208,9 @@ export async function dmHistorySave(msg, opts = {}) {
         const db = await _open();
         if (!current()) return false;
         await new Promise((resolve, reject) => {
-            const tx = db.transaction(msg.file ? [STORE, FILE_STORE] : STORE, 'readwrite');
+            const tx = db.transaction([STORE, FILE_STORE, NATIVE_STATE], 'readwrite');
             const record = _recordForMessage(msg, opts);
+            const write = () => {
             if (msg.file) {
                 const cached = tx.objectStore(FILE_STORE).get(msg.message_id);
                 cached.onsuccess = () => {
@@ -219,6 +224,14 @@ export async function dmHistorySave(msg, opts = {}) {
                     } catch { try { tx.abort(); } catch { /* Transaction already settled. */ } }
                 };
             } else tx.objectStore(STORE).put(record);
+            };
+            const state = tx.objectStore(NATIVE_STATE).get(msg.message_id);
+            state.onsuccess = () => {
+                try {
+                    if (!current() || state.result && (state.result.thread_id !== msg.thread_id || state.result.from_webid !== msg.from_webid)) { tx.abort(); return; }
+                    if (!state.result?.deletedLocal && !state.result?.deletedEveryone) write();
+                } catch { try { tx.abort(); } catch { /* settled */ } }
+            };
             tx.oncomplete = resolve;
             tx.onabort = tx.onerror = () => reject(tx.error);
         });
@@ -247,11 +260,12 @@ export async function dmHistorySaveFile(msg, blob, { current = () => true } = {}
         const db = await _open();
         if (!current()) return false;
         const saved = await new Promise(resolve => {
-            const tx = db.transaction([STORE, FILE_STORE], 'readwrite'), files = tx.objectStore(FILE_STORE);
+            const tx = db.transaction([STORE, FILE_STORE, NATIVE_STATE], 'readwrite'), files = tx.objectStore(FILE_STORE);
             let accepted = false;
             tx.oncomplete = () => resolve(accepted && current());
             tx.onabort = tx.onerror = () => resolve(false);
             const safe = work => { try { if (!current()) tx.abort(); else work(); } catch { try { tx.abort(); } catch { /* Transaction already settled. */ } } };
+            const write = () => {
             const prior = files.get(msg.message_id);
             prior.onsuccess = () => safe(() => {
                 const existing = prior.result;
@@ -277,6 +291,13 @@ export async function dmHistorySaveFile(msg, blob, { current = () => true } = {}
                     });
                 });
             });
+            };
+            const state = tx.objectStore(NATIVE_STATE).get(msg.message_id);
+            state.onsuccess = () => safe(() => {
+                if (state.result && (state.result.thread_id !== msg.thread_id || state.result.from_webid !== msg.from_webid)) { tx.abort(); return; }
+                if (state.result?.deletedLocal || state.result?.deletedEveryone) accepted = true;
+                else write();
+            });
         });
         if (!saved || !current()) return false;
         await _enforceCap(db, msg.thread_id);
@@ -288,11 +309,13 @@ export async function dmHistorySaveFile(msg, blob, { current = () => true } = {}
 // file ACK requires the bytes/reference still to exist, not merely a prior put.
 async function _retainedFile(db, msg, current, digest = null) {
     return new Promise(resolve => {
-        const tx = db.transaction([STORE, FILE_STORE]), record = tx.objectStore(STORE).get(msg.message_id),
+        const tx = db.transaction([STORE, FILE_STORE, NATIVE_STATE]), state = tx.objectStore(NATIVE_STATE).get(msg.message_id), record = tx.objectStore(STORE).get(msg.message_id),
             asset = tx.objectStore(FILE_STORE).get(msg.message_id);
         tx.onabort = tx.onerror = () => resolve(false);
         tx.oncomplete = () => {
             const file = record.result?.file, known = asset.result;
+            if (current() && state.result?.thread_id === msg.thread_id && state.result.from_webid === msg.from_webid
+                && (state.result.deletedLocal || state.result.deletedEveryone)) { resolve(true); return; }
             if (!current() || record.result?.from_webid !== msg.from_webid || !file || file.size !== msg.file?.size) { resolve(false); return; }
             resolve(digest ? file._nativeAsset === msg.message_id && known?.digest === digest && known.from_webid === msg.from_webid
                 && known.blob instanceof Blob && known.blob.size === msg.file.size
@@ -645,14 +668,17 @@ export async function dmHistoryApplyNativeEdit(plaintext, event, context, { curr
         const db = await _open();
         if (!current()) return false;
         return await new Promise(resolve => {
-            const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+            const tx = db.transaction([STORE, NATIVE_STATE], 'readwrite'), store = tx.objectStore(STORE);
             let accepted = false;
             tx.oncomplete = () => resolve(accepted && current());
             tx.onabort = tx.onerror = () => resolve(false);
+            const state = tx.objectStore(NATIVE_STATE).get(id);
             const get = store.get(id);
             get.onsuccess = () => {
                 try {
                     if (!current()) { tx.abort(); return; }
+                    if (state.result?.thread_id === context.threadId && state.result.from_webid === context.actorWebId
+                        && (state.result.deletedLocal || state.result.deletedEveryone)) { accepted = true; return; }
                     const rec = resolveNativeMessageRef(body.ref, { ...context, messages: [get.result] });
                     if (!rec) return;
                     const previous = rec.native_edit_seq ?? 0;
@@ -747,4 +773,85 @@ export async function dmHistoryUpdateContent(messageId, newContent, meta = null)
             g.onerror = resolve;
         });
     } catch (_) { /* ignore */ }
+}
+
+// Native action state shares a transaction with history and Blob cleanup. It
+// contains no filename/caption/bytes and is not evicted with ordinary history.
+async function _mutateNativeState(id, author, context, action, local, callerCurrent) {
+    const name = accountDbName(DB_NAME);
+    const current = () => (!local ? _enabled : true) && callerCurrent() && name === accountDbName(DB_NAME);
+    if (!current()) return false;
+    try {
+        const db = await _open(); if (!current()) return false;
+        return await new Promise(resolve => {
+            const tx = db.transaction([STORE, FILE_STORE, NATIVE_STATE], 'readwrite'), states = tx.objectStore(NATIVE_STATE), messages = tx.objectStore(STORE);
+            let accepted = false;
+            tx.oncomplete = () => resolve(accepted && current()); tx.onabort = tx.onerror = () => resolve(false);
+            const safe = fn => { try { if (!current()) tx.abort(); else fn(); } catch { try { tx.abort(); } catch { /* settled */ } } };
+            const old = states.get(id), original = messages.get(id);
+            original.onsuccess = () => safe(() => {
+                const previous = old.result, record = original.result;
+                if (previous && (previous.thread_id !== context.threadId || previous.from_webid !== author)
+                    || record && (record.thread_id !== context.threadId || record.from_webid !== author)) return;
+                if (local && !previous?.deletedLocal && !nativeMessageRef(record, context)) return;
+                const mutate = () => {
+                    const state = previous || { message_id: id, thread_id: context.threadId, from_webid: author };
+                    if (local || action.op === 'delete') {
+                        state[local ? 'deletedLocal' : 'deletedEveryone'] = true;
+                        if (!local) state.deleteMid ||= action.mid;
+                        if (state.deletedEveryone && state.pin) state.pin = { ...state.pin, active: false };
+                        states.put(state); messages.delete(id); tx.objectStore(FILE_STORE).delete(id);
+                        accepted = true; return;
+                    }
+                    if (state.deletedEveryone) { accepted = true; return; }
+                    const before = state.pin;
+                    // Lamport clock + opaque action id is stable across each
+                    // gateway/browser actor alias, unlike a WebID tie-breaker.
+                    if (before && (before.clock > action.clock || before.clock === action.clock && before.mid > action.mid)) { accepted = true; return; }
+                    if (before && before.clock === action.clock && before.mid === action.mid) {
+                        accepted = before.active === (action.op === 'pin') && before.actor === context.actorWebId; return;
+                    }
+                    state.pin = { clock: action.clock, mid: action.mid, active: action.op === 'pin', actor: context.actorWebId };
+                    states.put(state); accepted = true;
+                };
+                if (previous) mutate();
+                else {
+                    const count = states.count(); count.onsuccess = () => safe(() => { if (count.result < MAX_NATIVE_STATE) mutate(); });
+                }
+            });
+        });
+    } catch { return false; }
+}
+
+export async function dmHistoryApplyNativeAction(body, context, { current = () => true } = {}) {
+    if (!validNativeAction(body)) return false;
+    const id = nativeMessageIdForRef(body.ref, context);
+    if (!id) return false;
+    const author = body.ref.author === 'actor' ? context.actorWebId
+        : context.actorWebId === context.selfWebId ? context.peerWebId : context.selfWebId;
+    return _mutateNativeState(id, author, { ...context }, { ...body }, false, current);
+}
+
+export async function dmHistoryDeleteNativeLocal(messageId, context, { current = () => true } = {}) {
+    if (typeof messageId !== 'string' || !context || !current()) return false;
+    const match = /^native:(did:key:[A-Za-z0-9_-]{1,2040}):([A-Za-z0-9_-]{1,128})$/.exec(messageId);
+    if (!match || ![context.selfWebId, context.peerWebId].includes(match[1])
+        || !nativeMessageIdForRef({ v: 1, kind: 'native_file', id: match[2], author: 'actor' }, { ...context, actorWebId: context.selfWebId })) return false;
+    return _mutateNativeState(messageId, match[1], { ...context }, null, true, current);
+}
+
+export async function dmHistoryNativeState(context, { current: callerCurrent = () => true } = {}) {
+    context = { ...context };
+    if (!nativeMessageIdForRef({ v: 1, kind: 'native_file', id: 'probe', author: 'actor' },
+        { ...context, actorWebId: context?.selfWebId })) return false;
+    const name = accountDbName(DB_NAME), current = () => callerCurrent() && name === accountDbName(DB_NAME);
+    if (!current()) return false;
+    try {
+        const db = await _open(); if (!current()) return false;
+        return await new Promise(resolve => {
+            const tx = db.transaction(NATIVE_STATE), request = tx.objectStore(NATIVE_STATE).index('thread_id').getAll(context.threadId);
+            tx.oncomplete = () => resolve(current() ? request.result.filter(row => [context.selfWebId, context.peerWebId].includes(row.from_webid)) : false);
+            tx.onabort = tx.onerror = () => resolve(false);
+        });
+    } catch { return false; }
 }

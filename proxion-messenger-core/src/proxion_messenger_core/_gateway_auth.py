@@ -160,6 +160,7 @@ class AuthHandlerMixin:
             "native_chunks_v": pending.get("native_chunks_v"),
             "native_edit_v": pending.get("native_edit_v"),
             "native_ref_v": pending.get("native_ref_v"),
+            "native_action_v": pending.get("native_action_v"),
             "x25519_pub": pending.get("x25519_pub"),
         })
 
@@ -267,6 +268,7 @@ class AuthHandlerMixin:
                 "native_chunks_v": data.get("native_chunks_v"),
                 "native_edit_v": data.get("native_edit_v"),
                 "native_ref_v": data.get("native_ref_v"),
+                "native_action_v": data.get("native_action_v"),
                 "x25519_pub": data.get("x25519_pub"),
             }
             _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
@@ -365,6 +367,7 @@ class AuthHandlerMixin:
                 "native_chunks_v": 1 if type(data.get("native_chunks_v")) is int and data["native_chunks_v"] == 1 else 0,
                 "native_edit_v": 1 if type(data.get("native_edit_v")) is int and data["native_edit_v"] == 1 else 0,
                 "native_ref_v": 1 if type(data.get("native_ref_v")) is int and data["native_ref_v"] == 1 else 0,
+                "native_action_v": 1 if type(data.get("native_action_v")) is int and data["native_action_v"] == 1 else 0,
                 "native_media_pub": data.get("x25519_pub"),
                 "session_id": str(_uuid_sess.uuid4()),
                 "connected_at": datetime.now(timezone.utc).isoformat(),
@@ -469,6 +472,7 @@ class AuthHandlerMixin:
             registered_msg: dict = {"type": "registered", "webid": identity, "dm_commit_v": 1}
             if self._native_ref_capable(websocket) and self._native_storage_writable():
                 registered_msg['native_ref_v'] = 1
+                if self._native_action_capable(websocket): registered_msg['native_action_v'] = 1
             if self._native_capable(websocket) and self._native_storage_writable():
                 registered_msg["native_media_v"] = 1
                 if self._native_edits_capable(websocket):

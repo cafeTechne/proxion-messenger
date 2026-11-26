@@ -9,7 +9,7 @@ async function runNativeCaptionJourney({ sender, receiver, sourceGateway, target
         const history = await import('./dmhistory.js');
         const { accountDbName } = await import('./auth.js');
         const rows = await new Promise((resolve, reject) => {
-            const request = indexedDB.open(accountDbName('proxion-dm-history'), 2);
+            const request = indexedDB.open(accountDbName('proxion-dm-history'), 3);
             request.onerror = () => reject(request.error);
             request.onsuccess = () => {
                 const db = request.result, tx = db.transaction('messages'), get = tx.objectStore('messages').getAll();

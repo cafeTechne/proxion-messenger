@@ -261,3 +261,15 @@ describe('structured message transformation at the durable history boundary', ()
         expect(h.history.size).toBe(0); expect(h.e2e.finishDmReceive).not.toHaveBeenCalled();
     });
 });
+
+describe('native action receive proof version', () => {
+    const fanout = { type: 'dm_fanout', from_webid: 'alice', message_id: 'action', to_device_id: 'device',
+        payload: { ...event, native_ref_v: 1, native_action_v: 1 }, receive_commit: { v: 1, queue_id: 1, envelope_digest: 'a'.repeat(64) } };
+    it('echoes both reference and action versions in a consumption proof', () => {
+        expect(gatewayReceiveCommit(fanout)).toMatchObject({ native_ref_v: 1, native_action_v: 1 });
+    });
+    it('refuses an unknown action version before decryption', async () => {
+        const h = harness(); expect(await h.engine().receive({ ...fanout, payload: { ...fanout.payload, native_action_v: 2 } })).toBe(false);
+        expect(h.e2e.ratchetDecrypt).not.toHaveBeenCalled(); expect(h.history.size).toBe(0);
+    });
+});

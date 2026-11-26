@@ -1104,7 +1104,7 @@ class DmHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "fanout too large"}))
             return
 
-        if any(isinstance(entry, dict) and isinstance(entry.get('payload'), dict) and 'native_ref_v' in entry['payload'] for entry in fanout):
+        if any(isinstance(entry, dict) and isinstance(entry.get('payload'), dict) and ('native_ref_v' in entry['payload'] or 'native_action_v' in entry['payload']) for entry in fanout):
             return  # Typed references require the explicitly versioned ingress.
         delivered = []
         _pushed_accounts: set = set()  # one push per account per logical message
@@ -1178,7 +1178,7 @@ class DmHandlerMixin:
 
     async def _deliver_commit_fanout(self, sockets, message_id, sender, device, payload):
         """None means legacy; False means admission failed. Queue BEFORE write."""
-        if isinstance(payload, dict) and 'native_ref_v' in payload:
+        if isinstance(payload, dict) and ('native_ref_v' in payload or 'native_action_v' in payload):
             return False  # Never use the legacy fanout path for a typed reference.
         modern = [ws for ws in sockets if self._fanout_commit_capable(ws)]
         if not modern:
@@ -1215,6 +1215,7 @@ class DmHandlerMixin:
         if row and 'native_ref_v' in row['payload']:
             if (not self._native_ref_deliverable(websocket, row['payload'])
                     or type(data.get('native_ref_v')) is not int or data['native_ref_v'] != 1
+                    or 'native_action_v' in row['payload'] and (type(data.get('native_action_v')) is not int or data['native_action_v'] != 1)
                     or not self._native_ref_device(owner, device, row['payload']['recipient_pub'])):
                 return
         if self._store.acknowledge_device_fanout(owner, device, data.get("queue_id"),
@@ -1226,7 +1227,8 @@ class DmHandlerMixin:
                     "receive_id": receive_id, "queue_id": data["queue_id"],
                     "from_webid": sender, "message_id": message,
                     "envelope_digest": data["envelope_digest"],
-                    **({'native_ref_v': 1} if type(data.get('native_ref_v')) is int and data['native_ref_v'] == 1 and self._native_ref_capable(websocket) else {})}))
+                    **({'native_ref_v': 1} if type(data.get('native_ref_v')) is int and data['native_ref_v'] == 1 and self._native_ref_capable(websocket) else {}),
+                    **({'native_action_v': 1} if type(data.get('native_action_v')) is int and data['native_action_v'] == 1 and self._native_action_capable(websocket) else {})}))
 
     async def _handle_dm_receive_recover(self, websocket, data):
         import time
@@ -1487,7 +1489,7 @@ class DmHandlerMixin:
             return "400 Bad Request", '{"error":"invalid fanout content"}'
         if not message_id or not to_device_id or not isinstance(payload, dict):
             return "400 Bad Request", '{"error":"invalid fanout content"}'
-        if 'native_ref_v' in payload:
+        if 'native_ref_v' in payload or 'native_action_v' in payload:
             return "400 Bad Request", '{"error":"native_ref_requires_versioned_relay"}'
         # A contact that moved to a new gateway proves the new URL with its key.
         _origin = str(data.get("origin_gateway_url") or "")
