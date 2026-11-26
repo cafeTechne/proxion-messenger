@@ -488,7 +488,7 @@ export function createConnection({
             if (_delegCert) {
                 try { _regPayload.delegation_cert = JSON.parse(_delegCert); } catch (_) { /* corrupt — ignore */ }
             }
-            if (_e2ePub && localStorage.getItem('dmHistoryEnabled') !== 'false') _regPayload.native_ref_v = 1;
+            if (_e2ePub && localStorage.getItem('dmHistoryEnabled') !== 'false') { _regPayload.native_ref_v = 1; _regPayload.native_action_v = 1; }
             if (!_regPayload.delegation_cert && _e2ePub && localStorage.getItem('dmHistoryEnabled') !== 'false') {
                 _regPayload.native_media_v = 1;
                 _regPayload.native_chunks_v = 1;

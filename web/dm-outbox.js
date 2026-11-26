@@ -1,19 +1,23 @@
 import { dmEnvelopeFingerprint } from './dm-receipts.js';
+import { decodeNativeAction } from './native-action-codec.js';
 import { decodeNativeReaction } from './native-reaction-codec.js';
 import { decodeNativeReply } from './native-reply-codec.js';
 import { validNativeMessageRef } from './native-message-ref.js';
 
 function validReplyPlan(job) {
-    if (job.wireText === undefined) return !job.nativeControl && !job.record?.native_reaction;
-    const reaction = job.nativeControl === 'reaction' ? decodeNativeReaction(job.wireText, job.id) : null;
-    const body = reaction || decodeNativeReply(job.wireText, job.id);
-    const ref = reaction ? job.record?.native_reaction?.ref : job.record?.native_reply_ref;
-    const binding = reaction ? job.record?.content === '' && ['mid', 'tok', 'seq', 'op', 'emoji'].every(field => reaction[field] === job.record?.native_reaction?.[field])
-        && job.record?.native_reaction_context?.actorWebId === job.actor
-        && job.record?.native_reaction_context?.selfWebId === job.actor
-        && job.record?.native_reaction_context?.peerWebId === job.peer
-        && job.record?.native_reaction_context?.threadId === job.record?.thread_id
-        : !job.nativeControl && body?.text === job.record?.content && job.record?.native_reply_actor === job.actor;
+    if (job.wireText === undefined) return !job.nativeControl && !job.record?.native_reaction && !job.record?.native_action;
+    const kind = job.nativeControl;
+    const control = kind === 'reaction' ? decodeNativeReaction(job.wireText, job.id)
+        : kind === 'action' ? decodeNativeAction(job.wireText, job.id) : null;
+    const body = control || decodeNativeReply(job.wireText, job.id);
+    const record = kind === 'action' ? job.record?.native_action : job.record?.native_reaction;
+    const context = kind === 'action' ? job.record?.native_action_context : job.record?.native_reaction_context;
+    const fields = kind === 'action' ? ['mid', 'clock', 'op'] : ['mid', 'tok', 'seq', 'op', 'emoji'];
+    const ref = control ? record?.ref : job.record?.native_reply_ref;
+    const binding = control ? job.record?.content === '' && fields.every(field => control[field] === record?.[field])
+        && context?.actorWebId === job.actor && context?.selfWebId === job.actor && context?.peerWebId === job.peer
+        && context?.threadId === job.record?.thread_id
+        : !kind && body?.text === job.record?.content && job.record?.native_reply_actor === job.actor;
     return !!body && binding && validNativeMessageRef(ref)
         && ['v', 'kind', 'id', 'author'].every(field => ref[field] === body.ref[field])
         && job.record.from_webid === job.actor
@@ -80,10 +84,10 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             fanout.push({ to_webid: entry.account, to_device_id: entry.device,
                 payload: { ...field(encrypted[index]), from_device_id: job.device,
                     thread_id: job.record.thread_id, thread_peer: job.peer,
-                    x25519_pub: job.pub, ...(job.wireText !== undefined ? { native_ref_v: 1, recipient_pub: entry.pub, e2e_v: 1 } : {}), ...(job.record.reply_to_id && job.wireText === undefined ? { reply_to_id: job.record.reply_to_id } : {}) } });
+                    x25519_pub: job.pub, ...(job.wireText !== undefined ? { native_ref_v: 1, recipient_pub: entry.pub, e2e_v: 1, ...(job.nativeControl === 'action' ? { native_action_v: 1 } : {}) } : {}), ...(job.record.reply_to_id && job.wireText === undefined ? { reply_to_id: job.record.reply_to_id } : {}) } });
         }
         if (job.mode === 'fanout') return fanout.length ? [{ cmd: job.wireText !== undefined ? 'native_ref_send' : 'send_dm_fanout',
-            ...(job.wireText !== undefined ? { native_ref_v: 1, cert_id: job.record.thread_id } : {}), message_id: job.id, fanout }] : [];
+            ...(job.wireText !== undefined ? { native_ref_v: 1, cert_id: job.record.thread_id, ...(job.nativeControl === 'action' ? { native_action_v: 1 } : {}) } : {}), message_id: job.id, fanout }] : [];
         const primary = job.entries.findIndex(entry => entry.primary);
         const route = { ...job.route };
         if (job.wireText !== undefined) delete route.reply_to_id;
@@ -240,6 +244,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
     }
     function evidencedTargets(job, evidence) {
         if (job.wireText !== undefined && (evidence?.kind !== 'native-ref' || evidence.native_ref_v !== 1)) return [];
+        if (job.nativeControl === 'action' && evidence?.native_action_v !== 1) return [];
         if (['echo', 'history', 'pod'].includes(evidence?.kind)) {
             if (evidence.from !== job.record.from_webid || job.mode !== 'single') return [];
             return job.entries.flatMap((entry, index) => entry.primary ? [index] : []);

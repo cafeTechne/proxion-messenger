@@ -1,8 +1,8 @@
 # Round 148 implementation checkpoint
 
-Status: in progress. Persistence and protocol gates are implemented and tested;
-delete/pin controls and real acceptance are not connected yet. This elaborates
-the existing bounded plan, without adding scope.
+Status: complete. The controls and receiver are connected, and real acceptance
+passed. See `ROUND_148_CLOSEOUT.md` for final evidence. This note elaborates the
+existing bounded plan without adding scope.
 
 Implemented:
 
@@ -29,46 +29,48 @@ Implemented:
   Signed preflight/relay proofs echo the new version; exact device capability,
   queued recovery and full consumption commits enforce it. Ordinary fanout
   rejects action markers, including markers without a reference version.
-- The client reference/receive adapters understand the new codec and proof, but
-  the application deliberately does **not advertise native_action_v yet**.
-  Its action-state callback and UI remain unconnected, so advertising support
-  would be inaccurate. Reply/reaction capability remains unchanged.
+- The source controller freezes delete/pin intent before local state and any
+  header. The outbox binds body, actor and conversation; every action frame and
+  full proof carries the separate version. Recovery does not require an original
+  that its own durable deletion already removed. Existing ordering holds and
+  cancellation restrictions remain in force.
+- Native controls use the authenticated action callback and advertise support
+  only with that complete receiver connected. File presentation and history
+  merging inspect deletion state; late quote reads cannot overwrite tombstones.
+  Delete-for-me awaits atomic local removal before changing the visible feed.
+- Native pins merge with ordinary server pins. Local previews read metadata,
+  and Jump loads the actual retained Blob only when needed. A missing original
+  stays unavailable; a retained authenticated pin can be unpinned after signed
+  parent preflight without inventing a file. Linked readers use this path.
+- A pending caption can finish after its original is deleted: its previously
+  validated protected intent must still match a retained author/thread tombstone.
+  Exact headers remain unchanged, and delayed caption application consumes the
+  tombstone without restoring the file. This adds no cancellation or reset.
 
-Remaining implementation before closing 148:
-
-- Bind native actions into the durable outbox: frozen actor/context/body, new
-  wire flag, source state before any header, exact retry/hold, new-version full
-  ACK evidence and existing cancellation restrictions.
-- Connect authenticated incoming action persistence and local presentation.
-  Before presenting native files, inspect durable deletion evidence so a stale
-  callback cannot restore an in-memory file after its atomic history removal.
-  Remove cached quote/pin previews when an original is deleted. Preserve the
-  ordinary 145 receive protocol and 144's design-only safety outcome.
-- Connect author-only delete-for-everyone and strictly local delete-for-me to
-  existing controls. No prepared transfer cancellation or gateway/source
-  retirement is inferred from a history tombstone. Check pending prepared
-  caption/reply actions against deletion so their exact recovery cannot be
-  stranded by removal of the original history row.
-- Add native pins alongside ordinary server pins, without hiding ordinary text
-  pins. Read retained native references locally for offline previews; resolve
-  only real originals, with unavailable/deleted guards and scoped navigation.
-  Preserve existing Pod room adapters. Enable capability advertisement only
-  once the complete action receiver is connected.
-- Exercise both authors' pin/unpin, author-only deletion, local-only removal,
-  Blob cleanup, delayed replay, reload and failure/restart recovery in real
-  browsers. Rerun final gates and write an evidence-based closeout.
+Safety constraints retained: no prepared transfer cancellation, source/gateway
+retirement, reset protocol, larger storage/ratchet caps or attachment-byte fanout.
+Round 144 remains design-only, and ordinary receive commits preserve round 145.
 
 Checkpoint evidence (2026-11-25):
 
-- Full frontend after v3 fixture updates: 2,807 passed, 64 skipped.
+- Full frontend with connected controls and mixed-panel refresh: 2,820 passed,
+  64 skipped, including the final native-context guard (shell cache v326).
 - Focused history/native-file/reference/receive checks: 67 passed, including
   atomic rollback, concurrent Blob save/delete, v2 migration, both-author UUID
   collisions, delayed captions, bounded state and disabled-history local delete.
 - Final focused gateway/reference and relay schema/key checks: 39 passed,
   including signed cross-gateway action preflight/custody/full proof, reply-only
   reader exclusion, exact version/key checks and ordinary-ingress bypass denial.
-- Full backend regression: 4,925 passed, 15 skipped, 220 warnings. Its
-  collection predates the final two relay/bypass tests and the allowlist/ordinary
-  ingress correction; the focused 39-test run covers those final changes. Final
-  closeout must rerun the full backend after complete UI/receiver integration.
-- No real delete/pin acceptance case is claimed complete at this checkpoint.
+- Full backend against the complete protocol gates: 4,927 passed, 15 skipped,
+  221 warnings (`r148-connected-full-core.log`).
+- Focused connected source/outbox/pin/quote/caption checks: 205 passed; mixed
+  ordinary-pin refresh has an additional passing regression case.
+- Real three-browser/two-gateway acceptance passed
+  (`r148-action-focused-browser-4.log`): both participants' pins, ordinary pin
+  coexistence, legacy-mirror restart/upgrade, retained-reference linked unpin,
+  reload and offline previews, local-only and author-only deletion, atomic Blob
+  cleanup, both gateway restarts, exact pending caption/delete headers, delayed
+  original replay rejection, and readable later text. The helper now waits for
+  asynchronously hydrated file rows before invoking their controls.
+- Earlier preserved caption/reply/reaction journeys also passed while this UI
+  integration was under test; final combined regression will run in round 150.

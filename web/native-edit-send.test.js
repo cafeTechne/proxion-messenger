@@ -130,3 +130,19 @@ describe('durable native caption sender', () => {
         expect(h.deps.send).not.toHaveBeenCalled(); expect(h.jobs.size).toBe(1);
     });
 });
+
+describe('caption intent after native deletion', () => {
+    it('recovers the same prepared header when its durable original is replaced by a scoped tombstone', async () => {
+        const h = harness(), job = await h.sender.enqueue(message, view, 'caption');
+        h.e2e.saveDmSendJob.mockRejectedValueOnce(Error('prepared save failed'));
+        await expect(h.sender.retry(job.id)).rejects.toThrow(); expect(h.prepared()).toBe(1);
+        // The injected reader closes over this flag, matching an atomic deletion.
+        const sender = createNativeEditSender({ ...h.deps, getMessage: async () => null,
+            isDeleted: async (id, context, current) => id === message.message_id && context.threadId === 'thread' && current() });
+        expect(await sender.retry(job.id)).toBe(true); expect(h.prepared()).toBe(1);
+        expect(h.deps.send.mock.calls.at(-1)[0].payload.content).toBe('ciphertext');
+        const missing = createNativeEditSender({ ...h.deps, getMessage: async () => null, isDeleted: async () => false });
+        // A fully prepared job remains recoverable from its frozen payload.
+        expect(await missing.retry(job.id)).toBe(true); expect(h.prepared()).toBe(1);
+    });
+});

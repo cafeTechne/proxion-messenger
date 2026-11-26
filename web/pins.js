@@ -16,12 +16,12 @@ import { parseDmAttachment } from './dm-attachments.js';
 // socketSendOrQueue) instead of dropping them into a closed socket.
 export function createPins({ getSocket, getActiveView, getMessages = () => [],
     revealMessage = (id) => document.getElementById(`msg-${id}`), send = null,
-    readPins = null, savePin = null, resolvePin = null, watchPins = null,
+    readPins = null, readExtraPins = null, savePin = null, resolvePin = null, watchPins = null,
     canRead = () => true, canManage = () => true, getSessionId = () => '',
     onUnavailable = () => {}, onSaveFailed = () => {}, onSaved = () => {},
     pollMs = 30000, setTimer = setInterval, clearTimer = clearInterval }) {
     let context = null, generation = 0, busy = false, again = false, timer = null, unwatch = null;
-    let shownPins = new Map();
+    let shownPins = new Map(), basePins = [];
     const saves = new Map();
     const sameView = view => getActiveView()?.id === view.id && getActiveView()?.type === view.type;
     function current() {
@@ -29,7 +29,7 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
             && document.getElementById('pin-panel').style.display !== 'none';
     }
     function closePinPanel() {
-        generation++; context = null; busy = false; again = false; shownPins = new Map();
+        generation++; context = null; busy = false; again = false; shownPins = new Map(); basePins = [];
         if (unwatch) { try { unwatch(); } catch { /* cleanup continues */ } unwatch = null; }
         if (timer !== null) { clearTimer(timer); timer = null; }
         document.getElementById('pin-panel').style.display = 'none';
@@ -61,7 +61,19 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
     function refresh() {
         if (!current()) { closePinPanel(); return; }
         if (busy) { again = true; return; }
-        return load(readPins(context.view));
+        return context.extra ? loadExtra() : load(readPins(context.view));
+    }
+    async function loadExtra() {
+        if (!current() || !context.extra) return;
+        const gen = generation;
+        busy = true;
+        try {
+            const result = await readExtraPins(context.view);
+            if (gen !== generation || !current()) return;
+            if (!result?.ok) { loadFailed(); return; }
+            renderPinRows([...basePins.filter(pin => !String(pin.message_id).startsWith('native:')), ...result.pins]);
+        } catch { if (gen === generation && current()) loadFailed(); }
+        finally { if (gen === generation) { busy = false; if (again) { again = false; refresh(); } } }
     }
     function persist(view, id, add, pin) {
         if (!savePin) return null;
@@ -100,7 +112,10 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
         const socket = getSocket(), view = getActiveView();
         if (!view) return;
         if (!canRead(view)) { onUnavailable(); return; }
-        if (current()) return refresh();
+        if (current()) {
+            if (context.extra && socket?.readyState === 1) socket.send(JSON.stringify({ cmd: 'get_pins', thread_id: 'dm:' + view.id }));
+            return refresh();
+        }
         const pending = readPins?.({ ...view });
         if (pending) {
             closePinPanel();
@@ -111,6 +126,26 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
             timer = setTimer(refresh, pollMs); timer?.unref?.();
             return load(pending);
         }
+        const extra = readExtraPins?.({ ...view });
+        if (extra) {
+            closePinPanel(); context = { view: { ...view }, session: getSessionId(), extra: true };
+            document.getElementById('pin-panel').style.display = 'block';
+            document.getElementById('pin-list').innerHTML = inlineNotice(t('pin.loading'));
+            timer = setTimer(refresh, pollMs); timer?.unref?.();
+            // First request was used to select the adapter; consume that exact
+            // promise, then use readExtraPins only for subsequent refreshes.
+            const gen = generation; busy = true;
+            const run = Promise.resolve(extra).then(result => {
+                if (gen === generation && current()) {
+                    if (result?.ok) renderPinRows([...basePins.filter(pin => !String(pin.message_id).startsWith('native:')), ...result.pins]);
+                    else loadFailed();
+                }
+            }).catch(() => { if (gen === generation && current()) loadFailed(); }).finally(() => {
+                if (gen === generation) { busy = false; if (again) { again = false; refresh(); } }
+            });
+            if (socket?.readyState === 1) socket.send(JSON.stringify({ cmd: 'get_pins', thread_id: 'dm:' + view.id }));
+            return run;
+        }
         if (!socket) return;
         const threadId = (view.type === 'dm' || view.type === 'local_dm' ? 'dm:' : 'room:') + view.id;
         socket.send(JSON.stringify({ cmd: 'get_pins', thread_id: threadId }));
@@ -118,6 +153,13 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
     }
 
     function renderPins(pins) {
+        if (context?.extra) {
+            if (!current()) return;
+            basePins = pins || []; return refresh();
+        }
+        return renderPinRows(pins);
+    }
+    function renderPinRows(pins) {
         const list = document.getElementById("pin-list");
         shownPins = new Map((pins || []).map(pin => [pin.message_id, pin]));
         list.innerHTML = "";

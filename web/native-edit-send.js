@@ -13,7 +13,7 @@ const b64u = hex => btoa(String.fromCharCode(...hex.match(/../g).map(byte => par
 // distinct scope. The plan precedes ratchet preparation, and a prepared edit
 // retains its exact send id/header until both history and delivery commit.
 export function createNativeEditSender({ e2e, getScope, getGeneration = () => 0, isActive = () => true, isInspectable = isActive,
-    contextForView, getPeerPub, getMessage, capability, send, applyEdit, onApplied = () => {}, onState = () => {} }) {
+    contextForView, getPeerPub, getMessage, isDeleted = async () => false, capability, send, applyEdit, onApplied = () => {}, onState = () => {} }) {
     let epoch = 0;
     const jobs = new Map(), queues = new Map();
     let intents = Promise.resolve();
@@ -85,7 +85,11 @@ export function createNativeEditSender({ e2e, getScope, getGeneration = () => 0,
                 if (!current()) return false;
                 const ref = nativeMessageRef(original, job.context);
                 if (!ref || ref.author !== 'actor' || ref.id !== job.event.file_id
-                    || (original.native_edit_seq ?? 0) + 1 !== job.event.native_sequence) return false;
+                    || (original.native_edit_seq ?? 0) + 1 !== job.event.native_sequence) {
+                    // A retained author/context tombstone does not cancel a
+                    // previously validated intent or its journaled header.
+                    if (original || !await isDeleted(job.messageId, job.context, current) || !current()) return false;
+                }
                 const encrypted = await e2e.ratchetEncrypt(job.peer, job.plaintext,
                     { sendId: job.sendId, peerPub: job.peerPub, holdForReceive: true, current });
                 if (!current()) return false;

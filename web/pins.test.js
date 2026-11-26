@@ -18,7 +18,7 @@ function make(over = {}) {
     getSocket: () => (over.socket === undefined ? socket : over.socket),
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     getMessages: () => over.messages || [],
-    readPins: over.readPins, savePin: over.savePin, watchPins: over.watchPins,
+    readPins: over.readPins, readExtraPins: over.readExtraPins, savePin: over.savePin, watchPins: over.watchPins,
     canManage: over.canManage, canRead: over.canRead, getSessionId: over.getSessionId,
     onSaved: over.onSaved, onSaveFailed: over.onSaveFailed, onUnavailable: over.onUnavailable,
     setTimer: over.setTimer || (() => 1), clearTimer: over.clearTimer || (() => {}),
@@ -217,4 +217,29 @@ describe('native DM pin thread identity', () => {
     h.pins.renderPins([{ message_id: 'm1', content: 'Pinned DM' }]);
     expect(rows[0].innerHTML).toContain('data-thread-id="dm:cert-9"');
   });
+});
+
+describe('local native pins alongside ordinary pins', () => {
+    it('renders local references offline and merges later ordinary server pins', async () => {
+        const children = [], readExtraPins = vi.fn(async () => ({ ok: true, pins: [{ message_id: 'native:did:key:alice:file', content: 'local file' }] }));
+        const h = make({ activeView: { type: 'dm', id: 'thread' }, socket: null, readExtraPins });
+        document.getElementById('pin-list').appendChild = row => children.push(row);
+        await h.pins.showPinPanel(); expect(children.at(-1).innerHTML).toContain('local file');
+        await h.pins.renderPins([{ message_id: 'text', content: 'ordinary text' }]);
+        expect(children.slice(-2).map(row => row.innerHTML).join('')).toContain('ordinary text');
+        expect(children.at(-1).innerHTML).toContain('local file');
+    });
+    it('discards a local pin read after closing the panel or changing accounts', async () => {
+        let resolve, session = 'a'; const children = [];
+        const h = make({ readExtraPins: () => new Promise(done => { resolve = done; }), getSessionId: () => session });
+        document.getElementById('pin-list').appendChild = row => children.push(row);
+        const task = h.pins.showPinPanel(); session = 'b'; h.pins.closePinPanel(); resolve({ ok: true, pins: [{ message_id: 'native:file', content: 'private' }] });
+        await task; expect(children).toEqual([]);
+    });
+    it('refreshes ordinary gateway pins when an open mixed panel is explicitly shown again', async () => {
+        const h = make({ activeView: { type: 'dm', id: 'thread' }, readExtraPins: async () => ({ ok: true, pins: [] }) });
+        await h.pins.showPinPanel(); await h.pins.showPinPanel();
+        expect(h.sent).toEqual([{ cmd: 'get_pins', thread_id: 'dm:thread' }, { cmd: 'get_pins', thread_id: 'dm:thread' }]);
+    });
+
 });

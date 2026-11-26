@@ -18,6 +18,14 @@ export function encodeNativeAction(original, context, { messageId, operation, cl
     if (!validNativeAction(body)) throw Error('Invalid native action');
     return { body, plaintext: encodeSealedPlain(KIND, body) };
 }
+// Only unpin can use an already retained pin reference without an original.
+// The caller must validate local state/context and obtain the normal signed
+// parent preflight. This never creates a placeholder message or file.
+export function encodeRetainedNativeUnpin(ref, { messageId, clock } = {}) {
+    const body = { mid: messageId, ref: { ...ref }, op: 'unpin', clock };
+    if (!validNativeAction(body)) throw Error('Invalid retained native pin');
+    return { body, plaintext: encodeSealedPlain(KIND, body) };
+}
 export function decodeNativeAction(plaintext, messageId) {
     if (typeof plaintext !== 'string' || bytes.encode(plaintext).length > 4096) return null;
     const body = decodeSealedPlain(plaintext, KIND);

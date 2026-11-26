@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDmOutbox } from './dm-outbox.js';
+import { encodeNativeAction } from './native-action-codec.js';
 import { encodeNativeReaction } from './native-reaction-codec.js';
 import { encodeNativeReply } from './native-reply-codec.js';
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -474,6 +475,34 @@ describe('native reaction outbox', () => {
             const h = harness(); h.options.nativeReferencesReady = () => true;
             const plan = reactionInput(); patch(plan);
             await expect(h.engine().queue(plan)).rejects.toThrow(); expect(h.disk.size).toBe(0); expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled();
+        }
+    });
+});
+
+describe('native delete/pin outbox proof', () => {
+    function plan() {
+        const context = { threadId: 'thread', selfWebId: 'did:key:alice', peerWebId: 'did:key:bob', actorWebId: 'did:key:alice' };
+        const file = { message_id: 'native:did:key:alice:file', thread_id: 'thread', from_webid: context.selfWebId, file: {} };
+        const encoded = encodeNativeAction(file, context, { messageId: 'delete', operation: 'delete', clock: 1 });
+        return { ...input, id: 'delete', actor: context.selfWebId, peer: context.peerWebId, nativeControl: 'action', mode: 'fanout', wireText: encoded.plaintext,
+            route: { cmd: 'send_dm', cert_id: 'thread' }, entries: [{ peerId: 'bob#device', account: context.peerWebId, device: 'device', pub: 'P'.repeat(43) }],
+            record: { ...input.record, message_id: 'delete', from_webid: context.selfWebId, content: '', native_action: encoded.body, native_action_context: context } };
+    }
+    it('retains state before encryption, tags every frozen frame and requires the distinct full proof', async () => {
+        const h = harness(); h.options.nativeReferencesReady = () => true;
+        const engine = h.engine(), job = plan(); await engine.queue(job);
+        h.options.persistMessage.mockResolvedValueOnce(false); expect(await engine.send(job.id)).toBe(false); expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled();
+        expect(await engine.cancel(job.id)).toBe(false); expect(await engine.send(job.id)).toBe(true);
+        expect(h.frames[0]).toMatchObject({ cmd: 'native_ref_send', native_ref_v: 1, native_action_v: 1 });
+        expect(h.frames[0].fanout[0].payload.native_action_v).toBe(1);
+        const evidence = { kind: 'native-ref', native_ref_v: 1, delivered: [{ to_webid: job.peer, to_device_id: 'device' }] };
+        await engine.confirm(job.id, evidence); expect(h.disk.size).toBe(1); expect(h.holds.size).toBe(1);
+        await engine.confirm(job.id, { ...evidence, native_action_v: 1 }); expect(h.disk.size).toBe(0); expect(h.holds.size).toBe(0);
+    });
+    it('rejects changed context or clock before saving any intent', async () => {
+        for (const mutate of [job => { job.record.native_action.clock++; }, job => { job.record.native_action_context.actorWebId = 'did:key:mallory'; }]) {
+            const h = harness(); h.options.nativeReferencesReady = () => true; const job = plan(); mutate(job);
+            await expect(h.engine().queue(job)).rejects.toThrow(); expect(h.disk.size).toBe(0);
         }
     });
 });

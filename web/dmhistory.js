@@ -434,7 +434,7 @@ export async function dmHistoryLoad(threadId, limit = 500) {
 }
 
 // This device's cached copy of one DM message, or null.
-export async function dmHistoryGet(messageId) {
+export async function dmHistoryGet(messageId, { hydrate = true } = {}) {
     if (!messageId) return null;
     const name = accountDbName(DB_NAME), current = () => name === accountDbName(DB_NAME);
     try {
@@ -444,7 +444,7 @@ export async function dmHistoryGet(messageId) {
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => resolve(null);
         });
-        return current() ? await _hydrateFile(db, rec, current) : null;
+        return current() ? hydrate ? await _hydrateFile(db, rec, current) : rec : null;
     } catch (_) {
         return null;
     }

@@ -64,6 +64,7 @@ import { createNativeMedia } from './native-media.js';
 import { createNativeEdits } from './native-edits.js';
 import { nativeMessageRef, nativeMessageIdForRef } from './native-message-ref.js';
 import { createNativeReactionStore } from './native-reaction-store.js';
+import { createNativeActions } from './native-actions.js';
 import { createNativeReactions } from './native-reactions.js';
 import { createNativeReferences } from './native-references.js';
 import { createDmOutbox } from './dm-outbox.js';
@@ -137,7 +138,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistoryResolveNativeReply, dmHistoryApplyNativeEdit, dmHistorySave, dmHistorySaveFile, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
+import { dmHistoryApplyNativeAction, dmHistoryDeleteNativeLocal, dmHistoryNativeState, dmHistoryResolveNativeReply, dmHistoryApplyNativeEdit, dmHistorySave, dmHistorySaveFile, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
 import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
@@ -816,8 +817,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             canRead: () => _conversationSupports('pins'),
             canManage: view => _conversationSupports('pins') && (!_isPodRoomView(view) || roomCreatorOf.has(view.id)),
             readPins: view => _isPodRoomView(view) ? _readPodPins(view) : null,
-            savePin: (view, id, add, pin) => _isPodRoomView(view) ? _savePodPin(view, id, add, pin) : null,
-            resolvePin: (view, pin) => _isPodRoomView(view) ? _revealPodPin(view, pin) : null,
+            readExtraPins: view => _nativeEditContext(view) ? _readNativePins(view) : null,
+            savePin: (view, id, add, pin) => id?.startsWith('native:') ? _nativeActions.save(view, id, add ? 'pin' : 'unpin') : _isPodRoomView(view) ? _savePodPin(view, id, add, pin) : null,
+            resolvePin: (view, pin) => pin.message_id?.startsWith('native:') ? _revealNativePin(view, pin) : _isPodRoomView(view) ? _revealPodPin(view, pin) : null,
             watchPins: (view, callback) => crossRooms?.isPodRoom(view.id) ? crossRooms.watchPins(view.id, callback)
                 : watchResource((_remoteRooms[view.id]?.container || chatRootUrl(podStorageRoot(), view.id)) + 'pins.json', callback),
             onUnavailable: () => showToast(t('error.transportUnsupported')),
@@ -888,12 +890,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             persistFile: (message, blob, current) => dmHistoryEnabled() ? dmHistorySaveFile(_nativeHistoryMessage(message, message.from_webid), blob, { current }) : false,
             isPersistedFile: async (message, meta, current) => {
                 if (!current()) return false;
+                const context = _nativeEditContext({ id: message.thread_id, type: 'dm', peerWebid: message.from_webid });
+                if (context && await _isNativeDeleted(message.message_id, context, current)) return current();
                 const saved = await dmHistoryGet(message.message_id);
                 return current() && saved?.from_webid === message.from_webid && saved.file?.size === meta.size
                     && typeof saved.file.data_b64 === 'string' && !saved.file.unavailable;
             },
             persistMessage: (message, current) => dmHistoryEnabled() ? dmHistorySave(_nativeHistoryMessage(message, message.from_webid), { requireFile: true, current }) : false,
-            handleEvent,
+            handleEvent: _presentNativeFile,
             toMessage: event => ({ type: 'message', source: 'local_dm', local: true,
                 message_id: 'native:' + event.from_webid + ':' + event.message_id,
                 from_webid: event.from_webid, from_display_name: event.from_display_name,
@@ -914,14 +918,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     ? await dmHistorySaveFile(message, row.blob, { current })
                     : await dmHistorySave(message, { requireFile: true, current });
                 if (saved === false || !current()) return false;
-                handleEvent(message); return true;
+                await _presentNativeFile(message); return true;
             },
         });
         function _nativeEditContext(view) {
             if (!view || !['dm', 'local_dm'].includes(view.type)) return null;
             const peer = view.peerWebid || view.peerDid || localDmPeers[view.id]?.peer_webid
                 || Object.keys(peerDidToCertId).find(did => peerDidToCertId[did] === view.id);
-            if (!String(peer || '').startsWith('did:key:')) return null;
+            if (!String(peer || '').startsWith('did:key:') || !String(selfWebId || '').startsWith('did:key:') || selfWebId === peer) return null;
             return { threadId: view.id, selfWebId, peerWebId: peer };
         }
         async function _loadNativeReplyParent(id, child = null) {
@@ -933,9 +937,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (child?.native_reply_ref && nativeMessageIdForRef(child.native_reply_ref,
                 { ...context, actorWebId: child.native_reply_actor }) !== id) return null;
             const parent = await dmHistoryGet(id);
-            return current() && nativeMessageRef(parent, context) ? { ...parent, local: true } : null;
+            return current() && nativeMessageRef(parent, context) && !await _isNativeDeleted(id, context, current) && current() ? { ...parent, local: true } : null;
         }
         async function _jumpReply(id) {
+            if (messageMap[id]?.deleted) { showToast(t('file.unavailable')); return; }
             if (id?.startsWith('native:') && !messageMap[id]) {
                 const parent = await _loadNativeReplyParent(id);
                 if (!parent) { showToast(t('file.unavailable')); return; }
@@ -956,8 +961,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 const id = peerDidToCertId[actor] || Object.keys(localDmPeers).find(key => localDmPeers[key]?.peer_webid === actor);
                 return id ? { threadId: id, selfWebId, peerWebId: actor, actorWebId: actor } : null;
             },
-            acceptReaction: _applyNativeReaction,
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, getMessage: dmHistoryGet,
+            isDeleted: _isNativeDeleted,
             applyEdit: dmHistoryApplyNativeEdit,
             onApplied: async (id, current) => {
                 const record = await dmHistoryGet(id);
@@ -969,6 +974,79 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             },
             onError: error => console.warn('[native-edit] recovery pending:', error),
         });
+        async function _isNativeDeleted(id, context, current = () => true) {
+            const rows = await dmHistoryNativeState(context, { current });
+            return !!rows && rows.some(row => row.message_id === id && (row.deletedLocal || row.deletedEveryone));
+        }
+        function _removeNativeRows(rows, context) {
+            if (activeView?.id !== context.threadId || _nativeEditContext(activeView)?.peerWebId !== context.peerWebId) return;
+            for (const row of rows) if (row.deletedLocal || row.deletedEveryone) {
+                if (messageMap[row.message_id]?.thread_id && messageMap[row.message_id].thread_id !== context.threadId) continue;
+                rendering.removeMessage(row.message_id);
+                allMessages = allMessages.filter(message => message.message_id !== row.message_id);
+                delete messageReactions[row.message_id];
+            }
+        }
+        async function _presentNativeState(context, callerCurrent = () => true) {
+            const scope = _outgoingScope(), generation = _outgoingGeneration();
+            const current = () => callerCurrent() && scope === _outgoingScope() && generation === _outgoingGeneration();
+            const rows = await dmHistoryNativeState(context, { current });
+            if (!rows || !current()) return;
+            _removeNativeRows(rows, context);
+            if (activeView?.id === context.threadId) pinActions.refresh();
+        }
+        async function _applyNativeAction(body, context, current) {
+            if (await dmHistoryApplyNativeAction(body, context, { current }) !== true) return false;
+            try { await _presentNativeState(context, current); } catch (_) {}
+            return current();
+        }
+        async function _presentNativeFile(message) {
+            const context = _nativeEditContext({ id: message.thread_id, type: 'dm',
+                ...(message.from_webid !== selfWebId ? { peerWebid: message.from_webid } : {}) });
+            const scope = _outgoingScope(), generation = _outgoingGeneration();
+            const current = () => scope === _outgoingScope() && generation === _outgoingGeneration();
+            if (!context) return false;
+            const rows = await dmHistoryNativeState(context, { current });
+            if (!rows || !current()) return false;
+            if (rows.some(row => row.message_id === message.message_id && (row.deletedLocal || row.deletedEveryone))) {
+                _removeNativeRows(rows, context); return true;
+            }
+            handleEvent(message); return true;
+        }
+        async function _readNativePins(view) {
+            const context = _nativeEditContext(view), scope = _outgoingScope(), generation = _outgoingGeneration();
+            const current = () => scope === _outgoingScope() && generation === _outgoingGeneration()
+                && activeView?.id === view.id && activeView?.type === view.type;
+            if (!context || !current()) return { ok: false };
+            const rows = await dmHistoryNativeState(context, { current });
+            if (!rows || !current()) return { ok: false };
+            const pins = [];
+            for (const row of rows) if (row.pin?.active && !row.deletedLocal && !row.deletedEveryone) {
+                const original = await dmHistoryGet(row.message_id, { hydrate: false });
+                if (!current()) return { ok: false };
+                const valid = nativeMessageRef(original, context);
+                pins.push({ message_id: row.message_id, native_pin: true, pinned_by: row.pin.actor,
+                    content: valid ? original.file.filename || original.content : t('file.unavailable'),
+                    ...(valid ? { message: { from_webid: original.from_webid, from_display_name: original.from_display_name } } : {}) });
+            }
+            return { ok: true, pins };
+        }
+        async function _revealNativePin(view, pin) {
+            const scope = _outgoingScope(), generation = _outgoingGeneration();
+            const current = () => scope === _outgoingScope() && generation === _outgoingGeneration()
+                && activeView?.id === view.id && activeView?.type === view.type;
+            if (!current()) return null;
+            const original = await _loadNativeReplyParent(pin.message_id);
+            if (!current()) return null;
+            if (!original || original.deleted || original.file?.unavailable || typeof original.file?.data_b64 !== 'string') {
+                showToast(t('file.unavailable')); return null;
+            }
+            messageMap[original.message_id] = original;
+            if (!allMessages.some(row => row.message_id === original.message_id)) {
+                allMessages.push(original); allMessages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+            }
+            return rendering.revealMessage(original.message_id);
+        }
         const _nativeReactionStore = createNativeReactionStore({ getScope: _outgoingScope, enabled: dmHistoryEnabled });
         async function _hydrateNativeReactions(context, callerCurrent = () => true) {
             const scope = _outgoingScope(), generation = _outgoingGeneration();
@@ -996,7 +1074,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && tabLock.isLeader() && transport.mode !== 'web' && socket?.readyState === WebSocket.OPEN,
             historyEnabled: dmHistoryEnabled, send: command => sendCmd(command.cmd, command),
-            acceptReaction: _applyNativeReaction,
+            acceptReaction: _applyNativeReaction, acceptAction: _applyNativeAction,
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, getMessage: dmHistoryGet, contextForView: _nativeEditContext,
             contextForMessage: message => {
                 const actor = message.from_webid, peer = actor === selfWebId ? message._nativeThreadPeer : actor;
@@ -1007,7 +1085,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const _dmOutbox = createDmOutbox({
             e2e: { ratchetEncrypt, finishDmSend, releaseDmSendHold, saveDmSendJob, listDmSendJobs, removeDmSendJob, hasPendingDmSend },
             getScope: _outgoingScope, getGeneration: _outgoingGeneration, isActive: () => !!clientDid && tabLock.isLeader(),
-            nativeReferencesReady: () => _nativeRefs.available(),
+            nativeReferencesReady: job => job?.nativeControl === 'action' ? _nativeRefs.actionsAvailable() : _nativeRefs.available(),
             send: (frame, job) => {
                 const actor = job.podActor || job.media?.actor;
                 const bound = transport.mode !== 'web' && isDmPeerWebId(job.peer) && actor;
@@ -1018,7 +1096,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     ? !!crossMode?.isReady() : !!socket && socket.readyState === WebSocket.OPEN,
             planStatus: job => _frozenDmPlanStatus(job),
             onCancelled: id => { _undeliveredDms.delete(id); sendStatus.forget(id); deleteForMeLocal(id); },
-            persistMessage: (record, current = () => true) => record.native_reaction
+            persistMessage: (record, current = () => true) => record.native_action
+                ? _applyNativeAction(record.native_action, record.native_action_context, current)
+                : record.native_reaction
                 ? _applyNativeReaction(record.native_reaction, record.native_reaction_context, current)
                 : dmHistorySave(record, { delivery: 'pending', outbox: true, current }),
             clearDelivery: id => dmHistorySetDelivery(id, null),
@@ -1035,27 +1115,34 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 if (job?.media) { _dmMedia?.refresh(); if (!job.mediaReleased) _releaseCompletedMedia(job); }
             },
         });
+        async function _queueNativeControl(encoded, context, current, kind) {
+            const view = activeView && { ...activeView };
+            if (!current() || view?.id !== context.threadId) return null;
+            const peer = context.peerWebId, actor = context.selfWebId;
+            const peers = [{ device_id: encoded.primaryDeviceId, pub_b64u: encoded.peerPub },
+                ...identity.devicesForPeer(peer).filter(dev => dev.device_id && dev.pub_b64u && dev.device_id !== encoded.primaryDeviceId)];
+            const own = (await _ownDevicesForSend(peer)).filter(dev => dev.device_id && dev.pub_b64u);
+            if (!current()) return null;
+            const entries = peers.map(dev => ({ peerId: peer + '#' + dev.device_id, account: peer, device: dev.device_id, pub: dev.pub_b64u }));
+            for (const dev of own) entries.push({ peerId: actor + '#' + dev.device_id, account: actor, device: dev.device_id, pub: dev.pub_b64u });
+            return _dmOutbox.queue({ id: encoded.body.mid, actor, peer, device: clientDid, pub: myX25519PubB64u(),
+                nativeControl: kind, wireText: encoded.plaintext, mode: 'fanout', entries,
+                route: view.type === 'local_dm' ? { cmd: 'local_dm', target_webid: peer } : { cmd: 'send_dm', cert_id: context.threadId },
+                record: { message_id: encoded.body.mid, thread_id: context.threadId, from_webid: actor, content: '',
+                    timestamp: new Date().toISOString(), [kind === 'action' ? 'native_action' : 'native_reaction']: encoded.body,
+                    [kind === 'action' ? 'native_action_context' : 'native_reaction_context']: context } });
+        }
         const _nativeReactions = createNativeReactions({
             store: _nativeReactionStore, references: _nativeRefs, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !accountDid && _nativeRefs.available(), contextForView: _nativeEditContext,
             getMessage: dmHistoryGet, listJobs: listDmSendJobs, transmit: id => _dmOutbox.send(id), onApplied: _hydrateNativeReactions,
-            queue: async (encoded, context, current) => {
-                const view = activeView && { ...activeView };
-                if (!current() || view?.id !== context.threadId) return null;
-                const peer = context.peerWebId, actor = context.selfWebId;
-                const peers = [{ device_id: encoded.primaryDeviceId, pub_b64u: encoded.peerPub },
-                    ...identity.devicesForPeer(peer).filter(dev => dev.device_id && dev.pub_b64u && dev.device_id !== encoded.primaryDeviceId)];
-                const own = (await _ownDevicesForSend(peer)).filter(dev => dev.device_id && dev.pub_b64u);
-                if (!current()) return null;
-                const entries = peers.map(dev => ({ peerId: peer + '#' + dev.device_id, account: peer, device: dev.device_id, pub: dev.pub_b64u }));
-                for (const dev of own) entries.push({ peerId: actor + '#' + dev.device_id, account: actor, device: dev.device_id, pub: dev.pub_b64u });
-                return _dmOutbox.queue({ id: encoded.body.mid, actor, peer, device: clientDid, pub: myX25519PubB64u(),
-                    nativeControl: 'reaction', wireText: encoded.plaintext, mode: 'fanout', entries,
-                    route: view.type === 'local_dm' ? { cmd: 'local_dm', target_webid: peer } : { cmd: 'send_dm', cert_id: context.threadId },
-                    record: { message_id: encoded.body.mid, thread_id: context.threadId, from_webid: actor, content: '',
-                        timestamp: new Date().toISOString(), native_reaction: encoded.body, native_reaction_context: context } });
-            },
+            queue: (encoded, context, current) => _queueNativeControl(encoded, context, current, 'reaction'),
         });
+        const _nativeActions = createNativeActions({ getScope: _outgoingScope, getGeneration: _outgoingGeneration,
+            isActive: () => _nativeRefs.actionsAvailable(), contextForView: _nativeEditContext,
+            getMessage: dmHistoryGet, listJobs: listDmSendJobs, readState: dmHistoryNativeState, apply: dmHistoryApplyNativeAction,
+            references: _nativeRefs, transmit: id => _dmOutbox.send(id), onApplied: _presentNativeState,
+            queue: (encoded, context, current) => _queueNativeControl(encoded, context, current, 'action') });
         function _releaseCompletedMedia(job) {
             if (_mediaCleanup.has(job.id)) return;
             const scope = _outgoingScope(), epoch = authContext().epoch, bridgeEpoch = crossMode?.generation() || 0;
@@ -3231,11 +3318,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     break;
                 case "pins": {
                     if (_isPodRoomView(activeView)) break;
+                    const _pinView = activeView && { ...activeView };
+                    const _pinSession = _webRoomSessionId();
+                    if (!_pinView || event.thread_id !== ((['dm', 'local_dm'].includes(_pinView.type) ? 'dm:' : 'room:') + _pinView.id)) break;
                     // A sealed DM pin shows this device's plaintext copy or a notice.
                     const _seq = ++_pinsRenderSeq;
                     const _dm = String(event.thread_id || '').startsWith('dm:');
                     unsealList(event.pins, { isDm: () => _dm, lookup: _localPlaintext })
-                        .then((pins) => { if (_seq === _pinsRenderSeq) renderPins(pins); });
+                        .then((pins) => { if (_seq === _pinsRenderSeq && _pinSession === _webRoomSessionId() && activeView?.id === _pinView.id && activeView?.type === _pinView.type) renderPins(pins); });
                     break;
                 }
                 case "blocks":
@@ -4347,7 +4437,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 case "dm_receive_committed":
                     _gatewayReceives.confirmCommit(event).catch(err => console.warn('[gateway-dm] commit receipt:', err)); break;
                 case "native_ref_fanout_ack":
-                    _confirmDmSend(event.message_id, { kind: 'native-ref', native_ref_v: event.native_ref_v, delivered: event.delivered });
+                    _confirmDmSend(event.message_id, { kind: 'native-ref', native_ref_v: event.native_ref_v, native_action_v: event.native_action_v, delivered: event.delivered });
                     break;
                 case "send_dm_fanout_ack":
                     // Fanout has no self-echo; confirm the optimistic send on ack.
@@ -5288,20 +5378,25 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         async function mergeDmLocalHistory(threadId) {
             if (!threadId || !activeView || activeView.id !== threadId) return;
-            let local;
-            try { local = await dmHistoryLoad(threadId); } catch (_) { return; }
-            if (!local || !local.length || !activeView || activeView.id !== threadId) return;
             const scope = _outgoingScope(), generation = _outgoingGeneration(), view = { ...activeView };
             const current = () => scope === _outgoingScope() && generation === _outgoingGeneration()
                 && activeView?.id === threadId && activeView?.type === view.type;
+            let local;
+            try { local = await dmHistoryLoad(threadId); } catch (_) { return; }
+            if (!local || !current()) return;
             const context = _nativeEditContext(view);
             if (context) for (const row of local) if (row.native_reply_ref) {
                 const resolved = await dmHistoryResolveNativeReply(row.message_id, { ...context, actorWebId: row.native_reply_actor }, { current });
                 if (!current()) return;
                 if (resolved) Object.assign(row, resolved);
             }
+            const nativeState = context ? await dmHistoryNativeState(context, { current }) : [];
+            if (!nativeState || !current()) return;
+            const deleted = new Set(nativeState.filter(row => row.deletedLocal || row.deletedEveryone).map(row => row.message_id));
+            if (context) _removeNativeRows(nativeState, context);
             let changed = false;
             for (const lm of local) {
+                if (deleted.has(lm.message_id)) continue;
                 const existing = messageMap[lm.message_id];
                 if (!existing) {
                     const msg = { ...lm, local: true };
@@ -5462,6 +5557,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         }
 
         function _deleteConfirmed(view, msgId) {
+            if (msgId?.startsWith('native:')) {
+                _nativeActions.save(view, msgId, 'delete').then(result => { if (!result.ok) showToast(t('msg.changeFailed')); }); return;
+            }
             if (_isPodRoomView(view)) {
                 const revision = messageMap[msgId]?.revision_id || '';
                 _changePodRoomMessage(view, msgId, { kind: 'delete', expectedRevision: revision })
@@ -5483,6 +5581,15 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // re-appear via the history merge on the next open.)
         function deleteForMeLocal(msgId) {
             if (!msgId) return;
+            if (msgId.startsWith('native:')) {
+                const context = _nativeEditContext(activeView), scope = _outgoingScope(), generation = _outgoingGeneration();
+                const current = () => scope === _outgoingScope() && generation === _outgoingGeneration();
+                if (!context) { showToast(t('msg.changeFailed')); return; }
+                return dmHistoryDeleteNativeLocal(msgId, context, { current }).then(async ok => {
+                    if (!current()) return;
+                    if (ok) await _presentNativeState(context, current); else showToast(t('msg.changeFailed'));
+                });
+            }
             rendering.removeMessage(msgId);
             allMessages = allMessages.filter(m => m.message_id !== msgId);
             dmHistoryDelete(msgId);
@@ -7701,7 +7808,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             document.getElementById("ctx-meme").style.display = isImage ? "" : "none";
             // Local-only removal: offered where the hover bar used to offer it.
             document.getElementById("ctx-delete-me").style.display =
-                isOwn && (msg.local || activeView?.local) ? "" : "none";
+                (msgId.startsWith('native:') || isOwn) && (msg.local || activeView?.local) ? "" : "none";
 
             const menu = document.getElementById("ctx-menu");
             // Focus moves into the menu (menu.js). Escape/Tab, or activating an

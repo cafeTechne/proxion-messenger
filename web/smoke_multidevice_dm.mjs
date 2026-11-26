@@ -1,4 +1,5 @@
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
+import { nativeActionJourney } from './scripts/native-action-journey.mjs';
 import { nativeReactionJourney } from './scripts/native-reaction-journey.mjs';
 import { nativeReplyJourney } from './scripts/native-reply-journey.mjs';
 import { nativeCaptionJourney } from './scripts/native-caption-journey.mjs';
@@ -382,6 +383,22 @@ try {
   await b.waitForFunction(async () => (await (await import('./dmhistory.js')).dmHistorySearch('voice.webm')).some(row => row.file?.mime_type === 'audio/webm'),
     { timeout: 20000, polling: 250 });
   console.log('  ✓ native DM voice records and sends through the sealed attachment route');
+  if (process.env.PROXION_NATIVE_ACTION_ONLY) {
+    step = 'native-action-fixtures';
+    await b.bringToFront();
+    await b.evaluate(() => {
+      const transfer = new DataTransfer(); transfer.items.add(new File(['B action original'], 'native-caption-action-fixture.txt', { type: 'text/plain' }));
+      const input = document.getElementById('file-input'); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await b.waitForSelector('#file-confirm-modal', { visible: true }); await b.click('#file-confirm-ok');
+    await ap.bringToFront(); await ap.waitForFunction(async () => (await (await import('./dmhistory.js')).dmHistorySearch('native-caption-action-fixture')).some(row => row.file), { timeout: 30000 });
+    await b.bringToFront(); await b.waitForFunction(async () => (await (await import('./dmhistory.js')).dmHistorySearch('native-caption-action-fixture')).some(row => row.file), { timeout: 30000 });
+    await ap.bringToFront(); await ap.focus('#message-input'); await ap.type('#message-input', 'text-after-native-reaction-fixture-' + Date.now()); await ap.keyboard.press('Enter');
+    step = 'native-delete-pin-references';
+    await nativeActionJourney({ sender: ap, receiver: b, linked: ad, sourceGateway: A, targetGateway: B,
+      openSender: () => openFirstDm(ap, 'action sender'), openReceiver: () => openFirstDm(b, 'action recipient'),
+      openLinked: () => openFirstDm(ad, 'action linked reader'), online });
+  } else {
   step = 'native-inline-durable-recovery';
   if (!process.env.PROXION_NATIVE_CAPTION_ONLY) await nativeMediaJourney({ sender: ap, receiver: b, sourceGateway: A, targetGateway: B,
     openSender: () => openFirstDm(ap, 'native inline sender'), openReceiver: () => openFirstDm(b, 'native inline recipient'), online });
@@ -396,6 +413,11 @@ try {
     step = 'native-reaction-references';
     await nativeReactionJourney({ sender: ap, receiver: b, linked: ad, sourceGateway: A,
       openSender: () => openFirstDm(ap, 'reaction sender'), openReceiver: () => openFirstDm(b, 'reaction recipient'), online });
+    step = 'native-delete-pin-references';
+    await nativeActionJourney({ sender: ap, receiver: b, linked: ad, sourceGateway: A, targetGateway: B,
+      openSender: () => openFirstDm(ap, 'action sender'), openReceiver: () => openFirstDm(b, 'action recipient'),
+      openLinked: () => openFirstDm(ad, 'action linked reader'), online });
+  }
   }
   if (!process.env.PROXION_NATIVE_CAPTION_ONLY) {
   step = 'native-accepted-inline-adaptation';

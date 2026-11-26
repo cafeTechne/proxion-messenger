@@ -1089,4 +1089,17 @@ describe('native reply quote cache lookup', () => {
     expect(bodyOf(feed, 'reply').innerHTML).toContain('reply-context-unavailable');
     expect(host.allMessages).toHaveLength(1); expect(sent.some(packet => packet.cmd === 'get_message')).toBe(false);
   });
+  it('does not restore a deleted parent when its earlier asynchronous quote lookup completes', async () => {
+    miniDom(); let finish;
+    const id = 'native:did:key:zA:file', pending = new Promise(resolve => { finish = resolve; });
+    const r = make({ loadReplyParent: () => pending });
+    r.renderMessage({ message_id: 'reply', thread_id: 'room-1', from_webid: 'did:key:zB', content: 'reply', reply_to_id: id,
+      timestamp: at('2026-10-04T11:00:00') });
+    await Promise.resolve(); r.removeMessage(id);
+    finish({ message_id: id, thread_id: 'room-1', from_webid: 'did:key:zA', file: { data_b64: 'eA==' }, content: 'retired caption' });
+    await Promise.resolve(); await Promise.resolve();
+    expect(host.messageMap[id]).toMatchObject({ deleted: true }); expect(host.messageMap[id].file).toBeUndefined();
+    expect(host.allMessages.some(row => row.message_id === id && row.file)).toBe(false);
+  });
+
 });

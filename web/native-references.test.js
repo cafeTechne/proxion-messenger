@@ -115,4 +115,12 @@ describe('native delete/pin separate capability', () => {
         expect(await h.controller.transform(message, () => true)).toBe(message); expect(h.getMessage).not.toHaveBeenCalled();
         h.controller.start(1); expect(await h.controller.transform(message, () => true)).toBeNull(); h.controller.stop();
     });
+    it('preflights a retained unpin by its validated author/UUID without a synthetic file', async () => {
+        const h = harness(); h.controller.start(1, 1);
+        const pending = h.controller.prepareRetainedUnpin({ v: 1, kind: 'native_file', id: 'file', author: 'peer' }, { id: 'thread' }, { messageId: 'unpin', clock: 2 });
+        h.controller.handleEvent(result(h.send.mock.calls.at(-1)[0], { native_action_v: 1 }));
+        expect(await pending).toMatchObject({ body: { op: 'unpin', clock: 2, ref: { author: 'peer' } } });
+        expect(h.getMessage).not.toHaveBeenCalled(); h.controller.stop();
+    });
+
 });

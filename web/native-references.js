@@ -1,6 +1,6 @@
 import { encodeNativeReply, decodeNativeReply, isNativeReplyPlain, resolveNativeReply } from './native-reply-codec.js';
 import { encodeNativeReaction, decodeNativeReaction, isNativeReactionPlain } from './native-reaction-codec.js';
-import { encodeNativeAction, decodeNativeAction, isNativeActionPlain } from './native-action-codec.js';
+import { encodeNativeAction, encodeRetainedNativeUnpin, decodeNativeAction, isNativeActionPlain } from './native-action-codec.js';
 import { nativeMessageIdForRef } from './native-message-ref.js';
 
 // Capability state belongs to a single authenticated connection. No prepared
@@ -44,6 +44,12 @@ export function createNativeReferences({ getScope, getGeneration = () => 0, isAc
         prepareReply(original, view, input, current = () => true) { return prepare(original, view, input, current, encodeNativeReply); },
         prepareReaction(original, view, input, current = () => true) { return prepare(original, view, input, current, encodeNativeReaction); },
         prepareAction(original, view, input, current = () => true) { return prepare(original, view, input, current, encodeNativeAction, true); },
+        prepareRetainedUnpin(ref, view, input, current = () => true) {
+            return prepare(ref, view, input, current, (retained, context, values) => {
+                if (!nativeMessageIdForRef(retained, { ...context, actorWebId: context?.selfWebId })) throw Error('Invalid native pin context');
+                return encodeRetainedNativeUnpin(retained, values);
+            }, true);
+        },
         handleEvent(event) {
             if (event?.type !== 'native_ref_capability_result') return false;
             const row = pending.get(event.request_id);

@@ -128,7 +128,8 @@ describe('main.js routes every DM surface through dmtext.js', () => {
     expect(src).toMatch(/case "local_history": \{\s*const tid = event\.thread_id;\s*const msgs = _unsealHistory\(event\.messages, tid\);/);
   });
   it('pins, search hits, fetched reply parents and notifications too', () => {
-    expect(src).toMatch(/case "pins": \{[\s\S]{0,300}unsealList\(event\.pins/);
+    const pinCase = src.split('case "pins": {')[1]?.split('case "blocks":')[0];
+    expect(pinCase).toContain('unsealList(event.pins');
     expect(src).toMatch(/case "search_results":\s*_searchWithLocalDms\(event\)\.then\(renderSearchResults\)/);
     expect(src).toMatch(/case "message_fetched": \{\s*const m = event\.message\s*&& unsealCopy\(/);
     expect(src).toContain("showOsNotification(`${sender}`, previewText(msg, t('e2e.undecryptable')), id);");

@@ -809,9 +809,10 @@ export function createRendering({
                         Promise.resolve().then(() => loadReplyParent(msg.reply_to_id, msg)).then(parentRow => {
                             if (getActiveView()?.id !== view?.id || getActiveView()?.type !== view?.type
                                 || scope !== e2eScopedKey('native-reply') || self !== getSelfWebId()) { state._requestedReplies.delete(msg.reply_to_id); return; }
-                            const found = parentRow?.message_id === msg.reply_to_id ? parentRow : null;
+                            const retired = getMessageMap()[msg.reply_to_id]?.deleted ? getMessageMap()[msg.reply_to_id] : null;
+                            const found = retired || (parentRow?.message_id === msg.reply_to_id ? parentRow : null);
                             if (!found) state._requestedReplies.delete(msg.reply_to_id);
-                            if (found) {
+                            if (found && !found.deleted) {
                                 getMessageMap()[found.message_id] = found;
                                 const messages = getAllMessages();
                                 if (!messages.some(row => row.message_id === found.message_id)) {

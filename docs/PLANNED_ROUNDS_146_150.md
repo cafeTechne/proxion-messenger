@@ -99,12 +99,13 @@ new crypto retirement/reset protocols.
 
 ## Round 148: Native message deletion and pins
 
-Status: in progress. Depends on 146–147.
+Status: complete. Depends on 146–147.
 
-Persistence/protocol checkpoint: atomic bounded deletion and pin state, history
-v3 migration, replay suppression and separate action capability gates are tested.
-Controls, outbox integration and real delete/pin acceptance remain unconnected.
-See `ROUND_148_IMPLEMENTATION_NOTES.md`; the acceptance checklist stays open.
+Completed within the planned scope: typed delete/pin controls, atomic bounded
+state and Blob cleanup, stale replay guards, mixed ordinary/native pin previews,
+offline navigation and exact action/caption recovery. The real three-browser,
+two-gateway acceptance passed. Full frontend: 2,820 passed, 64 skipped; full
+backend: 4,927 passed, 15 skipped. See `ROUND_148_CLOSEOUT.md`.
 
 Problem: generic delete/pin commands do not distinguish a native file's local
 history key from its gateway reference/provenance. Existing controls must apply
@@ -112,15 +113,15 @@ the operation to the intended delivered message and persist that result.
 
 Bounded work:
 
-- [ ] Authorise native delete-for-everyone using the original sender/reference;
+- [x] Authorise native delete-for-everyone using the original sender/reference;
   keep delete-for-me strictly local and preserve its account boundary.
-- [ ] Retain bounded deletion evidence so delayed original events/edits cannot
+- [x] Retain bounded deletion evidence so delayed original events/edits cannot
   resurrect a deleted message or its local file cache.
-- [ ] Make native pin/unpin work for either conversation participant, resolve
+- [x] Make native pin/unpin work for either conversation participant, resolve
   previews locally and retain the reference across reload/offline recovery.
-- [ ] Remove associated local history Blobs through the existing atomic cleanup
+- [x] Remove associated local history Blobs through the existing atomic cleanup
   rules when deletion requires it; do not infer source/gateway cancellation.
-- [ ] Verify foreign-author/thread, stale events and ordinary message controls.
+- [x] Verify foreign-author/thread, stale events and ordinary message controls.
 
 Acceptance: both peers can pin/unpin a delivered native file and reopen its
 correct preview after reload. Only its author can delete it for everyone;

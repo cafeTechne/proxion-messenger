@@ -3,7 +3,7 @@ import { createNativeEditReceiver } from './native-edit-receive.js';
 import { decodeNativeEdit } from './native-edit-codec.js';
 
 export function createNativeEdits({ e2e, receipts, getScope, getGeneration = () => 0, isActive, send,
-    contextForView, contextForPeer, getPeerPub, getOwnPub, getMessage, applyEdit, onApplied, onError = () => {} }) {
+    contextForView, contextForPeer, getPeerPub, getOwnPub, getMessage, isDeleted, applyEdit, onApplied, onError = () => {} }) {
     let version = 0, epoch = 0, timer = null, recovering = null;
     const pending = new Map();
     const active = () => version === 1 && isActive();
@@ -26,7 +26,7 @@ export function createNativeEdits({ e2e, receipts, getScope, getGeneration = () 
         });
     }
     const sender = createNativeEditSender({ e2e, getScope, getGeneration: generation, isActive: active, isInspectable: isActive,
-        contextForView, getPeerPub, getMessage, capability, send: guardedSend, applyEdit, onApplied });
+        contextForView, getPeerPub, getMessage, isDeleted, capability, send: guardedSend, applyEdit, onApplied });
     const receiver = createNativeEditReceiver({ e2e, receipts, getScope, getGeneration: generation, isActive: active,
         getOwnPub, contextForPeer, applyEdit, onApplied, send: guardedSend, onError });
     async function recover() {
