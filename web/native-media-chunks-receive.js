@@ -18,12 +18,13 @@ export function createNativeChunkReceiver({ receiver, getScope, getGeneration = 
         return { scope, current: () => stamp === epoch && scope === getScope() && generation === getGeneration() && isActive() };
     };
     const keyFor = row => JSON.stringify([row.scope, row.sender, row.id]);
-    const notify = (row, state) => onState({ id: row.id, peer: row.sender, scope: row.scope,
+    const notify = (row, state) => onState({ key: row.key || keyFor(row), id: row.id, peer: row.sender, scope: row.scope,
         state, received: row.received || 0, total: row.manifest.chunk_count });
     async function release(row, event, ctx, state = 'committed') {
         const identity = await nativeMediaIdentity(event, row.manifest.cipher_digest);
         if (!ctx.current()) return false;
         await inbox.release(ctx.scope, row.sender, row.id, row.manifestDigest, identity.receiveId, ctx.current);
+        if (!ctx.current()) return false;
         entries.delete(keyFor(row)); notify(row, state); return true;
     }
     async function finish(entry, ctx) {
@@ -33,9 +34,12 @@ export function createNativeChunkReceiver({ receiver, getScope, getGeneration = 
             const { row } = entry, assembled = await inbox.assemble(ctx.scope, row.sender, row.id, row.manifestDigest, ctx.current);
             if (!ctx.current() || getOwnPub() !== row.manifest.recipient_pub) return false;
             const event = asMessage(row);
-            if (!await receiver.receiveBytes(event, assembled.bytes, persistFile) || !ctx.current()) return false;
+            if (!await receiver.receiveBytes(event, assembled.bytes, persistFile) || !ctx.current()) {
+                if (ctx.current()) notify(row, 'history-pending'); return false;
+            }
             return release(row, event, ctx);
-        } finally { entry.finalizing = false; }
+        } catch (error) { if (ctx.current()) notify(entry.row, 'storage'); throw error; }
+        finally { entry.finalizing = false; }
     }
     async function fetch(entry, ctx) {
         if (!ctx.current() || entry.cancelled || entry.requesting || entry.finalizing || (entry.window.size && now() < entry.deadline)) return false;

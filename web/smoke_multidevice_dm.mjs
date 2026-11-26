@@ -1,3 +1,4 @@
+import { nativeFeedbackJourney } from './scripts/native-feedback-journey.mjs';
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
 import { nativeNavigationJourney } from './scripts/native-navigation-journey.mjs';
 import { nativeActionJourney } from './scripts/native-action-journey.mjs';
@@ -389,7 +390,11 @@ try {
   await b.waitForFunction(async () => (await (await import('./dmhistory.js')).dmHistorySearch('voice.webm')).some(row => row.file?.mime_type === 'audio/webm'),
     { timeout: 20000, polling: 250 });
   console.log('  ✓ native DM voice records and sends through the sealed attachment route');
-  if (process.env.PROXION_NATIVE_NAV_ONLY) {
+  if (process.env.PROXION_NATIVE_FEEDBACK_ONLY) {
+    step = 'native-live-feedback';
+    await nativeFeedbackJourney({ sender: ap, receiver: b, sourceGateway: A,
+      openSender: () => openFirstDm(ap, 'feedback sender'), openReceiver: () => openFirstDm(b, 'feedback recipient'), online });
+  } else if (process.env.PROXION_NATIVE_NAV_ONLY) {
     step = 'native-reference-navigation';
     await nativeNavigationJourney({ sender: ap, receiver: b, sourceGateway: A, openSender: () => openFirstDm(ap, 'navigation sender'), online });
   } else if (process.env.PROXION_NATIVE_ACTION_ONLY) {
@@ -428,6 +433,9 @@ try {
       openLinked: () => openFirstDm(ad, 'action linked reader'), online });
     step = 'native-reference-navigation';
     await nativeNavigationJourney({ sender: ap, receiver: b, sourceGateway: A, openSender: () => openFirstDm(ap, 'navigation sender'), online });
+    step = 'native-live-feedback';
+    await nativeFeedbackJourney({ sender: ap, receiver: b, sourceGateway: A,
+      openSender: () => openFirstDm(ap, 'feedback sender'), openReceiver: () => openFirstDm(b, 'feedback recipient'), online });
   }
   }
   if (!process.env.PROXION_NATIVE_CAPTION_ONLY) {
@@ -617,7 +625,7 @@ try {
     console.log(`    A-primary's REPLY reached B; self-synced to A-device; history survived reload.`);
   }
 } catch (e) {
-  if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${process.env.PROXION_NATIVE_NAV_ONLY ? e.stack : e.message}`);
+  if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${(process.env.PROXION_NATIVE_NAV_ONLY || process.env.PROXION_NATIVE_FEEDBACK_ONLY) ? e.stack : e.message}`);
   if (!process.exitCode) process.exitCode = 1;
 } finally {
   if (browser) await browser.close();

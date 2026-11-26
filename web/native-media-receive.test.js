@@ -162,3 +162,15 @@ it('refuses decline after retained history succeeded but the separate full recei
     expect(await engine.receive(h.event)).toBe(true);
     expect(h.commits.at(-1).cmd).toBe('native_media_commit');
 });
+
+
+it('reports history failure on the original receive while retaining its journal and withholding full delivery', async () => {
+    const h = await harness(); h.options.onState = vi.fn(); h.options.persistMessage.mockResolvedValueOnce(false);
+    const engine = h.engine(); expect(await engine.receive(h.event)).toBe(false);
+    const id = [...h.journal.values()][0].receiveId;
+    // Feedback identifies the exact retained header journal row shown in Pending sends.
+    expect(h.options.onState).toHaveBeenCalledWith({ id, state: 'history-pending' });
+    expect(h.journal.has(id)).toBe(true); expect(h.commits.some(row => row.cmd === 'native_media_commit')).toBe(false);
+    expect(await engine.receive(h.event)).toBe(true);
+    expect(h.options.onState.mock.calls.at(-1)[0].state).toBe('committed'); expect(h.journal.size).toBe(0);
+});

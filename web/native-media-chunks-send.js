@@ -90,5 +90,16 @@ export function createNativeChunkUploader({ send, getScope, getGeneration = () =
                 manifest_digest: entry.manifestDigest, seq, data_b64: b64(bytes) }, seq);
         } finally { entry.busy = false; }
     }
-    return { start, status, stop() { epoch++; uploads.clear(); starting.clear(); } };
+    function refuse(event) {
+        const entry = uploads.get(JSON.stringify([getScope(), event?.message_id]));
+        if (!entry?.current() || event.type !== 'error') return false;
+        const command = entry.phase === 'begin' ? 'native_media_begin' : 'native_media_part';
+        const expected = entry.phase === 'begin' ? 'native_media_not_accepted' : 'native_media_part_not_accepted';
+        if (event.cmd && event.cmd !== command || ![expected, 'rate_limited', 'native_media_unavailable'].includes(event.message)
+            || ['rate_limited', 'native_media_unavailable'].includes(event.message) && event.cmd !== command
+            || entry.phase !== 'begin' && event.seq !== entry.phase) return false;
+        entry.deadline = now() + 15000;
+        onState(entry.row.id, event.message === 'rate_limited' ? 'rate' : event.message === 'native_media_unavailable' ? 'gateway-storage' : 'refused'); return true;
+    }
+    return { start, status, refuse, stop() { epoch++; uploads.clear(); starting.clear(); } };
 }

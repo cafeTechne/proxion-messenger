@@ -129,8 +129,11 @@ class NativeChunkGatewayMixin:
         await ws.send(json.dumps(response))
 
     async def _handle_native_media_begin(self, ws, data):
-        if (not self._native_chunks_capable(ws) or not self._native_storage_writable()
+        if (not self._native_chunks_capable(ws)
                 or type(data.get('v')) is not int or data['v'] != 1):
+            return
+        if not self._native_storage_writable():
+            await self._native_storage_refusal(ws, data, "native_media_begin")
             return
         owner = self._client_webids[ws]
         if self._store.is_cert_revoked(f'device:{owner}'):
@@ -166,8 +169,11 @@ class NativeChunkGatewayMixin:
             self._schedule_native_media(row)
 
     async def _handle_native_media_part(self, ws, data):
-        if (not self._native_chunks_capable(ws) or not self._native_storage_writable()
+        if (not self._native_chunks_capable(ws)
                 or type(data.get('v')) is not int or data['v'] != 1):
+            return
+        if not self._native_storage_writable():
+            await self._native_storage_refusal(ws, data, "native_media_part")
             return
         owner = self._client_webids[ws]
         if self._store.is_cert_revoked(f'device:{owner}'):

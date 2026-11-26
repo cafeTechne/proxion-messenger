@@ -176,3 +176,26 @@ it('inspects durable chunk progress before header consumption and keeps it visib
     h.engine.stop();
     expect((await h.engine.inspect())[0]).toMatchObject({ state: 'nativeConnection', progress: { received: 0, total: 2 }, canCancel: false, canRetry: false });
 });
+
+
+it('scopes bounded feedback subscriptions and detaches them at connection stop', async () => {
+    const h = harness(); h.engine.start(1); await h.engine.recover();
+    const listener = vi.fn(), stop = h.engine.subscribe(listener);
+    h.engine.stop(); expect(listener).toHaveBeenCalledWith({ reset: true });
+    h.engine.start(1); await h.engine.recover(); h.engine.stop(); expect(listener).toHaveBeenCalledTimes(1); stop();
+    h.engine.start(1); const former = vi.fn(); h.engine.subscribe(former); h.account(); h.engine.stop();
+    expect(former).not.toHaveBeenCalled();
+});
+
+
+it('does not reuse another account’s feedback when local transfer ids coincide', async () => {
+    const h = harness(); h.engine.start(1); await h.engine.recover(); await h.enqueue();
+    const attempt = h.engine.sender.retry('file-1'); await h.settle();
+    const request = h.sent.find(row => row.cmd === 'native_media_capability');
+    await h.engine.handleEvent({ ...h.reply(request), supported: false }); await attempt;
+    expect((await h.engine.inspect())[0].state).toBe('nativePeer');
+    h.account();
+    await h.store.insert({ scope: 'other', id: 'file-1', peer: view.peerWebid, view, blob: new Blob(['other private source']),
+        metadata: { name: 'other.txt', mime: 'text/plain' }, receiveHold: true });
+    expect((await h.engine.inspect())[0].state).toBe('nativeWaiting');
+});

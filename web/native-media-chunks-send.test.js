@@ -97,3 +97,25 @@ describe('durable native chunk upload', () => {
     });
 
 });
+
+
+it('correlates refusal/rate errors to the active phase, account and original exact upload', async () => {
+    const h = await fixture(); await h.uploader.start(h.row, h.identity);
+    const original = structuredClone(h.commands[0]);
+    const rate = { type: 'error', code: 'E_RATE', cmd: 'native_media_begin', message: 'rate_limited', message_id: 'file' };
+    expect(h.uploader.refuse({ ...rate, message_id: 'foreign' })).toBe(false);
+    expect(h.uploader.refuse({ ...rate, cmd: 'send_message' })).toBe(false);
+    expect(h.uploader.refuse(rate)).toBe(true); expect(h.states.at(-1)).toEqual(['file', 'rate']);
+    await h.uploader.start(h.row, h.identity); expect(h.commands).toHaveLength(1);
+    h.advance(15001); await h.uploader.start(h.row, h.identity); expect(h.commands.at(-1)).toEqual(original);
+    await h.uploader.status(await h.ack([0, 1, 2]));
+    const refused = { type: 'error', message: 'native_media_part_not_accepted', message_id: 'file', seq: 0 };
+    expect(h.uploader.refuse({ ...refused, seq: 1 })).toBe(false);
+    expect(h.uploader.refuse(rate)).toBe(false);
+    expect(h.uploader.refuse(refused)).toBe(true); expect(h.states.at(-1)).toEqual(['file', 'refused']);
+    const storage = { ...refused, cmd: 'native_media_part', message: 'native_media_unavailable' };
+    expect(h.uploader.refuse({ ...storage, cmd: 'native_media_begin' })).toBe(false);
+    expect(h.uploader.refuse(storage)).toBe(true); expect(h.states.at(-1)).toEqual(['file', 'gateway-storage']);
+    h.generation(); expect(h.uploader.refuse(refused)).toBe(false);
+    expect(h.row.stage).toBe('sealed'); expect(h.row.receiveHold).toBe(true);
+});

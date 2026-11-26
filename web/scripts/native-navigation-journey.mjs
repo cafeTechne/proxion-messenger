@@ -106,5 +106,12 @@ export async function nativeNavigationJourney({ sender, receiver, sourceGateway,
     await openRoom(); await savedJump('missing-navigation-reference');
     if (!await sender.$eval('#chat-header-name', (node, name) => node.textContent.includes(name), roomName)) throw Error('missing conversation guessed another destination');
     await closeSaved(); await sender.setOfflineMode(false); await sourceGateway.resume(); await online(sender); await openSender();
+    // These synthetic cache rows exercise the initial-load boundary only.
+    // Remove them so later baseline-history assertions share no fixture state.
+    await sender.evaluate(async run => {
+        const history = await import('./dmhistory.js');
+        for (let n = 0; n < 550; n++) await history.dmHistoryDelete(`nav-filler-${run}-${n}`);
+        if (await history.dmHistoryGet(`nav-filler-${run}-549`)) throw Error('navigation fixture cleanup failed');
+    }, name);
     console.log('  ✓ Saved/search cross conversation jumps preserve focus and older offline Blob bytes; stale view completion, deleted originals and missing conversations cannot reveal substitute messages');
 }

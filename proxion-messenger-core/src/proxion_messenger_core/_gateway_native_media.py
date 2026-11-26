@@ -21,6 +21,20 @@ class NativeMediaMixin:
                 and not self.__dict__.get("_native_media_stopping", False)
                 and not self._stop_event.is_set())
 
+    async def _native_storage_refusal(self, ws, data, command):
+        """Correlate a storage refusal without acknowledging any custody."""
+        message_id = data.get("message_id")
+        if not isinstance(message_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", message_id):
+            return
+        response = {"type": "error", "message": "native_media_unavailable",
+                    "cmd": command, "message_id": message_id}
+        if command == "native_media_part":
+            seq = data.get("seq")
+            if type(seq) is not int or not 0 <= seq < 400:
+                return
+            response["seq"] = seq
+        await ws.send(json.dumps(response))
+
     def _native_capable(self, ws):
         owner = self._client_webids.get(ws, "")
         return (str(owner).startswith("did:key:") and not self._session_device_did.get(ws)
@@ -59,7 +73,7 @@ class NativeMediaMixin:
     async def _handle_native_inline(self, ws, data, sealed, file_bytes):
         sender = self._client_webids.get(ws, "")
         if not self._native_capable(ws) or not self._native_storage_writable():
-            await ws.send(json.dumps({"type": "error", "message": "native_media_unavailable"}))
+            await self._native_storage_refusal(ws, data, "send_file")
             return
         thread = self._native_dm_thread(sender, data.get("cert_id"))
         if (not sealed or not thread or data.get("room_id") or data.get("cert_id") in self.dm_clients

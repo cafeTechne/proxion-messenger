@@ -2037,6 +2037,11 @@ class ProxionGateway(NativeReferenceGatewayMixin, NativeEditGatewayMixin, Native
                 return
             logger.error("Error executing command %s: %s", cmd, exc, exc_info=True)
             try:
+                import sqlite3
+                if isinstance(exc, sqlite3.Error) and (cmd in ("native_media_begin", "native_media_part")
+                        or cmd == "send_file" and data.get("native_media_v") == 1):
+                    await self._native_storage_refusal(websocket, data, cmd)
+                    return
                 await websocket.send(json.dumps({"type": "error", "code": "E_INTERNAL", "message": "internal error"}))
             except Exception:
                 pass  # socket may have died between the failure and the reply

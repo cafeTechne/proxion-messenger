@@ -470,3 +470,46 @@ def test_impossible_decline_proofs_cannot_release_custody(tmp_path, patch):
     proof = {'custody_complete': True, 'header_committed': False, 'committed': False, 'missing': [], 'recipient_pub': 'A' * 43, **patch}
     assert not gw._native_chunk_proof_valid(proof, row) and not gw._native_progress_valid(proof)
     gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_storage_refusal_is_correlated_without_custody_or_mutation(tmp_path, monkeypatch):
+    gw = gateway(tmp_path, 'storage-feedback'); ws = socket(gw, 'did:key:alice')
+    gw._session_meta[ws]['native_chunks_v'] = 1
+    monkeypatch.setenv('PROXION_SAFE_MODE', '1')
+    for command, extra in [('native_media_begin', {}), ('native_media_part', {'seq': 7}), ('send_file', {})]:
+        data = {'message_id': 'original', **extra}
+        if command == 'send_file':
+            await gw._handle_native_inline(ws, data, True, b'ciphertext')
+        else:
+            await getattr(gw, '_handle_' + command)(ws, {'v': 1, **data})
+        assert json.loads(ws.send.call_args.args[0]) == {'type': 'error', 'message': 'native_media_unavailable',
+            'cmd': command, 'message_id': 'original', **extra}
+    assert not gw._store.get_native_media('did:key:alice', 'original')
+    ws.send.reset_mock()
+    for message_id in ('', 'x' * 129, '<private>'):
+        await gw._native_storage_refusal(ws, {'message_id': message_id}, 'native_media_begin')
+    await gw._native_storage_refusal(ws, {'message_id': 'original', 'seq': True}, 'native_media_part')
+    ws.send.assert_not_called()
+    gw._store.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_write_failure_reports_original_part_without_acceptance(tmp_path, monkeypatch):
+    gw = gateway(tmp_path, 'write-feedback'); ws = socket(gw, 'did:key:alice')
+    gw._session_meta[ws]['native_chunks_v'] = 1
+    gw._store.save_dm_thread('thread', 'did:key:bob', owner_webid='did:key:alice')
+    await gw._handle_native_media_begin(ws, {'v': 1, 'message_id': 'file', 'cert_id': 'thread',
+        'media_digest': 'A' * 43, 'manifest': manifest()})
+    row = gw._store.get_native_media('did:key:alice', 'file')
+    def unavailable(*args):
+        raise sqlite3.OperationalError('simulated disk full')
+    monkeypatch.setattr(gw._store, 'put_native_media_part', unavailable)
+    ws.send.reset_mock()
+    await gw.process_command(ws, {'cmd': 'native_media_part', 'v': 1, 'message_id': 'file',
+        'manifest_digest': row['manifest_digest'], 'seq': 0, 'data_b64': base64.b64encode(b'x' * CHUNK).decode()})
+    assert json.loads(ws.send.call_args.args[0]) == {'type': 'error', 'message': 'native_media_unavailable',
+        'cmd': 'native_media_part', 'message_id': 'file', 'seq': 0}
+    retained = gw._store.get_native_media('did:key:alice', 'file')
+    assert not retained['custody_complete'] and not retained['committed']
+    await gw._stop_native_media(); gw._store.close()

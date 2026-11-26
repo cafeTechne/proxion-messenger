@@ -206,3 +206,18 @@ it('retains a declined prepared source and releases only the proven header hold 
     expect(await h.sender.status({ ...event, status: 'committed' })).toBe(false);
     expect((await h.store.get('alice/device', 'file-1')).committed).toBeUndefined();
 });
+
+
+it('attributes inline refusal only to an active original attempt and never fabricates progress', async () => {
+    const h = await harness(); h.options.onState = vi.fn();
+    // Recreate to capture the feedback callback supplied to this sender.
+    const sender = h.engine(); await sender.retry('file-1');
+    const error = { type: 'error', message: 'native_media_unavailable', cmd: 'send_file', message_id: 'file-1' };
+    expect(sender.refuse({ ...error, message_id: 'other' })).toBe(false);
+    expect(sender.refuse({ ...error, cmd: 'native_media_begin' })).toBe(false);
+    expect(sender.refuse(error)).toBe(true);
+    expect(h.options.onState).toHaveBeenCalledWith('file-1', 'gateway-storage');
+    const row = await h.store.get('alice/device', 'file-1'); expect(row.committed).not.toBe(true);
+    expect(row.stage).toBe('sealed'); expect(h.encrypted.size).toBe(1);
+    h.account(); expect(sender.refuse(error)).toBe(false);
+});

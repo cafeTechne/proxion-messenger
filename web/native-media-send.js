@@ -26,7 +26,7 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
     isActive = () => true, getPeerPub, capability, send, persistOwnMessage, chunkUpload = null, chunkUploadEnabled = () => true, onState = () => {},
     onError = err => console.warn('[native-media] send pending:', err) }) {
     let epoch = 0;
-    const queues = new Map();
+    const queues = new Map(), attempts = new Map();
     const preparation = createNativeMediaPreparation({ secondary, store, getScope,
         getGeneration: () => JSON.stringify([epoch, getGeneration()]),
         isActive, getPeerPub, holdForReceive: true });
@@ -46,6 +46,7 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
         if (!current()) return false;
         if (!row.headerCommitted) return true;
         const remove = async () => {
+            attempts.delete(row.id);
             await store.removeCompleted(row.scope, row.id, row.revision, current);
             if (current()) onState(row.id, 'committed');
             return true;
@@ -61,13 +62,18 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
         if (!await e2e.releaseDmSendHold(row.peer, identity.sendId, current) || !current()) return false;
         if (!row.committed) return true;
         if (!row.historySaved) {
-            if (await persistOwnMessage(row, current) === false || !current()) return false;
+            try {
+                if (await persistOwnMessage(row, current) === false || !current()) {
+                    if (current()) onState(row.id, 'history-pending'); return false;
+                }
+            } catch (error) { if (current()) onState(row.id, 'storage'); throw error; }
             row = await store.progress(row.scope, row.id, row.revision, { historySaved: true }, current);
         }
         if (!current() || !await e2e.finishDmSend(row.peer, identity.sendId, current) || !current()) return false;
         return remove();
     }
     function retry(id) {
+        const attempt = context();
         return serialize(id, async ctx => {
             if (!ctx.current()) return false;
             let row = await store.get(ctx.scope, id, ctx.current);
@@ -94,12 +100,16 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
             if (row.declined) { await complete(row, identity, current); if (current()) onState(row.id, 'declined'); return false; }
             if (row.headerCommitted && !await complete(row, identity, current)) return false;
             if (chunked) return chunkUpload(row, identity, current);
+            attempts.set(id, { current });
             const result = await send({ cmd: 'send_file', cert_id: row.view.id, message_id: id,
                 native_media_v: 1, media_digest: identity.mediaDigest, ...row.hdr,
                 filename: 'file', mime_type: 'application/octet-stream',
                 data_b64: b64(row.prepared.ct) }, current);
             if (current()) onState(id, row.headerCommitted ? 'file-pending' : 'header-pending');
             return result !== false && current();
+        }).catch(error => {
+            if (attempt.current()) onState(id, error?.name === 'E2EHeaderPendingError' ? 'header-pending' : 'storage');
+            throw error;
         });
     }
     function status(event) {
@@ -127,7 +137,14 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
             return completed;
         });
     }
-    return { enqueue: preparation.enqueue, list: preparation.list, retry, status,
+    function refuse(event) {
+        const attempt = attempts.get(event?.message_id);
+        if (!attempt?.current() || event.type !== 'error' || event.cmd && event.cmd !== 'send_file'
+            || !['native_media_not_accepted', 'rate_limited', 'native_media_unavailable'].includes(event.message)
+            || ['rate_limited', 'native_media_unavailable'].includes(event.message) && event.cmd !== 'send_file') return false;
+        onState(event.message_id, event.message === 'rate_limited' ? 'rate' : event.message === 'native_media_unavailable' ? 'gateway-storage' : 'refused'); return true;
+    }
+    return { refuse, enqueue: preparation.enqueue, list: preparation.list, retry, status,
         async recover() {
             const ctx = context();
             if (!ctx.current()) return false;
@@ -145,6 +162,6 @@ export function createNativeMediaSender({ secondary, e2e, store, getScope, getGe
             }
             return true;
         },
-        stop() { epoch++; },
+        stop() { epoch++; attempts.clear(); },
     };
 }

@@ -888,7 +888,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             const ref = nativeMessageRef(message, { threadId: message.thread_id, selfWebId, peerWebId: peer });
             return ref ? { ...message, native_ref: ref } : message;
         }
-        const _nativeMedia = createNativeMedia({ secondary,
+        const _nativeMedia = createNativeMedia({ secondary, historyEnabled: dmHistoryEnabled,
             e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend },
             receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
@@ -1200,13 +1200,23 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             cancel: id => id.startsWith('native:') ? _nativeMedia.cancel(id.slice(7)) : _dmOutbox.cancel(id),
         },
             getScope: () => JSON.stringify([_outgoingScope(), authContext().epoch, crossMode?.generation() || 0]),
+            getAccountScope: () => JSON.stringify([_outgoingScope(), authContext().epoch, _boundBridgeWebId || '']),
             isActive: () => tabLock.isLeader() && (!boundWebId() || authContext().authenticated),
             getName: id => resolvePeerName(id) || id,
+            subscribe: callback => _nativeMedia.subscribe(callback),
+            isVisible: () => document.getElementById('settings-modal')?.style.display === 'flex',
+            observeVisibility: callback => {
+                const observer = new MutationObserver(callback);
+                observer.observe(document.getElementById('settings-modal'), { attributes: true, attributeFilter: ['style', 'hidden'] });
+                return () => observer.disconnect();
+            },
+            reviewHistory: () => { _settingsNav.showSection('settings-sec-privacy'); document.getElementById('settings-dm-history-toggle')?.focus(); },
             getLegacy: () => [..._undeliveredDms.values()].filter(record => !record.outbox_id && record.from_webid === selfWebId),
             reviewLegacy: id => _resendStoredDm(_undeliveredDms.get(id)),
             reviewUnknown: id => { const record = _dmOutbox.record(id); if (record) _resendStoredDm(record, 'outbox.actorReviewConfirm'); },
             reviewMedia: id => { const record = _dmOutbox.record(id); if (record) { _closeSettings(); _navigateToThread(record.thread_id); _dmMedia?.refresh(); } },
         });
+        window.addEventListener('pagehide', () => _pendingSendsUi.reset());
         for (const event of ['login', 'logout', 'sessionExpired', 'sessionRestore']) {
             solidSession.events?.on(event, () => _pendingSendsUi.reset());
         }
@@ -1476,7 +1486,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             forceReconnect, connect, flushPending, shutdown: stopConnection,
         } = createConnection({
             wsUrl: WS_URL,
-            getSocket: () => socket, setSocket: (s) => { _dmCommitV = 0; socket = _withPodRooms(s); },
+            getSocket: () => socket, setSocket: (s) => {
+                _dmCommitV = 0; _nativeMedia.stop(); socket = _withPodRooms(s);
+                s?.addEventListener?.('close', () => { if (socket === s) _nativeMedia.stop(); });
+            },
             getClientDid: () => clientDid,
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
             isActive: () => tabLock.isLeader(),
@@ -1704,7 +1717,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 _boundBridgeWebId = st.webid;
                 try { localStorage.setItem('proxion_bridge_actor::' + clientDid, st.webid); } catch { /* private mode */ }
             }
-            _pendingSendsUi.reset();
+            _pendingSendsUi.contextChanged();
             _assetInventory?.sync();
             const el = document.getElementById('settings-crossmode-status');
             if (!el) return;
@@ -2411,6 +2424,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             el.addEventListener("blur", () => saver.flush());
         }
         function _closeSettings() {
+            _pendingSendsUi.reset();
             _assetInventory?.reset();
             _nameSaver.flush();
             _statusSaver.flush();
@@ -3242,6 +3256,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 case "registered":
                     _dmCommitV = event.dm_commit_v === 1 ? 1 : 0;
                     _nativeMedia.start(event.native_media_v, event.native_chunks_v, event.native_decline_v);
+                    queueMicrotask(() => { if (document.getElementById('settings-modal')?.style.display === 'flex') _pendingSendsUi.refresh(); });
                     _nativeEdits.start(event.native_edit_v);
                     _nativeRefs.start(event.native_ref_v, event.native_action_v);
                     _dmOutbox.start();

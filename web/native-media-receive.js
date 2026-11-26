@@ -50,7 +50,7 @@ export async function nativeMediaEnvelope(event) {
 // acknowledgements; a protected full receipt survives a lost socket reply.
 export function createNativeMediaReceiver({ e2e, receipts, getScope, getGeneration = () => 0,
     isActive = () => true, persistMessage, isPersistedFile = async () => false, handleEvent, toMessage, sendCommit,
-    requestReplay = () => {}, onError = err => console.warn('[native-media] receive pending:', err) }) {
+    requestReplay = () => {}, onState = () => {}, onError = err => console.warn('[native-media] receive pending:', err) }) {
     let generation = 0;
     const queues = new Map(), replayOffsets = { headers: 0, full: 0, decline: 0 };
     function replayBatch(rows, kind) {
@@ -120,18 +120,21 @@ export function createNativeMediaReceiver({ e2e, receipts, getScope, getGenerati
         // Chunk callers persist a Blob and its history reference atomically,
         // then provide the readable history record for presentation.
         let presented = opened;
-        if (persistFile) {
-            const saved = await persistFile(opened, new Blob([plain], { type: meta.mime_type }), ctx.current);
-            if (!saved || !ctx.current()) return false;
-            presented = saved === true ? opened : { ...opened, ...saved };
-            presented.file = { ...opened.file, ...presented.file,
-                data_b64: typeof presented.file?.data_b64 === 'string' ? presented.file.data_b64 : b64(plain) };
-            delete presented.file.unavailable;
-        } else if (await persistMessage(opened, ctx.current) === false || !ctx.current()) return false;
+        try {
+            if (persistFile) {
+                const saved = await persistFile(opened, new Blob([plain], { type: meta.mime_type }), ctx.current);
+                if (!saved || !ctx.current()) { if (ctx.current()) onState({ id: envelope.headerId, state: 'history-pending' }); return false; }
+                presented = saved === true ? opened : { ...opened, ...saved };
+                presented.file = { ...opened.file, ...presented.file,
+                    data_b64: typeof presented.file?.data_b64 === 'string' ? presented.file.data_b64 : b64(plain) };
+                delete presented.file.unavailable;
+            } else if (await persistMessage(opened, ctx.current) === false || !ctx.current()) { if (ctx.current()) onState({ id: envelope.headerId, state: 'history-pending' }); return false; }
+        } catch (error) { if (ctx.current()) onState({ id: envelope.headerId, state: 'storage' }); throw error; }
         const { receiveId, headerId, commit } = envelope;
         if (!await receipts.remember(ctx.receiptScope, receiveId, null, commit) || !ctx.current()) return false;
         if (await sendCommit(commit) === false || !ctx.current()) return false;
         if (!await e2e.finishDmReceive(event.from_webid, headerId, ctx.current) || !ctx.current()) return false;
+        if (ctx.current()) onState({ id: headerId, state: 'committed' });
         await handleEvent(presented);
         return true;
     }

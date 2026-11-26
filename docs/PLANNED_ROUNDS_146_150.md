@@ -169,7 +169,14 @@ and guessing/inventing messages for missing references.
 
 ## Round 150: Live transfer feedback and actionable recovery
 
-Status: not started.
+Status: complete (2026-11-26).
+
+Live scoped feedback, stable focused controls through progress/reconnect,
+correlated refusal/rate/storage/history/key states and existing history
+preferences are connected. Full frontend: 2,849 passed, 64 skipped. Full backend:
+4,929 passed, 15 skipped. The complete real browser suite passed, including all
+five follow-ups and preserved transfer/fanout/decline/policy gates. See
+`ROUND_150_CLOSEOUT.md` for evidence and limits.
 
 Problem: Pending sends currently refreshes transfer progress only on explicit
 review/refresh. Write/connection failures can leave a generic waiting state
@@ -177,15 +184,15 @@ without explaining the next supported action.
 
 Bounded work:
 
-- [ ] Update visible native progress/status from bounded scoped events, without
+- [x] Update visible native progress/status from bounded scoped events, without
   rebuilding focused controls on every part or repeatedly reading large drafts.
-- [ ] Coalesce announcements/updates; stop subscriptions on panel close,
+- [x] Coalesce announcements/updates; stop subscriptions on panel close,
   connection/account change and teardown.
-- [ ] Correlate transfer refusal/rate/storage/key/history failures to the
+- [x] Correlate transfer refusal/rate/storage/key/history failures to the
   original active transfer and display an accurate recoverable state.
-- [ ] Link to existing history/storage preferences or the original conversation
+- [x] Link to existing history/storage preferences or the original conversation
   where useful; preserve source-only cancellation and distinct decline semantics.
-- [ ] Verify progress/retry/decline with keyboard and storage/connection faults,
+- [x] Verify progress/retry/decline with keyboard and storage/connection faults,
   and rerun the preserved end-to-end transfer/fanout gates at final closeout.
 
 Acceptance: a visible pending transfer updates as parts commit and survives

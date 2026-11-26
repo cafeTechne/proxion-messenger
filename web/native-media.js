@@ -9,12 +9,38 @@ import { NATIVE_FILE_BYTES } from './native-media-protocol.js';
 // Socket replies are correlated to the original peer/key and connection epoch.
 // File bytes use direct sends, never the persisted generic command queue.
 export function createNativeMedia({ secondary, e2e, receipts, getScope, getGeneration = () => 0,
-    isActive, send, persistOwnMessage, persistMessage, handleEvent, toMessage, getPeerPub, getOwnPub, persistFile, isPersistedFile,
+    isActive, send, historyEnabled = () => true, persistOwnMessage, persistMessage, handleEvent, toMessage, getPeerPub, getOwnPub, persistFile, isPersistedFile,
     inbox = createNativeMediaInbox(),
     store = createNativeMediaStore(globalThis.indexedDB, { maxCipherBytes: NATIVE_FILE_BYTES }), onState = () => {}, doc = globalThis.document,
     onError = err => console.warn('[native-media] pending:', err) }) {
     let version = 0, chunkVersion = 0, declineVersion = 0, epoch = 0, timer = null, recovering = null;
-    const pending = new Map(), states = new Map(), progress = new Map();
+    const pending = new Map(), states = new Map(), progress = new Map(), incomingStates = new Map(), listeners = new Set();
+    let feedbackScope = null;
+    function scopeFeedback() {
+        const scope = getScope();
+        if (feedbackScope !== scope) { states.clear(); progress.clear(); incomingStates.clear(); feedbackScope = scope; }
+    }
+    const stateNames = { uploading: 'nativeUpload', storage: 'nativeStorage', 'history-pending': 'nativeHistory',
+        'key-unavailable': 'nativeKey', 'peer-unavailable': 'nativePeer', 'header-pending': 'nativeHeader',
+        'file-pending': 'nativeFile', blocked: 'nativeBlocked', declined: 'nativeDeclined', rate: 'nativeRate', 'gateway-storage': 'nativeRefused', refused: 'nativeRefused', receiving: 'nativeIncoming' };
+    const stateName = state => state === 'history-pending' ? historyEnabled() ? 'nativeStorage' : 'nativeHistory' : stateNames[state];
+    function emit(event) { for (const listener of [...listeners]) { try { listener(event); } catch { /* UI feedback cannot interrupt custody/receipts. */ } } }
+    function sentState(id, state, detail) {
+        scopeFeedback();
+        if (state === 'committed') { states.delete(id); progress.delete(id); }
+        else { states.set(id, state); if (detail) progress.set(id, detail); else progress.delete(id); }
+        onState(id, state);
+        emit({ id: 'native:' + id, canRetry: active() && state !== 'blocked', state: stateName(state) || 'nativeWaiting', ...(['uploading', 'header-pending', 'file-pending', 'history-pending'].includes(state) ? { canCancel: false } : {}), ...(detail ? { progress: detail } : {}), removed: state === 'committed' });
+    }
+    function receivedState(event) {
+        scopeFeedback();
+        if (event.scope && event.scope !== getScope()) return;
+        const id = event.key ? 'native-in:chunk:' + event.key : 'native-in:' + event.id;
+        if (['committed', 'declined'].includes(event.state)) incomingStates.delete(id);
+        else if (incomingStates.size < 18 || incomingStates.has(id)) incomingStates.set(id, event.state);
+        emit({ id, state: stateName(event.state) || 'nativeIncoming',
+            ...(event.total ? { progress: { received: event.received, total: event.total } } : {}), removed: ['committed', 'declined'].includes(event.state) });
+    }
     const active = () => version === 1 && isActive();
     const chunksConfigured = typeof getOwnPub === 'function' && typeof persistFile === 'function';
     const chunkActive = () => active() && chunkVersion === 1 && chunksConfigured && /^[A-Za-z0-9_-]{43}$/.test(getOwnPub() || '');
@@ -42,14 +68,27 @@ export function createNativeMedia({ secondary, e2e, receipts, getScope, getGener
     const sender = createNativeMediaSender({ secondary, e2e, store, getScope, getGeneration: generation,
         isActive: active, getPeerPub, capability, send: guardedSend, persistOwnMessage, onError,
         chunkUpload: (...args) => uploader.start(...args), chunkUploadEnabled: chunkActive,
-        onState: (id, state) => { if (state === 'committed') states.delete(id); else states.set(id, state); onState(id, state); } });
+        onState: sentState });
     const receiver = createNativeMediaReceiver({ e2e, receipts, getScope, getGeneration: generation,
-        isActive: active, persistMessage, isPersistedFile, handleEvent, toMessage, sendCommit: guardedSend, onError });
+        isActive: active, persistMessage, isPersistedFile, handleEvent, toMessage, sendCommit: guardedSend, onState: receivedState, onError });
     const uploader = createNativeChunkUploader({ send: guardedSend, getScope, getGeneration: generation,
         isActive: chunkActive, getPeerPub, onProgress: (event, current) => current() ? sender.status(event) : false,
-        onState: (id, state, detail) => { states.set(id, state); if (detail) progress.set(id, detail); else progress.delete(id); onState(id, state); } });
+        onState: sentState });
     const chunks = createNativeChunkReceiver({ receiver, inbox, getScope, getGeneration: generation,
-        isActive: chunkActive, getOwnPub, send: guardedSend, persistFile, onError });
+        isActive: chunkActive, getOwnPub, send: guardedSend, persistFile, onState: receivedState, onError });
+    function draftState(row) {
+        if (!active()) return 'nativeConnection';
+        if (row.committed) return row.historySaved ? 'nativeWaiting' : historyEnabled() ? 'nativeStorage' : 'nativeHistory';
+        if (row.blocked) return 'nativeBlocked';
+        if (row.declined) return 'nativeDeclined';
+        if (row.peerPub && getPeerPub(row.peer) !== row.peerPub) return 'nativeKey';
+        const state = states.get(row.id);
+        if (['storage', 'history-pending', 'rate', 'refused', 'gateway-storage', 'key-unavailable'].includes(state)) return stateName(state);
+        if (state === 'uploading') return 'nativeUpload';
+        if (row.headerCommitted) return 'nativeFile';
+        if (row.stage === 'sealed' || state === 'header-pending') return 'nativeHeader';
+        return state === 'peer-unavailable' ? 'nativePeer' : 'nativeWaiting';
+    }
     async function recover() {
         if (!active()) return false;
         if (recovering) return recovering;
@@ -66,14 +105,20 @@ export function createNativeMedia({ secondary, e2e, receipts, getScope, getGener
         finally { if (recovering === run) recovering = null; }
     }
     function stop() {
+        emit({ reset: true }); listeners.clear();
         epoch++; version = 0; chunkVersion = 0; declineVersion = 0;
         if (timer) clearInterval(timer); timer = null;
         for (const row of [...pending.values()]) row.finish(null);
-        sender.stop(); receiver.stop(); uploader.stop(); chunks.stop(); states.clear(); progress.clear(); recovering = null;
+        sender.stop(); receiver.stop(); uploader.stop(); chunks.stop(); states.clear(); progress.clear(); incomingStates.clear(); recovering = null;
         doc?.removeEventListener('visibilitychange', onVisible);
     }
     const onVisible = () => { if (!doc.hidden && active()) recover().catch(onError); };
-    return { available: active, chunksAvailable: chunkActive, sender, receiver, recover, stop,
+    return { subscribe(listener) {
+        if (typeof listener !== 'function' || listeners.size >= 10) return () => {};
+        const scope = getScope(), stamp = generation();
+        const guarded = event => { if (scope === getScope() && stamp === generation()) listener(event); };
+        listeners.add(guarded); return () => listeners.delete(guarded);
+    }, available: active, chunksAvailable: chunkActive, sender, receiver, recover, stop,
         start(negotiatedVersion, negotiatedChunks, negotiatedDecline) {
             stop(); version = negotiatedVersion === 1 ? 1 : 0; chunkVersion = negotiatedChunks === 1 ? 1 : 0; declineVersion = negotiatedDecline === 1 ? 1 : 0;
             if (!active()) return;
@@ -83,6 +128,7 @@ export function createNativeMedia({ secondary, e2e, receipts, getScope, getGener
         },
         async handleEvent(event) {
             if (!active() || event?.native_edit_v === 1) return false;
+            if (event?.type === 'error' && (uploader.refuse(event) || sender.refuse(event))) return true;
             if (event?.type === 'native_media_capability_result') {
                 const row = pending.get(event.request_id);
                 if (row?.current() && event.v === 1 && typeof event.supported === 'boolean'
@@ -103,6 +149,7 @@ export function createNativeMedia({ secondary, e2e, receipts, getScope, getGener
             return false;
         },
         async inspect() {
+            scopeFeedback();
             // Legacy, linked and pod connections must not disable their normal
             // outbox just because native media is not negotiated. Read retained
             // primary drafts locally even while that protocol is disconnected.
@@ -120,18 +167,16 @@ export function createNativeMedia({ secondary, e2e, receipts, getScope, getGener
             }
             if (!current()) return [];
             return [...rows.map(row => ({ id: 'native:' + row.id, peer: row.peer, timestamp: row.timestamp,
-                state: !active() ? 'nativeConnection' : row.committed ? 'nativeHistory' : row.blocked ? 'nativeBlocked' : row.declined ? 'nativeDeclined' : row.peerPub && getPeerPub(row.peer) !== row.peerPub ? 'nativeKey'
-                    : states.get(row.id) === 'uploading' ? 'nativeUpload' : row.headerCommitted ? 'nativeFile' : row.stage === 'sealed' || states.get(row.id) === 'header-pending' ? 'nativeHeader'
-                        : states.get(row.id) === 'peer-unavailable' ? 'nativePeer' : 'nativeWaiting',
+                state: draftState(row),
                 canCancel: row.stage === 'source', canRetry: active() && !row.blocked,
                 ...(states.get(row.id) === 'uploading' && progress.has(row.id) ? { progress: progress.get(row.id) } : {}) })),
                 ...incoming.map(row => ({ id: 'native-in:chunk:' + row.key, peer: row.sender, timestamp: row.timestamp,
-                    canCancel: false, canRetry: chunkActive(), canDecline: declineActive() && row.manifest.recipient_pub === getOwnPub(), state: chunkActive() ? 'nativeIncoming' : 'nativeConnection',
+                    canCancel: false, canRetry: chunkActive(), canDecline: declineActive() && row.manifest.recipient_pub === getOwnPub(), state: !chunkActive() ? 'nativeConnection' : stateName(incomingStates.get('native-in:chunk:' + row.key)) || 'nativeIncoming',
                     progress: { received: row.received, total: row.manifest.chunk_count } })),
                 ...receiving.filter(row => row.data.scope === scope
                     && !incoming.some(file => file.sender === row.peerId && file.id === row.data.commit?.message_id)).map(row => ({ id: 'native-in:' + row.receiveId,
                     peer: row.peerId, timestamp: row.data.timestamp, canCancel: false, canRetry: active(),
-                    state: active() ? 'nativeIncoming' : 'nativeConnection' })),
+                    state: !active() ? 'nativeConnection' : stateName(incomingStates.get('native-in:' + row.receiveId)) || 'nativeIncoming' })),
                 ...(unavailable ? [{ id: 'native-in:storage', peer: '', state: 'nativeStorage', canCancel: false, canRetry: true }] : [])];
         },
         async decline(id) {

@@ -1217,11 +1217,14 @@
   "nativeMedia.blocked": "Delivery was blocked or revoked. The prepared file is retained; it cannot be safely cancelled.",
   "nativeMedia.connectionRequired": "Reconnect a supported primary connection with local DM history enabled to resume this saved file.",
   "nativeMedia.receivingPending": "Received file waiting for verification or local storage. Enable local DM history or free space, then retry.",
-  "nativeMedia.storageUnavailable": "Some saved file state could not be read. Other pending sends remain available. Restore storage access or close older tabs, then reload and retry.",
+  "nativeMedia.storageUnavailable": "Local file history or transfer storage is unavailable. The pending file is retained. Restore storage access or free space, then retry.",
   "nativeMedia.uploading": "Uploading saved file",
   "nativeMedia.progressLabel": "File transfer progress",
   "nativeMedia.progress": "{percent}% transferred",
   "nativeMedia.decline": "Decline file",
   "nativeMedia.declineUnavailable": "This file could not be declined. It may already be saved; refresh and check the conversation.",
-  "nativeMedia.declined": "The recipient declined this file. Its saved source is retained; prepared files cannot be safely cancelled."
+  "nativeMedia.declined": "The recipient declined this file. Its saved source is retained; prepared files cannot be safely cancelled.",
+  "nativeMedia.rateLimited": "The gateway is busy. Your pending file is retained; wait a moment, then retry.",
+  "nativeMedia.refused": "The gateway did not accept this transfer. Your pending file is retained. Check gateway storage or availability, then retry.",
+  "nativeMedia.historyPreferences": "History preferences"
 }
