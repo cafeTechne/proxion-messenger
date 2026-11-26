@@ -16,7 +16,7 @@ import { parseDmAttachment } from './dm-attachments.js';
 // socketSendOrQueue) instead of dropping them into a closed socket.
 export function createPins({ getSocket, getActiveView, getMessages = () => [],
     revealMessage = (id) => document.getElementById(`msg-${id}`), send = null,
-    readPins = null, readExtraPins = null, savePin = null, resolvePin = null, watchPins = null,
+    readPins = null, readExtraPins = null, navigateReference = null, savePin = null, resolvePin = null, watchPins = null,
     canRead = () => true, canManage = () => true, getSessionId = () => '',
     onUnavailable = () => {}, onSaveFailed = () => {}, onSaved = () => {},
     pollMs = 30000, setTimer = setInterval, clearTimer = clearInterval }) {
@@ -213,6 +213,8 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
 
     function jumpToMsg(msgId) {
         const view = getActiveView(), pin = shownPins.get(msgId), session = getSessionId();
+        if (view && navigateReference) return navigateReference({ thread_id: view.id, thread_type: view.type, message_id: msgId,
+            timestamp: pin?.message?.pod_ts || pin?.message?.timestamp, reference_target: pin?.target });
         const pending = view && pin && resolvePin?.({ ...view }, pin);
         if (pending) return Promise.resolve(pending).then(element => {
             if (element && session === getSessionId() && sameView(view)) jumpToMessage(element, scrollBehavior());

@@ -184,7 +184,7 @@ describe('Saved account-bound transactions and reference UI', () => {
     it('carries original conversation/type/target into Jump and rejects an old-account button', async () => {
         _h.acct = crypto.randomUUID();
         await toggleSaved({ ...snapshotFromMessage(msg('ref'), view), reference_target: 'https://pod.example/room/day#ref' });
-        const element = () => ({ style: {}, children: [], listeners: {}, appendChild(row) { this.children.push(row); },
+        const element = () => ({ style: {}, dataset: {}, children: [], listeners: {}, appendChild(row) { this.children.push(row); },
             addEventListener(type, fn) { this.listeners[type] = fn; }, set innerHTML(value) { this.html = value; this.children = []; }, get innerHTML() { return this.html || ''; } });
         const list = element(), panel = element(); panel.style.display = 'block';
         global.document = { getElementById: id => id === 'saved-list' ? list : panel, createElement: element };

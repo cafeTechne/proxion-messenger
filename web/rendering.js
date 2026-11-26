@@ -472,10 +472,22 @@ export function createRendering({
         if (btn) btn.style.display = "block";
     }
 
+    function _focusedMessage(feed) {
+        const focused = document.activeElement;
+        return focused?.classList?.contains('message') && focused.closest?.('#message-feed') === feed ? focused.dataset?.messageId : null;
+    }
+    function _restoreMessageFocus(id) {
+        if (!id) return;
+        const restored = revealMessage(id);
+        if (restored) restored.tabIndex = 0;
+        restored?.scrollIntoView?.({ behavior: 'auto', block: 'nearest' });
+        restored?.focus?.({ preventScroll: true });
+    }
     function renderMessages() {
         if (!getActiveView()) return;
         const allMessages = getAllMessages();
         const feed = document.getElementById("message-feed");
+        const focusId = _focusedMessage(feed);
         const slice = allMessages.slice(-RENDER_WINDOW).map(_current).filter(Boolean);
         feed.innerHTML = "";
         state._lastRenderedDate = null;
@@ -487,6 +499,7 @@ export function createRendering({
             feed.scrollTop = feed.scrollHeight;
             state._pinnedToBottom = true;
         }
+        _restoreMessageFocus(focusId);
     }
 
     // --- "New messages" divider ---------------------------------------------
@@ -544,6 +557,7 @@ export function createRendering({
     // while keeping the message the reader was looking at in the same place.
     // Falls back to preserving the distance from the bottom of the content.
     function rerenderKeepingAnchor(slice, feed) {
+        const focusId = _focusedMessage(feed);
         const anchor = captureScrollAnchor(feed);
         const fromBottom = feed.scrollHeight - feed.scrollTop;
         feed.innerHTML = "";
@@ -552,6 +566,7 @@ export function createRendering({
         if (!restoreScrollAnchor(feed, anchor)) {
             feed.scrollTop = feed.scrollHeight - fromBottom;
         }
+        _restoreMessageFocus(focusId);
     }
 
     // opts.live: the message just arrived (or was just sent), so its row gets

@@ -1,4 +1,5 @@
 import { dmOutboxJourney } from './scripts/dm-outbox-journey.mjs';
+import { nativeNavigationJourney } from './scripts/native-navigation-journey.mjs';
 import { nativeActionJourney } from './scripts/native-action-journey.mjs';
 import { nativeReactionJourney } from './scripts/native-reaction-journey.mjs';
 import { nativeReplyJourney } from './scripts/native-reply-journey.mjs';
@@ -108,6 +109,11 @@ async function startGateway(name) {
     queued: (owner, device) => Number(execFileSync('python', ['-c',
       'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("SELECT COUNT(*) FROM pending_device_fanout WHERE to_webid=? AND to_device_id=?",sys.argv[2:]).fetchone()[0])',
       join(dataDir, 'proxion.db'), owner, device], { encoding: 'utf8' }).trim()),
+    pause: async () => {
+      if (p.exitCode !== null) return;
+      const exited = new Promise(resolve => p.once('exit', resolve)); p.kill('SIGKILL'); await exited;
+    },
+    resume: launch,
     restart: async () => {
       const exited = new Promise(resolve => p.once('exit', resolve));
       p.kill('SIGKILL'); await exited; await launch();
@@ -383,7 +389,10 @@ try {
   await b.waitForFunction(async () => (await (await import('./dmhistory.js')).dmHistorySearch('voice.webm')).some(row => row.file?.mime_type === 'audio/webm'),
     { timeout: 20000, polling: 250 });
   console.log('  ✓ native DM voice records and sends through the sealed attachment route');
-  if (process.env.PROXION_NATIVE_ACTION_ONLY) {
+  if (process.env.PROXION_NATIVE_NAV_ONLY) {
+    step = 'native-reference-navigation';
+    await nativeNavigationJourney({ sender: ap, receiver: b, sourceGateway: A, openSender: () => openFirstDm(ap, 'navigation sender'), online });
+  } else if (process.env.PROXION_NATIVE_ACTION_ONLY) {
     step = 'native-action-fixtures';
     await b.bringToFront();
     await b.evaluate(() => {
@@ -417,6 +426,8 @@ try {
     await nativeActionJourney({ sender: ap, receiver: b, linked: ad, sourceGateway: A, targetGateway: B,
       openSender: () => openFirstDm(ap, 'action sender'), openReceiver: () => openFirstDm(b, 'action recipient'),
       openLinked: () => openFirstDm(ad, 'action linked reader'), online });
+    step = 'native-reference-navigation';
+    await nativeNavigationJourney({ sender: ap, receiver: b, sourceGateway: A, openSender: () => openFirstDm(ap, 'navigation sender'), online });
   }
   }
   if (!process.env.PROXION_NATIVE_CAPTION_ONLY) {
@@ -606,7 +617,7 @@ try {
     console.log(`    A-primary's REPLY reached B; self-synced to A-device; history survived reload.`);
   }
 } catch (e) {
-  if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${e.message}`);
+  if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${process.env.PROXION_NATIVE_NAV_ONLY ? e.stack : e.message}`);
   if (!process.exitCode) process.exitCode = 1;
 } finally {
   if (browser) await browser.close();

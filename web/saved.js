@@ -210,21 +210,26 @@ export function createSaved({ showToast, jumpToMsg, navigateReference = null, ge
             const actions = document.createElement('div');
             actions.className = 'ref-row__actions';
             const jump = document.createElement('button');
+            jump.type = 'button'; jump.dataset.savedAction = 'jump'; jump.dataset.messageId = row.id; jump.dataset.threadId = row.thread_id;
             jump.textContent = `[${t('saved.jump')}]`;
             jump.className = 'link-btn link-btn--info';
             jump.addEventListener('click', async () => {
-                if (!current()) { reset(); return; }
-                if (navigateReference) await navigateReference({ message_id: row.id, thread_id: row.thread_id,
-                    thread_type: row.thread_type, timestamp: row.timestamp, reference_target: row.reference_target });
+                if (!current()) { if (stamp === epoch) reset(); return; }
+                if (navigateReference) {
+                    const opened = await navigateReference({ message_id: row.id, thread_id: row.thread_id,
+                        thread_type: row.thread_type, timestamp: row.timestamp, reference_target: row.reference_target });
+                    if (opened && current()) reset();
+                }
                 else jumpToMsg?.(row.id);
             });
             const rm = document.createElement('button');
+            rm.type = 'button'; rm.dataset.savedAction = 'remove'; rm.dataset.messageId = row.id;
             rm.textContent = t('saved.remove');
             rm.className = 'link-btn';
             rm.addEventListener('click', async () => {
-                if (!current()) { reset(); return; }
+                if (!current()) { if (stamp === epoch) reset(); return; }
                 await removeSaved(row.id).catch(() => {});
-                if (!current()) { reset(); return; }
+                if (!current()) { if (stamp === epoch) reset(); return; }
                 podSyncRemoveSavedMessage(row.id).catch(() => {});   // R62
                 renderSaved();
             });
@@ -244,7 +249,7 @@ export function createSaved({ showToast, jumpToMsg, navigateReference = null, ge
         try {
             const snapshot = snapshotFromMessage(msg, view);
             const r = await toggleSaved(snapshot);
-            if (!current()) { reset(); return; }
+            if (!current()) { if (stamp === epoch) reset(); return; }
             // R62: mirror the change to the pod (no-op unless sync opted in)
             if (r === 'saved') podSyncSavedMessage({ ...snapshot, addedAt: Date.now() }).catch(() => {});
             else podSyncRemoveSavedMessage(snapshot.id).catch(() => {});

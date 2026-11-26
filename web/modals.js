@@ -43,7 +43,7 @@ export function searchAction(raw, online) {
 }
 
 export function createModals({ getSocket, getActiveView, sendCmd, showToast, getMessageContent, openSearchResult,
-    getMediaForwardTargets, forwardMedia }) {
+    getMediaForwardTargets, forwardMedia, localSearch = null, getScope = () => '' }) {
     const state = { forwardingMsgId: null };
     let forwardGeneration = 0;
 
@@ -178,7 +178,7 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
     // Results open in their own panel in place of the feed. The feed is only
     // hidden, never cleared, so closing the panel puts the conversation back
     // exactly where it was.
-    let _searchTimer = null;
+    let _searchTimer = null, _searchGeneration = 0;
     let _feedScrollTop = 0;
 
     function _searchInput() { return document.getElementById('search-input'); }
@@ -228,11 +228,14 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
     // Close the panel and bring the conversation back. Returns true when a
     // panel was actually open (so an Escape handler knows it did something).
     function closeSearch({ focusInput = false, clearInput = true } = {}) {
+        _searchGeneration++;
         clearTimeout(_searchTimer);
         _setSearchHint('');
         const input = _searchInput();
         if (clearInput && input) input.value = '';
         const panel = document.getElementById('search-panel');
+        const results = panel?.querySelector('[data-search-results]');
+        if (results) results.innerHTML = '';
         if (!panel || panel.hidden) return false;
         panel.hidden = true;
         const feed = document.getElementById('message-feed');
@@ -246,22 +249,34 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
 
     // Debounced handler for the sidebar search box.
     function onSearchInput(raw) {
+        const generation = ++_searchGeneration, scope = getScope();
+        const current = () => generation === _searchGeneration && scope === getScope();
         clearTimeout(_searchTimer);
         const socket = getSocket();
         const online = !!(socket && socket.readyState === 1);
         const action = searchAction(raw, online);
         if (action.kind === 'close') { closeSearch(); return; }
         if (action.kind === 'short') { _setSearchHint(t('search.tooShort')); return; }
-        if (action.kind === 'offline') { _setSearchHint(t('search.offline')); return; }
+        if (action.kind === 'offline' && !localSearch) { _setSearchHint(t('search.offline')); return; }
         _setSearchHint('');
-        _searchTimer = setTimeout(() => {
+        _searchTimer = setTimeout(async () => {
+            if (!current()) return;
             const s = getSocket();
-            if (!s || s.readyState !== 1) { _setSearchHint(t('search.offline')); return; }
+            if (!s || s.readyState !== 1) {
+                if (!localSearch) { _setSearchHint(t('search.offline')); return; }
+                try {
+                    const result = await localSearch(action.query, current);
+                    if (current() && result) renderSearchResults(result);
+                } catch { if (current()) _setSearchHint(t('search.failed')); }
+                return;
+            }
             s.send(JSON.stringify({ cmd: 'search', query: action.query }));
         }, 500);
     }
 
     function renderSearchResults(event) {
+        if (!event) return;
+        const scope = getScope();
         const query = String((event && event.query) || '');
         // A late reply for a box the user has since cleared or changed.
         const input = _searchInput();
@@ -301,7 +316,8 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
                 `<span class="search-result__text">${escHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</span>`;
             btn.addEventListener('click', () => {
                 closeSearch();
-                if (openSearchResult) openSearchResult(res.thread_id, res.message_id);
+                if (scope !== getScope()) return;
+                if (openSearchResult) openSearchResult(res.thread_id, res.message_id, res);
             });
             li.appendChild(btn);
             list.appendChild(li);

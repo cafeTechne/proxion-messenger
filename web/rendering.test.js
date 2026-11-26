@@ -1103,3 +1103,22 @@ describe('native reply quote cache lookup', () => {
   });
 
 });
+
+describe('reference focus during background history merge', () => {
+  it('restores a focused older message outside the tail window after rerender', () => {
+    const { feed } = miniDom(), r = make(), focus = MiniEl.prototype.focus;
+    MiniEl.prototype.focus = function () { if (Number.isInteger(this.tabIndex)) document.activeElement = this; };
+    try {
+      for (let n = 0; n < 160; n++) r.renderMessage({ message_id: 'row-' + n, thread_id: 'room-1', from_webid: 'did:key:zA', content: 'message ' + n,
+        timestamp: new Date(Date.UTC(2026, 10, 26, 0, 0, n)).toISOString() });
+      const old = r.revealMessage('row-0'); old.closest = () => feed; old.tabIndex = 0; old.focus();
+      r.renderMessages();
+      expect(document.activeElement.dataset.messageId).toBe('row-0'); expect(document.activeElement).not.toBe(old);
+      expect(feed.children).toContain(document.activeElement);
+      document.activeElement.closest = () => feed;
+      r.rerenderKeepingAnchor(host.allMessages.slice(-100), feed);
+      expect(document.activeElement.dataset.messageId).toBe('row-0');
+      expect(feed.children).toContain(document.activeElement);
+    } finally { if (focus) MiniEl.prototype.focus = focus; else delete MiniEl.prototype.focus; }
+  });
+});

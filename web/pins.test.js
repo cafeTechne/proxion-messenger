@@ -18,7 +18,7 @@ function make(over = {}) {
     getSocket: () => (over.socket === undefined ? socket : over.socket),
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     getMessages: () => over.messages || [],
-    readPins: over.readPins, readExtraPins: over.readExtraPins, savePin: over.savePin, watchPins: over.watchPins,
+    readPins: over.readPins, readExtraPins: over.readExtraPins, navigateReference: over.navigateReference, savePin: over.savePin, watchPins: over.watchPins,
     canManage: over.canManage, canRead: over.canRead, getSessionId: over.getSessionId,
     onSaved: over.onSaved, onSaveFailed: over.onSaveFailed, onUnavailable: over.onUnavailable,
     setTimer: over.setTimer || (() => 1), clearTimer: over.clearTimer || (() => {}),
@@ -242,4 +242,14 @@ describe('local native pins alongside ordinary pins', () => {
         expect(h.sent).toEqual([{ cmd: 'get_pins', thread_id: 'dm:thread' }, { cmd: 'get_pins', thread_id: 'dm:thread' }]);
     });
 
+});
+
+describe('shared pin reference navigation', () => {
+    it('passes the authenticated room target and timestamp to the shared navigator', async () => {
+        const navigateReference = vi.fn(async () => true), h = make({ navigateReference });
+        h.pins.renderPins([{ message_id: 'm', target: 'https://pod.example/room/2026/11/26/chat.ttl#m', message: { timestamp: '2026-11-26T00:00:00.000Z' } }]);
+        await h.pins.jumpToMsg('m');
+        expect(navigateReference).toHaveBeenCalledWith({ thread_id: 'room-1', thread_type: 'local_room', message_id: 'm',
+            timestamp: '2026-11-26T00:00:00.000Z', reference_target: 'https://pod.example/room/2026/11/26/chat.ttl#m' });
+    });
 });

@@ -214,11 +214,11 @@ describe('search panel', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  function mk(online = true) {
+  function mk(online = true, over = {}) {
     const socket = { readyState: online ? 1 : 3, send: (s) => sent.push(JSON.parse(s)) };
     return createModals({
       getSocket: () => socket, getActiveView: () => null, sendCmd() {}, showToast() {},
-      openSearchResult: (thread, msg) => opened.push([thread, msg]),
+      openSearchResult: (thread, msg) => opened.push([thread, msg]), ...over,
     });
   }
 
@@ -334,4 +334,27 @@ describe('search panel', () => {
     expect(m.isSearchOpen()).toBe(false);
     expect(opened).toEqual([['r1', 'm1']]);
   });
+  it('searches retained local history offline without issuing a gateway command', async () => {
+    const localSearch = vi.fn(async query => ({ query, local_scope: true, results: [{ thread_id: 'dm-a', message_id: 'native:file', content: 'cached hello' }] }));
+    const m = mk(false, { localSearch }); dom['search-input'].value = 'hello'; m.onSearchInput('hello');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(localSearch).toHaveBeenCalledWith('hello', expect.any(Function)); expect(sent).toEqual([]);
+    expect(dom['search-panel'].querySelector('[data-search-results]').children).toHaveLength(1);
+  });
+  it('does not render offline search after an account switch or a closed query', async () => {
+    let account = 'a', finish; const pending = new Promise(resolve => { finish = resolve; });
+    const m = mk(false, { getScope: () => account, localSearch: () => pending });
+    dom['search-input'].value = 'hello'; m.onSearchInput('hello'); await vi.advanceTimersByTimeAsync(500);
+    account = 'b'; m.closeSearch(); finish({ query: 'hello', results: [{ thread_id: 'old', message_id: 'private', content: 'private' }] });
+    await Promise.resolve(); await Promise.resolve(); expect(dom['search-panel']).toBeUndefined();
+  });
+  it('refuses an old-account search button while preserving complete reference metadata for current results', () => {
+    let account = 'a'; const navigate = vi.fn(), m = mk(true, { getScope: () => account, openSearchResult: navigate });
+    dom['search-input'].value = 'hello'; const result = { thread_id: 'a', message_id: 'm', content: 'hello', timestamp: '2026-11-26T00:00:00.000Z' };
+    m.renderSearchResults({ query: 'hello', results: [result] });
+    const button = dom['search-panel'].querySelector('[data-search-results]').children[0].children[0];
+    button.listeners.click(); expect(navigate).toHaveBeenCalledWith('a', 'm', result);
+    account = 'b'; button.listeners.click(); expect(navigate).toHaveBeenCalledOnce();
+  });
+
 });

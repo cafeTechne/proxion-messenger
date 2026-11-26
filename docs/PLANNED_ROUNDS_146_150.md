@@ -134,12 +134,13 @@ prepared cancellation, broader room moderation and new file retention caps.
 
 ## Round 149: Saved/search/reference navigation across conversations
 
-Status: in progress.
+Status: complete (2026-11-26).
 
-Checkpoint: Saved account-bound transactions/UI guards are implemented; the
-scoped navigation coordinator is tested but not connected to main.js. Complete
-cross-conversation and offline navigation remains unimplemented. See
-`ROUND_149_IMPLEMENTATION_NOTES.md`; acceptance remains open.
+Saved/search/reply/pin adapters now share guarded actual-message navigation.
+The real browser journey passed cross-conversation text/room jumps, keyboard
+focus through background rerenders, older offline native Blob reads, stale
+completion and explicit deleted/missing reference handling. Account boundary
+races passed with real IndexedDB transactions. See `ROUND_149_CLOSEOUT.md`.
 
 Problem: Saved snapshots retain `thread_id`, but their Jump control passes only
 a message id to the current view. Search/reference navigation also needs to
@@ -147,15 +148,15 @@ handle retained messages outside the currently rendered history window.
 
 Bounded work:
 
-- [ ] Make Saved Jump carry the original conversation and select it before
+- [x] Make Saved Jump carry the original conversation and select it before
   revealing the message; retain keyboard focus and an explicit unavailable state.
-- [ ] Share guarded navigation with search/reply/pin entry points where needed,
+- [x] Share guarded navigation with search/reply/pin entry points where needed,
   reusing existing room/reference adapters rather than bypassing their checks.
-- [ ] Retrieve an older retained local DM/native file when it is outside the
+- [x] Retrieve an older retained local DM/native file when it is outside the
   current rendered/windowed history, including its bounded Blob reference.
-- [ ] Abort stale navigation on account/view replacement, deleted messages or
+- [x] Abort stale navigation on account/view replacement, deleted messages or
   missing original conversations; never guess a replacement destination.
-- [ ] Cover offline and normal text/room navigation alongside native files.
+- [x] Cover offline and normal text/room navigation alongside native files.
 
 Acceptance: from conversation B, a Saved item for A opens A and reveals exactly
 its original message with keyboard focus. An older cached native file is still

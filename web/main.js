@@ -64,6 +64,8 @@ import { createNativeMedia } from './native-media.js';
 import { createNativeEdits } from './native-edits.js';
 import { nativeMessageRef, nativeMessageIdForRef } from './native-message-ref.js';
 import { createNativeReactionStore } from './native-reaction-store.js';
+import { createReferenceNavigation } from './reference-navigation.js';
+import { pinTarget } from './room-pins.js';
 import { createNativeActions } from './native-actions.js';
 import { createNativeReactions } from './native-reactions.js';
 import { createNativeReferences } from './native-references.js';
@@ -106,7 +108,7 @@ import { resolveDmSendMode, canScheduleInView, primaryKeyFromDevices, createDevi
 import { createWebPresence } from './webpresence.js';
 import { createWebCalls, createCallSigners } from './webcalls.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
-import { chatRootUrl, dayFileAt } from './longchat.js';
+import { chatRootUrl, dayFileAt, messageIriAt } from './longchat.js';
 import {
     createRoomSync, createJoinedRoomStore, normalizeJoinedRecord, withJoinedRecord, withoutJoinedRecord,
     joinPendingKey,
@@ -489,6 +491,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         let socket = null;
         let activeView = null;
+        let _referenceViewRevision = 0, _resetReferencePanels = () => {};
         const _roomCodes = {};            // room_id -> invite code (for REST history catch-up)
         let unreadCounts = {}; // id -> count
         const unreadMentions = new Set(); // ids with an unread @mention (distinct sidebar badge)
@@ -788,7 +791,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     const m = messageMap[id];
                     return m && !isUndecryptable(m.content) && !isSealedCopy(m) ? (m.content || '') : '';
                 },
-                openSearchResult: (threadId, msgId) => _openSearchResult(threadId, msgId),
+                openSearchResult: (threadId, msgId, reference) => _openSearchResult(threadId, msgId, reference),
+                localSearch: (query, current) => _searchWithLocalDms({ query, results: [], local_scope: true }, current),
+                getScope: () => _referenceScope(),
                 getMediaForwardTargets: () => Object.entries(localDmPeers)
                     .filter(([id, peer]) => isDmPeerWebId(peer.peer_webid) && !blocks.isBlocked(peer.peer_webid) && !hiddenDms.has(id))
                     .map(([id, peer]) => ({ id, peerWebId: peer.peer_webid, name: peer.display_name || dmFallbackName(peer.peer_webid) })),
@@ -813,6 +818,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const pinActions = createPins({
             getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages,
             revealMessage: id => rendering.revealMessage(id), send: _sendOrQueue,
+            navigateReference: reference => _referenceNavigation.navigate(reference),
             getSessionId: () => _webRoomSessionId(),
             canRead: () => _conversationSupports('pins'),
             canManage: view => _conversationSupports('pins') && (!_isPodRoomView(view) || roomCreatorOf.has(view.id)),
@@ -939,17 +945,11 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             const parent = await dmHistoryGet(id);
             return current() && nativeMessageRef(parent, context) && !await _isNativeDeleted(id, context, current) && current() ? { ...parent, local: true } : null;
         }
-        async function _jumpReply(id) {
-            if (messageMap[id]?.deleted) { showToast(t('file.unavailable')); return; }
-            if (id?.startsWith('native:') && !messageMap[id]) {
-                const parent = await _loadNativeReplyParent(id);
-                if (!parent) { showToast(t('file.unavailable')); return; }
-                messageMap[id] = parent;
-                if (!allMessages.some(row => row.message_id === id)) {
-                    allMessages.push(parent); allMessages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-                }
-            }
-            jumpToMessage(rendering.revealMessage(id), scrollBehavior());
+        function _jumpReply(id) {
+            if (!activeView) return false;
+            const parent = messageMap[id];
+            return _referenceNavigation.navigate({ thread_id: activeView.id, thread_type: activeView.type, message_id: id,
+                timestamp: parent?.pod_ts || parent?.timestamp, reference_target: parent?.iri });
         }
         const _nativeEdits = createNativeEdits({
             e2e: { ratchetEncrypt, ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend,
@@ -1530,6 +1530,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // the "open in another tab" notice so no timer or watcher keeps running.
         tabLock.onStepDown(async () => {
             _pendingSendsUi.reset();
+            _resetReferencePanels();
             _gatewayReceives.stop();
             _nativeMedia.stop();
             _nativeEdits.stop();
@@ -1727,7 +1728,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
         } = createView({
             getSocket: () => socket,
-            setActiveView: (v) => { _stashWebRoom(); closePinPanel(); activeView = v; _applyCrossModeThreadGating(); },
+            setActiveView: (v) => { _referenceViewRevision++; _stashWebRoom(); closePinPanel(); activeView = v; _applyCrossModeThreadGating(); },
             setMessageMap: (m) => { messageMap = m; },
             setAllMessages: (a) => { allMessages = a; },
             setCurrentRoomMembers: (c) => { currentRoomMembers = c; },
@@ -1745,6 +1746,73 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             onViewOpened: () => _onViewOpened(),
             getActiveView: () => activeView,
         });
+        function _referenceScope() {
+            return JSON.stringify([_outgoingScope(), _outgoingGeneration(), _webRoomSessionId()]);
+        }
+        function _referenceConversation(ref) {
+            const row = document.getElementById('nav-' + ref.thread_id), type = row?.dataset.viewType;
+            return row && ['dm', 'local_dm', 'room', 'local_room'].includes(type) ? { id: ref.thread_id, type } : null;
+        }
+        async function _resolveReference(ref, view, current) {
+            const id = ref.message_id;
+            if (!current() || messageMap[id]?.deleted) return null;
+            if (['dm', 'local_dm'].includes(view.type)) {
+                if (id.startsWith('native:')) {
+                    const original = await _loadNativeReplyParent(id);
+                    return current() && original && !original.file?.unavailable && typeof original.file?.data_b64 === 'string' ? original : null;
+                }
+                const record = await dmHistoryGet(id);
+                const cached = record && { ...record, e2e: false };
+                if (!current() || messageMap[id]?.deleted) return null;
+                const loaded = messageMap[id], message = loaded?.thread_id === view.id && !isSealedCopy(loaded, true) && !isUndecryptable(loaded.content) ? loaded : cached;
+                return message?.thread_id === view.id && !message.deleted && !isSealedCopy(message, true) && !isUndecryptable(message.content)
+                    && !message.file?.unavailable ? { ...message, local: true } : null;
+            }
+            const cached = messageMap[id];
+            if (_isPodRoomView(view)) {
+                if (navigator.onLine === false) return cached?.thread_id === view.id && !cached.deleted ? cached : null;
+                const rec = crossRooms?.isPodRoom(view.id) ? crossRooms.list().find(room => room.roomId === view.id) : _podPinRoom(view);
+                if (!rec) return null;
+                const target = ref.reference_target || cached?.iri
+                    || ((ref.timestamp || cached?.pod_ts || cached?.timestamp) ? messageIriAt(rec.container, id, ref.timestamp || cached.pod_ts || cached.timestamp) : null);
+                const parsed = target && pinTarget(rec.container, target);
+                if (parsed?.message_id !== id) return null;
+                const result = crossRooms?.isPodRoom(view.id) ? await crossRooms.readPinMessage(view.id, target)
+                    : await podReadPinnedMessageAt(rec.container, target, rec.owner, current);
+                if (!current()) return null;
+                return result?.ok && result.message?.message_id === id && !result.message.deleted
+                    ? { ...result.message, thread_id: view.id, local: true } : null;
+            }
+            if (cached?.thread_id === view.id && !cached.deleted) return cached;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return null;
+            socket.send(JSON.stringify({ cmd: 'get_message', message_id: id }));
+            // Bound one existing gateway lookup; no history backfill or guessed
+            // destination. Every wait remains tied to this view revision.
+            for (let attempt = 0; attempt < 20 && current(); attempt++) {
+                const message = messageMap[id];
+                if (message?.thread_id === view.id) return message.deleted ? null : message;
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            return null;
+        }
+        const _referenceNavigation = createReferenceNavigation({ getScope: _referenceScope, getView: () => activeView,
+            getViewRevision: () => _referenceViewRevision, findConversation: _referenceConversation,
+            openConversation: target => {
+                document.getElementById('nav-' + target.id)?.click();
+                return activeView?.id === target.id && activeView?.type === target.type;
+            },
+            resolveMessage: _resolveReference,
+            revealMessage: (message, view, current) => {
+                if (!current() || messageMap[message.message_id]?.deleted) return null;
+                if (messageMap[message.message_id]) {
+                    Object.assign(messageMap[message.message_id], message);
+                    for (const row of allMessages) if (row.message_id === message.message_id) Object.assign(row, message);
+                }
+                if (!allMessages.some(row => row.message_id === message.message_id)) rendering.mergeOlderHistory([message]);
+                return current() ? rendering.revealMessage(message.message_id) : null;
+            },
+            focusMessage: element => jumpToMessage(element, scrollBehavior()),
+            onUnavailable: () => showToast(t('file.unavailable')) });
         // Invite-link carry-through (A4): capture now (survives reload/first-run),
         // consume on the "registered" event via the deep-link confirm modal.
         const invite = createInvite({
@@ -1851,6 +1919,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         const _webRoomSessionId = () => `${_webRoomEpoch}\n${solidSession.info.isLoggedIn}\n${selfWebId}\n${podStorageRoot()}`;
         function _invalidateWebRoomSession() {
             _webRoomEpoch++;
+            _resetReferencePanels();
             closePinPanel();
             window.proxionWebJoin?.stop();
             _browserFriends?.stop();
@@ -2016,6 +2085,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     : "";
                 const li = document.createElement("li");
                 li.id = `nav-${id}`;
+                li.dataset.viewType = peer.cert ? 'dm' : 'local_dm';
                 li.className = "dm-item" + (activeView && activeView.id === id ? " active" : "");
                 const body = document.createElement("div");
                 body.className = "dm-item-body";
@@ -2847,10 +2917,12 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // Gateway search cannot read E2E DMs: drop its sealed hits and add the
         // matches from this device's DM plaintext cache.
         let _pinsRenderSeq = 0;
-        async function _searchWithLocalDms(event) {
+        async function _searchWithLocalDms(event, callerCurrent = () => true) {
+            const scope = _referenceScope(), current = () => callerCurrent() && scope === _referenceScope();
             const query = String((event && event.query) || '');
             let local = [];
             try { local = await dmHistorySearch(query); } catch (_) { local = []; }
+            if (!current()) return null;
             const hits = local.map((r) => ({
                 message_id: r.message_id, thread_id: r.thread_id,
                 thread_name: _threadNames[r.thread_id] || (localDmPeers[r.thread_id] || {}).display_name || '',
@@ -4386,7 +4458,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     const m = event.message
                         && unsealCopy(event.message, { isDm: _isDmThread(event.message.thread_id),
                             plaintext: _knownPlaintext(event.message.message_id) });
-                    if (!m) break;
+                    if (!m || m.thread_id !== activeView?.id || messageMap[m.message_id]?.deleted) break;
                     messageMap[m.message_id] = m;
                     // Fill in any placeholders waiting for this message
                     document.querySelectorAll(`.reply-context-loading[data-reply-target="${CSS.escape(m.message_id)}"]`)
@@ -5859,19 +5931,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         // A search result can live in another conversation: open that thread
         // first, then scroll to the message once its history has rendered.
-        function _openSearchResult(threadId, msgId) {
-            if (!threadId || !msgId) return;
-            if (activeView && activeView.id === threadId) { jumpToMsg(msgId); return; }
-            const row = document.getElementById(`nav-${threadId}`);
-            if (!row) return;
-            row.click();
-            let tries = 0;
-            const wait = setInterval(() => {
-                if (document.getElementById(`msg-${msgId}`) || allMessages.some(m => m.message_id === msgId) || ++tries > 20) {
-                    clearInterval(wait);
-                    jumpToMsg(msgId);
-                }
-            }, 200);
+        function _openSearchResult(threadId, msgId, reference = {}) {
+            return _referenceNavigation.navigate({ thread_id: threadId, message_id: msgId,
+                timestamp: reference.timestamp, reference_target: reference.iri });
         }
 
         // Outgoing throttled "typing" + staleness sweep interval: wired by typing.js.
@@ -7731,7 +7793,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         });
         composerEmoji.attach(document.getElementById("message-input"));
         // R59E: saved messages (private bookmarks)
-        const savedMsgs = createSaved({ showToast, jumpToMsg });
+        const savedMsgs = createSaved({ showToast, getScope: _referenceScope, navigateReference: reference => _referenceNavigation.navigate(reference) });
+        _resetReferencePanels = () => { _referenceNavigation.cancel(); savedMsgs.reset(); closeSearch(); };
         savedMsgs.wireSaved();
         // Re-render the Saved list after a deleted/expired message took its bookmark.
         function _refreshSavedPanel(removed) {
