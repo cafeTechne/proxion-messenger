@@ -63,6 +63,8 @@ import { createGatewayDmReceiver, isGatewayDmReceive } from './gateway-dm-receiv
 import { createNativeMedia } from './native-media.js';
 import { createNativeEdits } from './native-edits.js';
 import { nativeMessageRef, nativeMessageIdForRef } from './native-message-ref.js';
+import { createNativeReactionStore } from './native-reaction-store.js';
+import { createNativeReactions } from './native-reactions.js';
 import { createNativeReferences } from './native-references.js';
 import { createDmOutbox } from './dm-outbox.js';
 import { createDmOutboxUi } from './dm-outbox-ui.js';
@@ -767,7 +769,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 getPollState: id => messageMap[id],
                 onVoteFailed: result => showToast(t(result?.reason === 'poll_changed' ? 'poll.changedRetry' : 'poll.voteFailed')),
                 getSessionId: () => _webRoomSessionId(),
-                saveReaction: (view, mid, emoji, add) => _isPodRoomView(view)
+                saveReaction: (view, mid, emoji, add) => mid?.startsWith('native:') ? _nativeReactions.save(view, mid, emoji, add) : _isPodRoomView(view)
                     ? _changePodRoomMessage(view, mid, { kind: add ? 'react' : 'unreact', content: emoji }) : null,
                 getPodReactions: mid => _isPodRoomView(activeView) ? (messageMap[mid]?.reactions ?? null) : null,
                 onSaveFailed: () => showToast(t('reaction.saveFailed')),
@@ -882,6 +884,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             e2e: { ratchetDecrypt, finishDmReceive, pendingDmReceives, releaseDmSendHold, finishDmSend },
             receipts: _dmReceipts, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && !accountDid && tabLock.isLeader() && transport.mode !== 'web',
+            acceptReaction: _applyNativeReaction,
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, send: command => sendCmd(command.cmd, command),
             persistFile: (message, blob, current) => dmHistoryEnabled() ? dmHistorySaveFile(_nativeHistoryMessage(message, message.from_webid), blob, { current }) : false,
             isPersistedFile: async (message, meta, current) => {
@@ -954,6 +957,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 const id = peerDidToCertId[actor] || Object.keys(localDmPeers).find(key => localDmPeers[key]?.peer_webid === actor);
                 return id ? { threadId: id, selfWebId, peerWebId: actor, actorWebId: actor } : null;
             },
+            acceptReaction: _applyNativeReaction,
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, getMessage: dmHistoryGet,
             applyEdit: dmHistoryApplyNativeEdit,
             onApplied: async (id, current) => {
@@ -966,10 +970,34 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             },
             onError: error => console.warn('[native-edit] recovery pending:', error),
         });
+        const _nativeReactionStore = createNativeReactionStore({ getScope: _outgoingScope, enabled: dmHistoryEnabled });
+        async function _hydrateNativeReactions(context, callerCurrent = () => true) {
+            const scope = _outgoingScope(), generation = _outgoingGeneration();
+            const current = () => callerCurrent() && scope === _outgoingScope() && generation === _outgoingGeneration()
+                && activeView?.id === context.threadId && _nativeEditContext(activeView)?.peerWebId === context.peerWebId;
+            if (!current()) return;
+            const rows = await _nativeReactionStore.rows({ ...context, actorWebId: selfWebId }, current);
+            if (!rows || !current()) return;
+            const grouped = {};
+            for (const row of rows) if (row.op === 'add' && nativeMessageRef(messageMap[row.target], context)) {
+                ((grouped[row.target] ||= {})[row.emoji] ||= []).push(row.actorWebId);
+            }
+            for (const msg of allMessages) if (nativeMessageRef(msg, context)) {
+                messageReactions[msg.message_id] = grouped[msg.message_id] || {};
+                renderReactions(msg.message_id);
+            }
+        }
+        async function _applyNativeReaction(body, context, current) {
+            if (await _nativeReactionStore.apply(body, context, current) !== true) return false;
+            // A transient render failure does not undo durable control storage.
+            try { await _hydrateNativeReactions(context, current); } catch (_) {}
+            return current();
+        }
         const _nativeRefs = createNativeReferences({
             getScope: _outgoingScope, getGeneration: _outgoingGeneration,
             isActive: () => !!clientDid && tabLock.isLeader() && transport.mode !== 'web' && socket?.readyState === WebSocket.OPEN,
             historyEnabled: dmHistoryEnabled, send: command => sendCmd(command.cmd, command),
+            acceptReaction: _applyNativeReaction,
             getPeerPub: cachedPeerPub, getOwnPub: myX25519PubB64u, getMessage: dmHistoryGet, contextForView: _nativeEditContext,
             contextForMessage: message => {
                 const actor = message.from_webid, peer = actor === selfWebId ? message._nativeThreadPeer : actor;
@@ -991,17 +1019,42 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     ? !!crossMode?.isReady() : !!socket && socket.readyState === WebSocket.OPEN,
             planStatus: job => _frozenDmPlanStatus(job),
             onCancelled: id => { _undeliveredDms.delete(id); sendStatus.forget(id); deleteForMeLocal(id); },
-            persistMessage: record => dmHistorySave(record, { delivery: 'pending', outbox: true }),
+            persistMessage: (record, current = () => true) => record.native_reaction
+                ? _applyNativeReaction(record.native_reaction, record.native_reaction_context, current)
+                : dmHistorySave(record, { delivery: 'pending', outbox: true, current }),
             clearDelivery: id => dmHistorySetDelivery(id, null),
             onPending: job => {
+                if (job.nativeControl) return;
                 if (job.media) { _dmMedia?.refresh(); return; }
                 _undeliveredDms.set(job.id, { ...job.record, outbox_id: job.id });
                 sendStatus.track(job.id, () => _dmOutbox.send(job.id));
                 renderMessage({ ...job.record, local: true }, { live: false });
             },
             onConfirmed: (id, job) => {
+                if (job?.nativeControl) return;
                 _undeliveredDms.delete(id); sendStatus.confirm(id, { known: true });
                 if (job?.media) { _dmMedia?.refresh(); if (!job.mediaReleased) _releaseCompletedMedia(job); }
+            },
+        });
+        const _nativeReactions = createNativeReactions({
+            store: _nativeReactionStore, references: _nativeRefs, getScope: _outgoingScope, getGeneration: _outgoingGeneration,
+            isActive: () => !accountDid && _nativeRefs.available(), contextForView: _nativeEditContext,
+            getMessage: dmHistoryGet, listJobs: listDmSendJobs, transmit: id => _dmOutbox.send(id), onApplied: _hydrateNativeReactions,
+            queue: async (encoded, context, current) => {
+                const view = activeView && { ...activeView };
+                if (!current() || view?.id !== context.threadId) return null;
+                const peer = context.peerWebId, actor = context.selfWebId;
+                const peers = [{ device_id: encoded.primaryDeviceId, pub_b64u: encoded.peerPub },
+                    ...identity.devicesForPeer(peer).filter(dev => dev.device_id && dev.pub_b64u && dev.device_id !== encoded.primaryDeviceId)];
+                const own = (await _ownDevicesForSend(peer)).filter(dev => dev.device_id && dev.pub_b64u);
+                if (!current()) return null;
+                const entries = peers.map(dev => ({ peerId: peer + '#' + dev.device_id, account: peer, device: dev.device_id, pub: dev.pub_b64u }));
+                for (const dev of own) entries.push({ peerId: actor + '#' + dev.device_id, account: actor, device: dev.device_id, pub: dev.pub_b64u });
+                return _dmOutbox.queue({ id: encoded.body.mid, actor, peer, device: clientDid, pub: myX25519PubB64u(),
+                    nativeControl: 'reaction', wireText: encoded.plaintext, mode: 'fanout', entries,
+                    route: view.type === 'local_dm' ? { cmd: 'local_dm', target_webid: peer } : { cmd: 'send_dm', cert_id: context.threadId },
+                    record: { message_id: encoded.body.mid, thread_id: context.threadId, from_webid: actor, content: '',
+                        timestamp: new Date().toISOString(), native_reaction: encoded.body, native_reaction_context: context } });
             },
         });
         function _releaseCompletedMedia(job) {
@@ -5264,6 +5317,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 allMessages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
                 renderMessages();
             }
+            if (context && current()) await _hydrateNativeReactions(context, current);
             // R61: also restore DM history archived to the pod (from any of your
             // devices). Reading your own archive is fine regardless of the write
             // toggle; dedup by message_id against what's already shown.

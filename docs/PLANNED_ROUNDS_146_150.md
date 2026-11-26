@@ -64,15 +64,14 @@ new room permissions, resets or prepared file retirement.
 
 ## Round 147: Replies and reactions on native attachments
 
-Status: in progress. Depends on 146.
+Status: complete. Depends on 146.
 
-Reply checkpoint (2026-11-25): compose, version-gated per-device delivery,
-retained references, quote rendering and local jump navigation are connected.
-The real three-browser/two-gateway journey passed both authors' replies, reload,
-legacy-mirror restart/upgrade and later ordinary text. Reaction wire/state and
-receive-boundary primitives are tested; source intent, outbox and visible pills
-remain unconnected. The combined acceptance checklist stays open. See
-`ROUND_147_IMPLEMENTATION_NOTES.md` for evidence and the remaining work.
+Completion checkpoint (2026-11-25): both primary authors passed native reply
+and reaction UI acceptance, reload, exact-frame restart recovery, failed
+receiver state, legacy/upgraded mirrors and later ordinary text. All reference,
+source intent, outbox, receive-state and pill paths are connected. Full frontend
+regression passed (2,791 tests, 64 skipped); the unchanged backend passed
+4,918 tests, 15 skipped. See `ROUND_147_CLOSEOUT.md` for evidence and limits.
 
 Problem: reaction and reply targets currently use the same private UI ids.
 A reference must identify the correct original message on each endpoint,
@@ -80,14 +79,14 @@ including when both participants choose the same wire UUID.
 
 Bounded work:
 
-- [ ] Apply 146's reference rules to native reply quotes and reaction add/remove.
-- [ ] Bind references to the authenticated conversation and original author;
+- [x] Apply 146's reference rules to native reply quotes and reaction add/remove.
+- [x] Bind references to the authenticated conversation and original author;
   resolve incoming references without confusing another sender/thread.
-- [ ] Preserve original reaction tokens and duplicate/removal behavior through
+- [x] Preserve original reaction tokens and duplicate/removal behavior through
   reload and delayed original-message/history arrival.
-- [ ] Retain bounded pending reference state or fail explicitly when the
+- [x] Retain bounded pending reference state or fail explicitly when the
   original file is unavailable; do not create a phantom file/text bubble.
-- [ ] Verify ordinary text/room reactions and replies remain functional.
+- [x] Verify ordinary text/room reactions and replies remain functional.
 
 Acceptance: each primary can reply to and react to the other's native file,
 remove its own reaction, reload and retain the correct quote/reaction. A reply

@@ -1,13 +1,22 @@
 import { dmEnvelopeFingerprint } from './dm-receipts.js';
+import { decodeNativeReaction } from './native-reaction-codec.js';
 import { decodeNativeReply } from './native-reply-codec.js';
 import { validNativeMessageRef } from './native-message-ref.js';
 
 function validReplyPlan(job) {
-    if (job.wireText === undefined) return true;
-    const body = decodeNativeReply(job.wireText, job.id), ref = job.record?.native_reply_ref;
-    return !!body && body.text === job.record?.content && validNativeMessageRef(ref)
+    if (job.wireText === undefined) return !job.nativeControl && !job.record?.native_reaction;
+    const reaction = job.nativeControl === 'reaction' ? decodeNativeReaction(job.wireText, job.id) : null;
+    const body = reaction || decodeNativeReply(job.wireText, job.id);
+    const ref = reaction ? job.record?.native_reaction?.ref : job.record?.native_reply_ref;
+    const binding = reaction ? job.record?.content === '' && ['mid', 'tok', 'seq', 'op', 'emoji'].every(field => reaction[field] === job.record?.native_reaction?.[field])
+        && job.record?.native_reaction_context?.actorWebId === job.actor
+        && job.record?.native_reaction_context?.selfWebId === job.actor
+        && job.record?.native_reaction_context?.peerWebId === job.peer
+        && job.record?.native_reaction_context?.threadId === job.record?.thread_id
+        : !job.nativeControl && body?.text === job.record?.content && job.record?.native_reply_actor === job.actor;
+    return !!body && binding && validNativeMessageRef(ref)
         && ['v', 'kind', 'id', 'author'].every(field => ref[field] === body.ref[field])
-        && job.record.native_reply_actor === job.actor && job.record.from_webid === job.actor
+        && job.record.from_webid === job.actor
         && String(job.actor).startsWith('did:key:') && String(job.peer).startsWith('did:key:') && job.actor !== job.peer
         && job.mode === 'fanout' && Array.isArray(job.entries) && job.entries.every(entry => !entry.primary
             && typeof entry.device === 'string' && entry.device && /^[A-Za-z0-9_-]{43}$/.test(entry.pub || ''))
@@ -178,6 +187,9 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                 if (!ctx.current() || !canSend(job) || job.wireText !== undefined && !nativeReferencesReady(job)) return false;
                 failures.delete(id);
                 headerWaiting.delete(id);
+                // A reaction's source state must commit before its first header.
+                // Replaying older intents is harmless: durable sequence state wins.
+                if (job.nativeControl && (!validReplyPlan(job) || await persistMessage(job.record, ctx.current) === false || !ctx.current())) return false;
                 let ready = job, transmitted = false;
                 const encrypted = preparedResults(job);
                 const prepare = async (entry, index) => {
@@ -204,7 +216,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
                         await send(JSON.parse(JSON.stringify(frame)), ready); transmitted = true;
                     }
                 };
-                if (!ctx.current() || (!ready.peerConfirmed && await persistMessage(ready.record) === false) || !ctx.current()) return false;
+                if (!ctx.current() || (!job.nativeControl && !ready.peerConfirmed && await persistMessage(ready.record, ctx.current) === false) || !ctx.current()) return false;
                 // Peer delivery precedes mirror preparation. A full/broken own
                 // journal must not strand an otherwise valid primary send.
                 await transmitPhase(entry => entry.account === job.peer);
@@ -269,7 +281,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             const live = jobs.get(snapshot.id);
             const job = newer(live, snapshot);
             jobs.set(job.id, job);
-            let canCancel = !job.media && !job.frames && !job.confirmed && !!e2e.hasPendingDmSend;
+            let canCancel = !job.nativeControl && !job.media && !job.frames && !job.confirmed && !!e2e.hasPendingDmSend;
             if (canCancel) for (const entry of job.entries) {
                 if (await e2e.hasPendingDmSend(entry.peerId, job.sendId)) { canCancel = false; break; }
             }
@@ -277,7 +289,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
             if (settled.has(job.id)) continue;
             // A live prepare/confirmation can overtake the scan's read awaits.
             const latest = jobs.get(job.id) || job;
-            if (latest.frames || latest.confirmed) canCancel = false;
+            if (latest.nativeControl || latest.frames || latest.confirmed) canCancel = false;
             const plan = planStatus({ ...latest, entries: remaining(latest) });
             const state = plan === 'actor_unknown' ? 'unbound' : plan === 'account'
                 ? latest.media ? 'mediaAttention' : latest.peerConfirmed ? 'accountConfirmed' : 'account'
@@ -295,7 +307,7 @@ export function createDmOutbox({ e2e, getScope, getGeneration = () => 0, isActiv
         return serialized(id, async () => {
             if (!ctx.current()) return false;
             const job = jobs.get(id) || (await e2e.listDmSendJobs()).find(row => row.id === id && row.scope === ctx.scope);
-            if (!ctx.current() || !job || job.media || job.frames || job.confirmed || !e2e.hasPendingDmSend) return false;
+            if (!ctx.current() || !job || job.nativeControl || job.media || job.frames || job.confirmed || !e2e.hasPendingDmSend) return false;
             for (const entry of job.entries) {
                 if (!ctx.current() || await e2e.hasPendingDmSend(entry.peerId, job.sendId)) return false;
             }

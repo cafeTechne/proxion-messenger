@@ -1,9 +1,9 @@
 # Round 147 implementation checkpoint
 
-Status: native replies are connected and passed the browser journey. Native
-reactions remain incomplete; their wire codec, durable state store and guarded
-receive hook are staged. Round 147 stays open. This note records implementation
-of the existing scope and adds no acceptance work.
+Status: complete. Native replies and reactions are connected and passed the
+real browser acceptance journey. See `ROUND_147_CLOSEOUT.md` for final evidence.
+This note records implementation of the existing scope and adds no acceptance
+work.
 
 Implemented:
 
@@ -26,24 +26,22 @@ Implemented:
 - The reaction codec binds action id, author-relative original, token, emoji,
   sequence and add/remove operation. The receive hook requires durable state
   before consumption and does not create a message or attachment.
-- The staged reaction store separates accounts, threads, authors and actors.
+- The reaction store separates accounts, threads, authors and actors.
   Stable tokens and monotonically increasing sequence numbers preserve remove
   tombstones against delayed adds. Its 2,000-record per-scope bound fails closed;
   it does not evict anti-replay state to accept more actions. Failed/aborted
   writes permit identical retries.
 
-Still required before closing 147:
+- Source reaction intent is saved before optimistic state and any ratchet
+  header. Recovery reconciles retained intents before assigning another
+  sequence. Duplicate clicks coalesce; remove/re-add preserves the token.
+  The protected receiver commits reaction state before full ACK, without
+  creating a chat row. Pills hydrate only against a real local original.
 
-- Connect reaction intent, source persistence, outbox recovery and visible pill
-  hydration. The store is not yet imported by the application, and the UI's
-  native reaction action is not implemented by these staged primitives.
-- Exercise native reaction add/remove/re-add, reload and failure recovery in the
-  real browser journey, including delayed originals and author collisions.
-- Run final regression gates after those changes and write the closeout against
-  actual evidence. Keep 144's design-only safety outcome and 145's ordinary
-  receive-commit protocol unchanged. No attachment-byte fanout, larger skip or
-  custody limits, prepared cancellation, reset workflow or emoji vocabulary is
-  added.
+Safety limits preserved: no attachment-byte fanout, larger skip or custody
+limits, prepared cancellation, reset workflow or new emoji vocabulary. Round
+144 remains design-only; ordinary receive commits retain the completed 145
+protocol.
 
 Validation checkpoint (2026-11-25):
 
@@ -53,9 +51,10 @@ Validation checkpoint (2026-11-25):
   consumed readable reply text without a phantom attachment. Later ordinary
   text remained independent. The existing 146 caption/restart/hash journey and
   145 protected-receive restart checks also passed in that run.
-- Full frontend suite: 2,784 passed, 64 skipped. Focused reaction codec/store,
-  reference boundary and service-worker checks: 39 passed.
+- Full frontend suite after reaction wiring: 2,791 passed, 64 skipped. Focused reaction codec/store,
+  reference boundary and service-worker checks: 39 passed. Connected reaction,
+  outbox, receive, history, rendering and service-worker checks: 186 passed.
 - Changed production JavaScript passed ESLint; changed Python passed Ruff;
   whitespace and cold-path checks passed.
-- Full backend suite: 4,918 passed, 15 skipped (222 warnings). No real
-  reaction acceptance case is complete yet.
+- Full backend suite: 4,918 passed, 15 skipped (222 warnings). Real
+  reaction acceptance additionally passed in the three-browser/two-gateway run.

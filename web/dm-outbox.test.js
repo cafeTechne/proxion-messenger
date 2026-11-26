@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDmOutbox } from './dm-outbox.js';
+import { encodeNativeReaction } from './native-reaction-codec.js';
 import { encodeNativeReply } from './native-reply-codec.js';
 const clone = value => JSON.parse(JSON.stringify(value));
 const input = { id: 'message-1', peer: 'bob', actor: 'alice', device: 'alice-device', pub: 'alice-pub',
@@ -442,6 +443,37 @@ describe('native reply plans in the normal durable outbox', () => {
             const h = harness(), plan = nativeReplyInput(); h.options.nativeReferencesReady = () => true; const engine = h.engine(); patch(plan);
             await expect(engine.queue(plan)).rejects.toThrow('Invalid native reply send plan');
             expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled(); expect(h.disk.size).toBe(0);
+        }
+    });
+});
+
+describe('native reaction outbox', () => {
+    function reactionInput() {
+        const context = { threadId: 'thread', selfWebId: 'did:key:alice', peerWebId: 'did:key:bob', actorWebId: 'did:key:alice' };
+        const file = { message_id: 'native:did:key:bob:file', thread_id: 'thread', from_webid: context.peerWebId, file: {} };
+        const encoded = encodeNativeReaction(file, context, { messageId: 'reaction', token: '~abcdefghijk', emoji: '👍', sequence: 1, add: true });
+        return { ...input, id: 'reaction', actor: context.selfWebId, peer: context.peerWebId, nativeControl: 'reaction', mode: 'fanout', wireText: encoded.plaintext,
+            route: { cmd: 'send_dm', cert_id: 'thread' }, entries: [{ peerId: 'bob#device', account: context.peerWebId, device: 'device', pub: 'P'.repeat(43) }],
+            record: { ...input.record, message_id: 'reaction', from_webid: context.selfWebId, content: '', native_reaction: encoded.body, native_reaction_context: context } };
+    }
+    it('commits source state before any header, retains failed intent and disables cancellation', async () => {
+        const h = harness(); h.options.nativeReferencesReady = () => true;
+        const engine = h.engine(), plan = reactionInput(); await engine.queue(plan);
+        h.options.persistMessage.mockResolvedValueOnce(false);
+        expect(await engine.send(plan.id)).toBe(false); expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled(); expect(h.frames).toEqual([]);
+        expect((await engine.inspect())[0].canCancel).toBe(false); expect(await engine.cancel(plan.id)).toBe(false);
+        h.options.persistMessage.mockImplementationOnce(async (_record, current) => { expect(current()).toBe(true); expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled(); return true; });
+        expect(await engine.send(plan.id)).toBe(true); expect(h.frames[0].cmd).toBe('native_ref_send');
+        expect(h.e2e.ratchetEncrypt.mock.calls[0][2].holdForReceive).toBe(true);
+        const exact = clone(h.disk.get(plan.id).frames);
+        await h.engine().restore({ force: true }); expect(h.disk.get(plan.id).frames).toEqual(exact);
+        expect(h.e2e.ratchetEncrypt).toHaveBeenCalledTimes(1);
+    });
+    it('rejects substituted actor/context/body before queuing or encrypting', async () => {
+        for (const patch of [p => { p.record.native_reaction_context.peerWebId = 'did:key:mallory'; }, p => { p.record.native_reaction.seq = 2; }, p => { delete p.wireText; }]) {
+            const h = harness(); h.options.nativeReferencesReady = () => true;
+            const plan = reactionInput(); patch(plan);
+            await expect(h.engine().queue(plan)).rejects.toThrow(); expect(h.disk.size).toBe(0); expect(h.e2e.ratchetEncrypt).not.toHaveBeenCalled();
         }
     });
 });

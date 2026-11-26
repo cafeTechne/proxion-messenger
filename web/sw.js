@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v321";
+const CACHE = "proxion-shell-v322";
 const SHELL = [
   "./",
   "index.html",
@@ -123,6 +123,8 @@ const SHELL = [
   "native-reply-codec.js",
   "native-references.js",
   "native-reaction-codec.js",
+  "native-reaction-store.js",
+  "native-reactions.js",
   "native-edit-send.js",
   "native-edit-receive.js",
   "native-edits.js",
